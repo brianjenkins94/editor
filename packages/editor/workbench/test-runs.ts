@@ -1,37 +1,3 @@
-/**
- * Tests for agents: which tests a change reaches, and their results as data (RUNNING.md, *Tests*). Their readers:
- * agents' `runs_affected` and `runs_tests`.
- *
- * - `tests.affected` { paths? }: the tests whose last run here ran the lines changed since the last commit (`tests.reach`;
- *   a file git doesn't have yet, or one named that hasn't changed, all of it), or that are in a changed test file — each with
- *   its last outcome, and `stale`: the file has changed since that run. And for each changed file, why it selected what it
- *   did (`why`, `selectionOf`): a test, lines a test ran, lines no test ran, code no test here runs, what every test runs
- *   under (config), or not code — so a change nothing here checks says so, rather than selecting nothing. And the test
- *   files with no reach kept that a run here would trace, a unit test or a spec (`untraced`, the first UNTRACED_LISTED, and
- *   how many more): what they reach isn't known until they run, so an answer without them isn't the whole of it; and how
- *   many browser suites there are (`outside`), run from outside the editor, whose reach isn't known here. A test folder's
- *   helpers and fixtures aren't tests (kindOf).
- * - `tests.run` { files?, affected? }: test files run one at a time, as `node --test` runs each (in the debugger), and
- *   each test's result: its outcome, what it threw, what a failed assertion compared, its time and statements, how it
- *   came out last before this run, and — passed, but by more than `run.tests.slowerBy` over its typical — `slower`. `affected` runs the files of the affected tests that are stale. A capability stop (a gated
- *   call the policy leaves undecided) isn't left waiting on a person who isn't watching: one `approved` names (its
- *   key, `runs_tests:<scope>`) is allowed, this once; the first that isn't ends the run there, and the run answers with
- *   its question (`ask`) — which runs_tests puts to the person through debug-mcp (BERNARD, JUDICIAL, then them), and
- *   is called again with it approved. A run waits for the editor to be up (readiness.ts: the workspace, the debugger
- *   and the packages' versions), and says what it's still waiting on if that takes longer than READY_MS. And a file's run that does
- *   nothing for STALL_MS — no debug session, no output, no question, no word it's computing (the run contract's `busy`)
- *   — is stuck: it's ended, and says where (`stalled`).
- *
- *   A run is the editor's, not its call's: the call answers within ANSWER_MS — the run's results, or, while it goes on,
- *   its id, what it's doing and for how long, and the files done so far (`running`) — and `{ run }` waits on it again.
- *   So a run that's slow, stuck before a file's clock starts, or in a tab that went away reads as that to an agent,
- *   rather than as its tool call never coming back.
- * - `tests.reach`: what each test last ran, by file and line, kept here (`.silo/local/reach/`, this machine's).
- * - `tests.coverage`: how much of each code file the tests here ran, by statements (`coverageOf`), from what each test
- *   file's last run loaded, kept here (`.silo/local/coverage/`, this machine's).
- * - `tests.history`: the runs kept here (`.silo/local/runs.jsonl`, this machine's): each file's run, when, how long, each
- *   test's outcome and time, and what it did to the world (its effects, the run's and each test's). What the table of features and tests reads.
- */
 import type { CoverageEvent, Effect, TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
@@ -44,40 +10,27 @@ import { isTestFile } from "./terminal/commands/node/node";
 
 const ROOT = "/workspace";
 
-/** The files a test's trace can be on. */
 const CODE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
 
-/** How long a run waits for the editor to come up before it says what it's waiting on. */
 const READY_MS = 300_000;
 
-/** How long a call waits on its run before it answers with where the run is (it goes on, asked again by its id): well
- *  inside what an agent's tool call waits for, so a run that's slow, stuck or gone reads as that and not as silence. */
 const ANSWER_MS = 50_000;
 
-/** Where runs are kept, and how many of each file's; and what each test last ran, by its file. */
 const HISTORY = ".silo/local/runs.jsonl";
 const REACH = ".silo/local/reach";
 const COVERAGE = ".silo/local/coverage";
 const KEPT_RUNS = 30;
 
-/** Runs kept to be asked about by id: the latest that have ended, and any still going. */
 const KEPT = 20;
 
-/** How long a file's run may do nothing (no session, output, question or `busy`) before it's ended as stuck. */
 const STALL_MS = 120_000;
 
-/** How long working out the affected tests may take — their traces and a search of the workspace — before a
- *  run goes on without (named files: how each test came out before) or says so (none named). */
 const AFFECTED_MS = 60_000;
 
-/** How many untraced test files an answer names: a repository's can be hundreds (the editor's, 185 unit tests and specs),
- *  more than an agent's tool answer holds; the rest are counted (`untracedLeftOut`). */
 const UNTRACED_LISTED = 50;
 
-/** A run's output kept, at most (its end): enough to see why a file failed to load. */
 const OUTPUT = 4000;
 
-/** `work`, or a rejection with `message` once `ms` pass without it. */
 async function within<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -90,13 +43,10 @@ async function within<T>(work: Promise<T>, ms: number, message: string): Promise
 	}
 }
 
-/** The question a run's capability stop asks (observability's PageToolAsk). */
 interface Asked { "message": string; "key": string; "scope": string; "request": Record<string, unknown> }
 
-/** A test file's result, as a run answers it. */
 interface Ran { "file": string; "exitCode": number; "ms": number; "tests": { "id": string; "outcome": string }[]; "output"?: string }
 
-/** Statements as the lines they cover, as few ranges as they make (first and last line, from 0). */
 function rangesOf(statements: [[number, number], [number, number]][]): [number, number][] {
 	const ranges: [number, number][] = [];
 
@@ -113,7 +63,6 @@ function rangesOf(statements: [[number, number], [number, number]][]): [number, 
 	return ranges;
 }
 
-/** One file's run, as it's kept: what the table of features and tests reads. */
 export interface RunRecord {
 	"file": string;
 	"at": string;
@@ -122,26 +71,15 @@ export interface RunRecord {
 	"stalled"?: string;
 	"tests": { "id": string; "outcome": string; "ms"?: number; "statements"?: number; "error"?: string; "effects"?: Effect[] }[];
 	"effects": Effect[];
-	/** Why a file that failed without a failed test did: the end of what it said. */
 	"output"?: string;
 }
 
-/** How a test ran slower than it typically does: by how much (a percentage), measured how, and its typical. */
 export interface Slower { "by": number; "measure": "statements" | "time"; "typical": number }
 
-/** How many earlier passing runs a time is compared with: a time varies with what ran beside it, so one isn't enough. (A
- *  count of statements doesn't: one is.) */
 const TIMED_RUNS = 3;
 
-/** The middle of `values`. */
 const median = (values: number[]): number => values.toSorted((one, other) => one - other)[Math.floor(values.length / 2)] ?? 0;
 
-/**
- * How much slower test `id` ran in `latest` than it typically does — the median of the `earlier` runs it passed in — when
- * by more than `percent` (setting `run.tests.slowerBy`). By its statements, where they're counted (its work: what ran
- * beside it doesn't change it); else by its time, once it has TIMED_RUNS earlier passes to go by. Undefined when it
- * isn't, or there's nothing to go by.
- */
 export function slowerOf(earlier: RunRecord[], id: string, latest: { "ms"?: number; "statements"?: number }, percent: number): Slower | undefined {
 	const passes = earlier.flatMap((run) => run.tests.filter((test) => test.id === id && test.outcome === "pass"));
 	const counted = passes.flatMap((test) => (test.statements === undefined ? [] : [test.statements]));
@@ -159,16 +97,10 @@ export function slowerOf(earlier: RunRecord[], id: string, latest: { "ms"?: numb
 	return by > percent ? { "by": by, "measure": compared.measure, "typical": compared.typical } : undefined;
 }
 
-/** A code file's statements as one test file's run saw them, each by where it starts: those that ran, and those that
- *  didn't. */
 export interface Statements { "ran": [number, number][]; "not": [number, number][] }
 
-/** What a test file's last run kept of the code it loaded (`.silo/local/coverage/<file>.json`): when, the test file
- *  (one kept before it was said, none), and each code file's statements. */
 export interface CoverageKept { "at": string; "file"?: string; "files": Record<string, Statements> }
 
-/** Each code file a run loaded (its `coverage` event: the entry's and every other's), its statements, ran or not: not a
- *  test's own, nor what's installed. */
 export function statementsOf(event: CoverageEvent): Record<string, Statements> {
 	return Object.fromEntries([event, ...event.files ?? []].map((loaded) => [loaded.file.replace(/^\/workspace\//u, ""), loaded] as const).filter(([file]) => CODE.test(file) && !file.includes("node_modules/") && !isTestFile(file)).map(([file, loaded]) => [file, {
 		"ran": loaded.statements.filter((statement) => statement.count > 0).map((statement) => statement.start),
@@ -176,11 +108,6 @@ export function statementsOf(event: CoverageEvent): Record<string, Statements> {
 	}]));
 }
 
-/**
- * How much of each code file the tests here ran, over every test file's last run: its statements as the latest run that
- * loaded it saw them (an older one's may be of a text since edited), how many of those any run ran, and which test files'
- * runs ran any (`by`).
- */
 export function coverageOf(kept: CoverageKept[]): Map<string, { "statements": number; "ran": number; "by": string[] }> {
 	const latest = new Map<string, { "at": string; "all": Set<string> }>();
 	const ran = new Map<string, Set<string>>();
@@ -203,9 +130,6 @@ export function coverageOf(kept: CoverageKept[]): Map<string, { "statements": nu
 	return new Map([...latest].map(([file, { all }]) => [file, { "statements": all.size, "ran": [...ran.get(file) ?? []].filter((each) => all.has(each)).length, "by": by(file, all) }]));
 }
 
-/** What one test file touches that another does too, so the two can't run at once: one writes what the other reads or
- *  writes. `test` and `otherTest` are the tests that did it, where their runs said (a run before tests carried their own
- *  effects, or the file's code outside any test, says only the file). */
 export interface Contention {
 	"test"?: string;
 	"touches": "reads" | "writes";
@@ -215,8 +139,6 @@ export interface Contention {
 	"otherTouches": "reads" | "writes";
 }
 
-/** A file an effect touched in the world everyone shares: made (not denied, not given back from a recording, not written
- *  into the run's own layer and thrown away with it), and of a file. */
 function touchOf(effect: Effect): "reads" | "writes" | undefined {
 	if (effect.how !== "made" || effect.decided === "layer") {
 		return undefined;
@@ -225,11 +147,6 @@ function touchOf(effect: Effect): "reads" | "writes" | undefined {
 	return effect.capability === "fs:write" ? "writes" : effect.capability === "fs:read" ? "reads" : undefined;
 }
 
-/**
- * Each test file's contentions with the others (the table's *Can't run in parallel*), from every run kept, not only the
- * last: a test that wrote a file once may not every time. Writes first, then by resource; one per other file and
- * resource.
- */
 export function contentionsOf(history: RunRecord[]): Map<string, Contention[]> {
 	type Touch = { "file": string; "test"?: string; "touches": "reads" | "writes"; "resource": string };
 	const byResource = new Map<string, Map<string, Touch>>();
@@ -237,7 +154,6 @@ export function contentionsOf(history: RunRecord[]): Map<string, Contention[]> {
 		const touches = byResource.get(touch.resource) ?? new Map<string, Touch>();
 		const known = touches.get(touch.file);
 
-		// (one touch a file: a write beats a read, then a test named beats the file alone)
 		if (known === undefined || (known.touches === "reads" && touch.touches === "writes") || (known.touches === touch.touches && known.test === undefined && touch.test !== undefined)) {
 			touches.set(touch.file, touch);
 		}
@@ -272,7 +188,6 @@ export function contentionsOf(history: RunRecord[]): Map<string, Contention[]> {
 
 	for (const [resource, touches] of byResource) {
 		for (const touch of touches.values()) {
-			// (a file's own reads and writes of one file, and two that only read it, don't contend)
 			const others = [...touches.values()].filter((other) => other.file !== touch.file && (touch.touches === "writes" || other.touches === "writes"));
 			for (const other of others) {
 				const its = contentions.get(touch.file) ?? [];
@@ -297,7 +212,6 @@ export function contentionsOf(history: RunRecord[]): Map<string, Contention[]> {
 	return contentions;
 }
 
-/** A run of test files (tests.run): what it was asked, what it's doing, each file's result as it comes, and its end. */
 interface Batch {
 	"id": string;
 	"args": Record<string, unknown>;
@@ -309,7 +223,6 @@ interface Batch {
 	"error"?: Error;
 }
 
-/** A gated call's silo scope (lib util/silo/enforce): `fs:<op>:<path>`, `net:<host>`, `exec:<program>`. */
 function scopeOf(capability: string, resource: string): string {
 	if (capability === "net") {
 		try {
@@ -322,10 +235,8 @@ function scopeOf(capability: string, resource: string): string {
 	return `${capability}:${resource === "" ? "*" : resource}`;
 }
 
-/** What kind of test a file is: where it runs. */
 export type Kind = "unit" | "UI spec" | "browser suite" | "not a test";
 
-/** What a file's imports say it is: its text may mention another kind (a test's own data can). */
 export function kindOf(text: string): Kind {
 	const importing = text.split("\n").filter((line) => line.startsWith("import "));
 	const imports = (what: string): boolean => importing.some((line) => line.includes(what));
@@ -341,7 +252,6 @@ export function kindOf(text: string): Kind {
 	return imports("node:test") || imports("vitest") ? "unit" : "not a test";
 }
 
-/** A test a change reaches. */
 interface Affected {
 	"id": string;
 	"file": string;
@@ -351,19 +261,12 @@ interface Affected {
 	"reaches": string[];
 }
 
-/** What every test runs under: its packages, its compiler's settings, what its program may do. */
 const CONFIG = /(?:^|\/)(?:package\.json|package-lock\.json|pnpm-lock\.yaml|\.npmrc|tsconfig[^/]*\.json)$|^\.silo\/policy\.json$/u;
 
-/** A changed file, and its changed lines (from 0, first and last, on either side of the change); none, all of it. */
 export interface Change { "path": string; "lines"?: [number, number][] }
 
-/** Why a changed file selected what it did: it's a test (itself); tests ran its changed lines (those); tests ran it but not
- *  those lines, or none here runs it at all (nothing checks the change); every test runs under it (config: what it
- *  reaches isn't lines); or it isn't code. */
 export type Why = "test" | "lines run" | "lines not run" | "not run" | "config" | "not code";
 
-/** The lines `head` → `working` changed, on both sides (a test's reach may be of either text): what a hunk removes and
- *  adds, or, where it only adds or only removes, the lines either side of it. From 0, as a test's reach is. */
 export function changedLines(head: string, working: string): [number, number][] {
 	const lines: [number, number][] = [];
 
@@ -376,8 +279,6 @@ export function changedLines(head: string, working: string): [number, number][] 
 	return lines;
 }
 
-/** Which tests `changes` select, by what each test last ran (`reach`: its id's each code file's lines), and why each change
- *  selected what it did. A test is selected by a change to its own file, or to lines it ran. */
 export function selectionOf(changes: Change[], reach: Record<string, Record<string, [number, number][]>>, isTest: (path: string) => boolean): { "tests": Map<string, string[]>; "why": { "path": string; "why": Why; "tests": number }[] } {
 	const tests = new Map<string, string[]>();
 	const why = changes.map(({ path, lines }) => {
@@ -416,8 +317,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 	const rpc = createRpcClient(hub);
 	const decoder = new TextDecoder();
 	const read = async (path: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(`${ROOT}/${path}`))).then((bytes) => decoder.decode(bytes), () => undefined);
-	/** What each test last ran: each code file's lines, by the test's id. */
-	/** Every JSON file kept under `folder`, read. */
 	const keptIn = async (folder: string): Promise<unknown[]> => {
 		const found: unknown[] = [];
 		const walk = async (uri: vscodeApi.Uri): Promise<void> => {
@@ -438,7 +337,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 	};
 	const readReach = async (): Promise<Record<string, Record<string, [number, number][]>>> => Object.assign({}, ...await keptIn(REACH)) as Record<string, Record<string, [number, number][]>>;
 
-	/** Each test-named file's kind (kindOf), read once, and again once it's changed. */
 	const kindsKnown = new Map<string, Kind>();
 	const kindOfFile = async (path: string): Promise<Kind> => {
 		let kind = kindsKnown.get(path);
@@ -458,11 +356,8 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		});
 	}
 
-	/** The tests a change reaches. What's changed, unless `paths` says: a walk of the whole tree (git's `whole`), as what's
-	 *  run of it acts on it — or, `glance`, of what the change watcher has told so far, for a view drawn again as it does. */
 	const affected = async (paths?: string[], glance = false): Promise<{ "tests": Affected[]; "changed": string[]; "why": { "path": string; "why": Why; "tests": number }[]; "untraced": string[]; "untracedLeftOut"?: number; "outside": number }> => {
 		const changed = paths ?? (await git.status({ "whole": !glance })).files.filter((change) => change.status !== "D").map((change) => change.path);
-		// (each changed code file's lines against the last commit; one git hasn't, or named and not changed, is all of it)
 		const changes = await Promise.all(changed.map(async (path): Promise<Change> => {
 			if (!CODE.test(path) || isTestFile(path)) {
 				return { "path": path };
@@ -486,8 +381,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 		const traced = new Set(Object.keys(reach).map((id) => id.split(" › ")[0]));
 		const testFiles = (await vscode.workspace.findFiles("**/*.{js,mjs,cjs,ts,mts,cts}", "**/{node_modules,.*}/**")).map((uri) => vscode.workspace.asRelativePath(uri, false)).filter((path) => isTestFile(path));
-		// (of those with no reach, what running here would trace — a unit test, a spec — and the browser suites, run from
-		// outside, whose reach isn't known here; a test folder's helpers and fixtures aren't tests)
 		const kinds = await Promise.all(testFiles.filter((path) => !traced.has(path)).map(async (path): Promise<[string, Kind]> => [path, await kindOfFile(path)]));
 		const untraced = kinds.filter(([, kind]) => kind === "unit" || kind === "UI spec").map(([path]) => path).sort((left, right) => left.localeCompare(right));
 		const outside = kinds.filter(([, kind]) => kind === "browser suite").length;
@@ -508,7 +401,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		return affected(Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string").map((path) => path.replace(/^\/workspace\//u, "")) : undefined, glance === true);
 	});
 
-	/** The runs kept, oldest first; each write waits for the one before, as files run at once end at once. */
 	let keeping: Promise<unknown> = Promise.resolve();
 	const historyUri = vscode.Uri.file(`${ROOT}/${HISTORY}`);
 	const readHistory = async (): Promise<RunRecord[]> => (await read(HISTORY) ?? "").split("\n").filter((line) => line !== "").map((line) => JSON.parse(line) as RunRecord);
@@ -527,7 +419,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 	serve(hub, "tests.history", async () => ({ "history": await readHistory() }));
 
-	/** What each test of `file` ran, its last run's: each code file's lines, as ranges. A file's run replaces its own. */
 	const keepReach = async (file: string, tests: TestReport[]): Promise<void> => {
 		const reach = Object.fromEntries(tests.map((test) => [[file, ...test.titles].join(" › "), Object.fromEntries(test.files.map((ran) => [ran.file.replace(/^\/workspace\//u, ""), rangesOf(ran.statements)]))]));
 
@@ -536,16 +427,12 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 	serve(hub, "tests.reach", async () => ({ "reach": await readReach() }));
 
-	/** What `file`'s run loaded of the code, its statements ran and not. A file's run replaces its own. */
 	const keepCoverage = async (file: string, files: Record<string, Statements>): Promise<void> => {
 		await vscode.workspace.fs.writeFile(vscode.Uri.file(`${ROOT}/${COVERAGE}/${file}.json`), new TextEncoder().encode(JSON.stringify({ "at": new Date().toISOString(), "file": file, "files": files } satisfies CoverageKept)));
 	};
 
 	serve(hub, "tests.coverage", async () => ({ "coverage": Object.fromEntries(coverageOf(await keptIn(COVERAGE) as CoverageKept[])) }));
 
-	/** One test file's run, in the debugger: its tests as the run tells them (its `tests` event), and its output's end. A
-	 *  capability stop `approved` names is allowed, this once; another ends the run (`asked`: its question). One that
-	 *  does nothing for STALL_MS ends too (`stalled`: where it was). */
 	const runFile = async (file: string, signal: AbortSignal, approved: string[], stopAll: () => void): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "effects": Effect[]; "output": string; "attached": boolean; "statements"?: Record<string, Statements>; "asked"?: Asked; "stalled"?: string }> => {
 		const controller = new AbortController();
 		const stop = (): void => {
@@ -554,8 +441,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 		signal.addEventListener("abort", stop, { "once": true });
 
-		// (stopped from outside — runs_stop, the run's Stop — the whole run stops, as Ctrl+C stops `node --test`, not only this
-		// file; a stall or a question stops this file alone)
 		const run = runner.runs.start({ "title": `node --test ${file}`, "kind": "task", "cwd": ROOT, "origin": { "other": "an agent (runs_tests)" }, "entry": `${ROOT}/${file}`, "runtime": "tsval" }, stopAll);
 		let reported: TestsEvent | undefined;
 		let covered: CoverageEvent | undefined;
@@ -571,7 +456,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				active = performance.now();
 			}
 		});
-		// (stuck: where it is — no session yet, or the session's top frame, as DAP says it — and the run ended)
 		const watching = setInterval(() => {
 			if (performance.now() - active < STALL_MS || stalled !== undefined) {
 				return;
@@ -612,11 +496,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				covered = event.body as CoverageEvent;
 			} else if (event.event === "ask") {
 				const { line, callee, capability, resource, resolved, "file": where = `${ROOT}/${file}` } = event.body as { "line": number; "callee": string; "capability": string; "resource": string; "resolved"?: boolean; "file"?: string };
-				// (a path not known before its line runs — `path.join(dir, name)` — is asked about as the test file's: keyed by
-				// the expression, each such call was its own question, and each answer started the run over)
 				const scope = resolved === false ? scopeOf(capability, `<as ${file} works it out>`) : scopeOf(capability, resource);
-				// (a temporary file's name is made fresh each run — mkdtemp's — so its approval is for the run's temporary files:
-				// keyed by the path, a re-run with it approved would ask again about a name it hasn't seen)
 				const key = `runs_tests:${scope.replace(/^(fs:\w+:\/tmp\/).*$/u, "$1*")}`;
 
 				if (approved.includes(key)) {
@@ -634,7 +514,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		try {
 			const debugged = await runner.debug(`${ROOT}/${file}`, ROOT, {}, {
 				"runId": run.id,
-				// (unattended, as `node --test` is: a breakpoint left in a test would pause it with nobody to continue)
 				"noDebug": true,
 				"signal": controller.signal,
 				"onOutput": (_stream, text) => {
@@ -645,7 +524,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 			run.end(debugged.attached ? debugged.exitCode : 1, controller.signal.aborted);
 
-			// (a workspace file's call is the editor's to make and to keep, so it isn't among what the debugger told)
 			const { "effects": kept } = await rpc.request("run.effects", { "run": run.id }, { "timeoutMs": 5000, "waitForResponderMs": 5000 }).catch(() => ({ "effects": [] as Effect[] })) as { "effects": Effect[] };
 
 			effects = [...effects, ...kept];
@@ -659,8 +537,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		}
 	};
 
-	/** A file that failed without a failed test: it didn't get to run them (a syntax error, a throw at its top level), so
-	 *  it's itself the failure, as `node --test` counts one. */
 	const diedOutsideATest = (exitCode: number, tests: { "outcome": string }[]): boolean => exitCode !== 0 && !tests.some((test) => test.outcome === "fail");
 
 	const counted = (ran: Ran[]): { "files": number; "pass": number; "fail": number; "skip": number } => {
@@ -669,13 +545,11 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		return { "files": ran.length, "pass": outcomes.filter((outcome) => outcome === "pass").length, "fail": outcomes.filter((outcome) => outcome === "fail").length + ran.filter((file) => diedOutsideATest(file.exitCode, file.tests)).length, "skip": outcomes.filter((outcome) => outcome === "skip" || outcome === "todo").length };
 	};
 
-	/** A run of test files, to its end: what it's doing (`batch.now`) and each file's result as it comes (`batch.ran`). */
 	const runBatch = async (batch: Batch): Promise<Record<string, unknown>> => {
 		const { files, "affected": onlyAffected, approved } = batch.args as { "files"?: unknown; "affected"?: unknown; "approved"?: unknown };
 		const approvals = Array.isArray(approved) ? approved.filter((key): key is string => typeof key === "string") : [];
 		const { signal } = batch.controller;
 
-		// (the editor up first: a run started before the debugger can take it waits out its timeout, saying nothing)
 		batch.now = { "doing": "waiting for the editor to be up (its workspace, its debugger and its packages' versions)", "since": performance.now() };
 
 		const waiting = await waitFor(["workspace", "debugger", "versions"], READY_MS, signal);
@@ -685,15 +559,12 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		}
 
 		const listed = Array.isArray(files) ? files.filter((file): file is string => typeof file === "string").map((file) => file.replace(/^\/workspace\//u, "")) : [];
-		// (no stall clock runs yet, and any of its steps can wait without end while the page is loading: a deadline)
 		const tooLong = `working out the affected tests took over ${String(AFFECTED_MS / 1000)} s (their traces, the workspace's files)`;
 
 		batch.now = { "doing": "working out the affected tests", "since": performance.now() };
 
 		const before = onlyAffected === true || listed.length === 0 ? await within(affected(), AFFECTED_MS, tooLong) : undefined;
 		const chosen = listed.length > 0 ? listed : [...new Set((before?.tests ?? []).filter((test) => test.stale).map((test) => test.file))];
-		// (how each test came out last, before this run: a test newly failing reads differently from one failing all along —
-		// without, when that can't be known in time)
 		const last = new Map((before ?? await within(affected(chosen), AFFECTED_MS, tooLong).catch(() => ({ "tests": [] as Affected[] }))).tests.map((test) => [test.id, test.outcome]));
 
 		for (const [index, file] of chosen.entries()) {
@@ -703,7 +574,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 			batch.now = { "doing": `running ${file} (${String(index + 1)} of ${String(chosen.length)})`, "since": performance.now() };
 
-			// (a file that isn't there fails, as node --test's does, rather than running nothing and passing: kept nowhere)
 			if (!await Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`${ROOT}/${file}`))).then(() => true, () => false)) {
 				batch.ran.push({ "file": file, "exitCode": 1, "ms": 0, "tests": [], "output": `Could not find '${ROOT}/${file}'` });
 
@@ -712,12 +582,10 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 			const result = await runFile(file, signal, approvals, () => { batch.controller.abort(); });
 
-			// (a question for the person: the run ends here, to go on from this file once it's answered — `rest`)
 			if (result.asked !== undefined) {
 				return { "ask": result.asked, "rest": chosen.slice(index) };
 			}
 
-			// (each test against its own earlier runs, before this one's kept among them)
 			const earlier = (await readHistory()).filter((run) => run.file === file);
 			const percent = vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25);
 
@@ -745,7 +613,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 				...result.stalled === undefined ? {} : { "stalled": result.stalled },
 				"tests": result.tests.map((test) => {
 					const id = [file, ...test.titles].join(" › ");
-					// (a test that passed but did more than it used to, or took longer: said, as a failure is)
 					const slower = test.outcome === "pass" ? slowerOf(earlier, id, test, percent) : undefined;
 
 					return { "id": id, "outcome": test.outcome, ...test.error === undefined ? {} : { "error": test.error }, ...test.assertion === undefined ? {} : { "assertion": test.assertion }, ...test.ms === undefined ? {} : { "ms": test.ms }, ...test.statements === undefined ? {} : { "statements": test.statements }, ...slower === undefined ? {} : { "slower": slower }, ...last.has(id) ? { "before": last.get(id) } : {} };
@@ -757,15 +624,12 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		return {
 			"files": batch.ran,
 			"counts": counted(batch.ran),
-			// (stopped: the files after it not run)
 			...signal.aborted ? { "stopped": "stopped: the files after the one it stopped in weren't run" } : {},
 			...chosen.length === 0 ? { "nothing": listed.length === 0 ? "no affected test is stale: name files to run them anyway" : "no files" } : {}
 		};
 	};
 
-	/** The runs, by id, to be asked about again: any still going, and the latest of the rest. */
 	const batches = new Map<string, Batch>();
-	/** A batch of `args`; or `resumed`'s, going on — its id, and what it ran before its question, kept. */
 	const startBatch = (args: Record<string, unknown>, resumed?: Batch): Batch => {
 		const batch: Batch = { "id": resumed?.id ?? crypto.randomUUID().slice(0, 8), "args": args, "ran": [...resumed?.ran ?? []], "controller": new AbortController(), "done": Promise.resolve() };
 
@@ -778,7 +642,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 		});
 		batches.set(batch.id, batch);
 
-		// (the oldest that have ended: one still going is still being asked about, however many have started and ended since)
 		const ended = [...batches].filter(([, each]) => each.result !== undefined || each.error !== undefined).map(([id]) => id);
 
 		for (const id of ended.slice(0, Math.max(0, batches.size - KEPT))) {
@@ -797,8 +660,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 			throw new Error(`no test run ${run} here (this page keeps its latest ${String(KEPT)}; a reload forgets them)`);
 		}
 
-		// A run its question stopped, answered — asked again by its id, or with the same files (as a tool's call is made
-		// again, the approval added): it goes on from the file that asked, the ones before it kept.
 		const answers = (each: Batch | undefined): each is Batch => {
 			const asked = (each?.result as { "ask"?: Asked } | undefined)?.ask;
 
@@ -815,11 +676,8 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitRead
 
 		batch ??= startBatch(given);
 
-		// The call waits on the run for ANSWER_MS at most: the run goes on without it, and is asked again by its id. (The
-		// call going away — cancelled, its tab reloaded — leaves the run as it is.)
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const answered = await Promise.race([batch.done.then(() => true), new Promise<boolean>((resolve) => {
-			// (sooner when asked: a test of the answer a run gives before it's done)
 			timer = setTimeout(() => { resolve(false); }, typeof answerMs === "number" ? Math.min(answerMs, ANSWER_MS) : ANSWER_MS);
 			signal.addEventListener("abort", () => { resolve(false); }, { "once": true });
 		})]);

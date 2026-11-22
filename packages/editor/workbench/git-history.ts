@@ -1,9 +1,3 @@
-/**
- * What changed and when, as `git diff`, `git log`, `git show <rev>:<path>` and `git blame` say it — over the hub for
- * agents' git_diff, git_log, git_show and git_blame (app/tools/git), and the blame as a person reads it too: Git: Show
- * Blame for This File, beside the code. What a shallow clone holds of the history, and where
- * that ends, said.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { HttpClient } from "isomorphic-git";
 import type * as vscodeApi from "vscode";
@@ -14,16 +8,11 @@ import { unifiedDiff } from "./git-service";
 
 const DIR = "/workspace";
 
-/** The characters `git.show` gives of a file, at most; and the commits `git.blame` reads back through. */
 const MOST_SHOWN = 200_000;
 const BLAME_COMMITS = 200;
 
-/** Serve `git.diff`, `git.log`, `git.show` and `git.blame` on `hub`; `remote`, where `git.show` fetches a branch or tag
- *  the clone hasn't (git-push.ts' — without it, only what's here). */
-/** A run of lines one commit last changed (`working`: not committed yet). */
 interface BlameRun { "from": number; "to": number; "commit": string; "boundary"?: boolean; "message"?: string; "author"?: string; "date"?: string }
 
-/** What a run says beside its first line: the commit, when and who — `working`, a change not yet committed. */
 function labelOf(run: BlameRun): string {
 	return run.commit === "working" ? "working" : `${run.commit} ${run.date?.slice(0, 10) ?? ""} ${run.author ?? ""}${run.boundary === true ? " (or older)" : ""}`.trimEnd();
 }
@@ -31,8 +20,6 @@ function labelOf(run: BlameRun): string {
 export function installGitHistory(vscode: typeof vscodeApi, hub: Hub, remote?: HttpClient): void {
 	const readWorking = async (path: string): Promise<string> => new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(DIR + "/" + path)));
 
-	// What changed, as `git diff HEAD` says it: one file's (`path`), or every changed file's — a unified diff of the
-	// working tree against the last commit.
 	serve(hub, "git.diff", async (args) => {
 		const path = (args as { "path"?: string } | null)?.path;
 		const current = typeof path === "string" && path !== "" ? undefined : await engine.status();
@@ -68,7 +55,6 @@ export function installGitHistory(vscode: typeof vscodeApi, hub: Hub, remote?: H
 
 		let text = await engine.fileAt(path, rev);
 
-		// A branch or a tag the clone hasn't (it's one commit deep): fetched from the repository, then read.
 		if (text === undefined && remote !== undefined && !/^[\da-f]{4,40}$/u.test(rev) && rev !== "HEAD") {
 			const url = await engine.githubRemote();
 
@@ -84,12 +70,10 @@ export function installGitHistory(vscode: typeof vscodeApi, hub: Hub, remote?: H
 		return { "path": path, "rev": rev, "lines": text.split("\n").length, "content": text.length > MOST_SHOWN ? text.slice(0, MOST_SHOWN) : text, ...text.length > MOST_SHOWN ? { "truncated": true } : {} };
 	});
 
-	/** Which commit last changed each line of `path`, as runs of lines from `first` to `last` (both 1-based). */
 	const blame = async (path: string, first = 1, last = Number.POSITIVE_INFINITY): Promise<{ "path": string; "runs": BlameRun[]; "versions": number; "boundary"?: string; "working": string }> => {
 		const commits = await engine.history(BLAME_COMMITS, path);
 		const versions: { "oid": string; "text": string }[] = [{ "oid": "working", "text": await readWorking(path).catch(() => "") }];
 
-		// (each commit's version of it, back until one hasn't it here: renamed before then, or past the clone's start)
 		for (const commit of commits) {
 			const text = await engine.fileAt(path, commit.oid);
 
@@ -135,8 +119,6 @@ export function installGitHistory(vscode: typeof vscodeApi, hub: Hub, remote?: H
 		return said;
 	});
 
-	// A person's: each line of the file in front beside the commit that last changed it, read-only, beside it — what
-	// agents' git_blame asks (`git.blame`).
 	const shown = new Map<string, string>();
 	const changed = new vscode.EventEmitter<vscodeApi.Uri>();
 
@@ -155,15 +137,12 @@ export function installGitHistory(vscode: typeof vscodeApi, hub: Hub, remote?: H
 		const lines = said.working.split("\n");
 		const width = Math.max(...said.runs.map((run) => labelOf(run).length), 0);
 		const text = said.runs.flatMap((run) => Array.from({ "length": run.to - run.from + 1 }, (_, index) => `${(index === 0 ? labelOf(run) : "").padEnd(width)} │ ${lines[run.from - 1 + index] ?? ""}`));
-		// (named as no language's file: `kept.ts` would be TypeScript's, taken into its server as a file of its own)
 		const uri = vscode.Uri.from({ "scheme": "editor-blame", "path": `/${path}.blame` });
 
 		shown.set(uri.toString(), [...text, ...said.boundary === undefined ? [] : ["", `(${said.boundary})`]].join("\n"));
 		changed.fire(uri);
 		await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { "viewColumn": vscode.ViewColumn.Beside, "preview": true });
 	});
-	// Who last changed a few lines (1-based) of a file, as the blame above says it: for an extension, which can't ask the
-	// hub — the notes' Make This Comment a Note, keeping who wrote the comment.
 	vscode.commands.registerCommand("editor.git.authorsOf", async (path: unknown, from: unknown, to: unknown): Promise<string[]> => {
 		if (typeof path !== "string" || typeof from !== "number" || typeof to !== "number") {
 			return [];

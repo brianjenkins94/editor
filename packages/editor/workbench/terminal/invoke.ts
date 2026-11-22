@@ -1,12 +1,3 @@
-/**
- * A command's definition (command.ts) and implementation as a just-bash command, run through juvy: juvy routes its
- * subcommands, parses its options and arguments by its schema (strictly — an unknown flag is an error, as it is in a real
- * CLI), validates them, renders `--help` and "did you mean", and hands the parsed config to the handler. juvy's `run`
- * writes to and exits through the process it's given — here, one that collects the command's output — so the same juvy
- * that runs a desktop CLI (packages/silo) runs the terminal's commands.
- *
- * Kept out of catalog.ts (which only Vite can read, for its glob), so a command's test can make its command here.
- */
 import type { JuvyCommand, RunProcess } from "@brianjenkins94/util/juvy/cli";
 import type { Command } from "just-bash/browser";
 import type { CommandDefinition, CommandResult, Handler, Implementation } from "./catalog";
@@ -14,10 +5,8 @@ import { juvy } from "@brianjenkins94/util/juvy";
 import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
 import { defineCommand } from "just-bash/browser";
 
-/** `definition` with `implementation`, as a just-bash command. */
 export function toCommand(definition: CommandDefinition, implementation?: Implementation): Command {
 	return defineCommand(definition.name, async (args, ctx) => {
-		// (whatever it was given: it isn't here)
 		const instead = definition.subcommandsNotHere?.[args[0] ?? ""];
 
 		if (definition.notHere !== undefined || instead !== undefined) {
@@ -25,7 +14,6 @@ export function toCommand(definition: CommandDefinition, implementation?: Implem
 		}
 
 		let [stdout, stderr] = ["", ""];
-		// The process juvy runs it on: one that collects what it writes, and doesn't exit.
 		const proc: RunProcess = {
 			"stdout": {
 				"write": (text: string) => {
@@ -39,9 +27,7 @@ export function toCommand(definition: CommandDefinition, implementation?: Implem
 			},
 			"exit": () => undefined
 		};
-		// What the handler returned, if juvy got as far as calling it.
 		let result: CommandResult | undefined;
-		// A fresh config for each run: a juvy config keeps what it parsed.
 		const leaf = (name: string, summary: string, options: CommandDefinition["options"], stopEarly: boolean | undefined, handler: Handler, aliases?: string[]): JuvyCommand => command({
 			"name": name,
 			"description": summary,
@@ -57,7 +43,6 @@ export function toCommand(definition: CommandDefinition, implementation?: Implem
 					"commands": Object.entries(definition.subcommands).map(([name, subcommand]) => leaf(name, subcommand.summary, subcommand.options, subcommand.stopEarly, (implementation as Record<string, Handler>)[name], subcommand.aliases))
 				});
 
-		// (a subcommand's bare `-<number>` as the option it stands for: `git log -3` is `git log -n 3`)
 		const numbered = definition.subcommands?.[args[0] ?? ""]?.numberIs;
 		const short = numbered === undefined ? undefined : (definition.subcommands?.[args[0]]?.options?.[numbered] as { "short"?: string } | undefined)?.short;
 		const argv = short === undefined ? args : args.flatMap((arg, at) => (at > 0 && /^-\d+$/u.test(arg) ? [`-${short}`, arg.slice(1)] : [arg]));
@@ -66,7 +51,6 @@ export function toCommand(definition: CommandDefinition, implementation?: Implem
 
 		const exitCode = Number(proc.exitCode ?? 0);
 
-		// juvy's own complaints (an unknown option, a missing value) say whose they are, as a shell's commands do.
 		if (result === undefined && exitCode !== 0 && stderr !== "" && !stderr.startsWith("error:")) {
 			stderr = `${definition.name}: ${stderr}`;
 		}

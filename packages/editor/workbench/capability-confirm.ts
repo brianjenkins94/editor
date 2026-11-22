@@ -1,14 +1,3 @@
-/**
- * Capabilities that shrink as well as grow: an allow rule in the policy is confirmed by the runs that use it. One that no test run
- * kept here has used, over enough of them to say, is a problem on the rule, in Problems, with a quick fix that takes it out
- * (packages/silo/README.md: "The join allows what no run used"). It's a person's to remove: code may need it where no test goes,
- * an error's path, say. Runs only say what ran, so a rule about anything but a call's capability and resource isn't judged.
- *
- * What a run used comes from its record (test-runs.ts), read again as each ends. And whether the code could still make the
- * call at all: what each of the workspace's code files can do (lib's `detect`, a scan of its text — a capability, never what
- * it reaches), read once a rule goes unused. None that can, and the rule is likely left over (a dependency's call may still
- * need it: what a package can do is the baseline's); a file that can, and it's a test that reaches it that's missing.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type { Policy, Predicate, Rule } from "@brianjenkins94/util/silo/policy";
@@ -20,20 +9,16 @@ import { parsePolicy, ruleMatches } from "@brianjenkins94/util/silo/policy";
 
 const ROOT = "/workspace";
 
-/** How many test runs since a rule was added before its not being used says anything. */
 const ENOUGH_RUNS = 5;
 
-/** The targets a rule's conditions name. */
 function targetsOf(when: Predicate): string[] {
 	return "predicates" in when ? when.predicates.flatMap(targetsOf) : [when.target_id];
 }
 
 const allows = (rule: Rule): boolean => rule.then.some((action) => action.action_id === "allow");
 
-/** Whether runs can say anything about `rule`: an allow, about a call's capability and resource alone. */
 const judged = (rule: Rule): boolean => allows(rule) && targetsOf(rule.when).every((target) => target === "capability" || target === "resource");
 
-/** The rules of `policy` no run in `history` used, once enough have run since each was added. */
 export function unconfirmed(policy: Policy, history: RunRecord[]): { "rule": Rule; "index": number; "runs": number }[] {
 	return policy.rules.flatMap((rule, index) => {
 		if (!judged(rule)) {
@@ -47,8 +32,6 @@ export function unconfirmed(policy: Policy, history: RunRecord[]): { "rule": Rul
 	});
 }
 
-/** Whether `when` holds of a call of `capability` whose resource isn't known: true, false, or undefined for either (a row
- *  about the resource could go both ways). */
 function holdsOf(when: Predicate, then: Rule["then"], capability: string): boolean | undefined {
 	if (!("predicates" in when)) {
 		return when.target_id === "capability"
@@ -69,12 +52,10 @@ function holdsOf(when: Predicate, then: Rule["then"], capability: string): boole
 	return each.includes(false) ? false : each.includes(undefined) ? undefined : true;
 }
 
-/** The code files (of `capabilities`, each one's as `detect` reads its text) that could make a call `rule` allows. */
 export function callersOf(rule: Rule, capabilities: Map<string, string[]>): string[] {
 	return [...capabilities].filter(([, can]) => can.some((capability) => holdsOf(rule.when, rule.then, capability) !== false)).map(([file]) => file).toSorted();
 }
 
-/** What a rule no run has used says, given the files whose code could make the call it allows (undefined: not read). */
 export function sayUnconfirmed(runs: number, callers: string[] | undefined): string {
 	const unused = `No test run has used this allow rule: ${String(runs)} kept since it was added`;
 
@@ -87,15 +68,8 @@ export function sayUnconfirmed(runs: number, callers: string[] | undefined): str
 		: `${unused}, but ${callers[0]}${callers.length > 1 ? ` and ${String(callers.length - 1)} more` : ""} can make the call: a test that reaches it would confirm it.`;
 }
 
-/** What each code file can do as last read, by its path, kept while its modification time and size stay as they were. */
 const known = new Map<string, { "mtime": number; "size": number; "can": string[] }>();
 
-/**
- * Each of the workspace's code files under `root` (not node_modules, a dot-folder or a declaration file) — or of `files`,
- * when the caller has listed them already (relative to `root`) — that can do anything, and what its text says it can do
- * (lib's `detect`); a file is read again only once it's changed (`known`). `files`, how many there are; `read`, how many
- * were read this time.
- */
 export async function capabilitiesOf(vscode: typeof vscodeApi, root: string, files?: string[]): Promise<{ "capabilities": Map<string, string[]>; "files": number; "read": number }> {
 	const uris = (files === undefined
 		? await vscode.workspace.findFiles("**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}", "{**/node_modules/**,**/.*/**}")
@@ -140,7 +114,6 @@ export function installCapabilityConfirm(vscode: typeof vscodeApi, hub: Hub, log
 	const check = async (): Promise<void> => log.span("editor.workbench.capability-confirm.check", {}, async (span) => {
 		const { history } = await rpc.request("tests.history", {}, { "timeoutMs": 60_000, "waitForResponderMs": 60_000 }) as { "history": RunRecord[] };
 		let count = 0;
-		// (what the code can do, read only once a rule's gone unused: every code file of the workspace)
 		let capabilities: Map<string, string[]> | undefined;
 		let read: number | undefined;
 
@@ -151,7 +124,6 @@ export function installCapabilityConfirm(vscode: typeof vscodeApi, hub: Hub, log
 
 			if (text !== undefined) {
 				const document = await vscode.workspace.openTextDocument(uri);
-				// (each rule's own `when`: a rule's conditions nest under `predicates`, with no other)
 				const starts = [...text.matchAll(/"when"/gu)].map((match) => match.index);
 
 				const found = unconfirmed(parsePolicy(text), history);
@@ -173,7 +145,6 @@ export function installCapabilityConfirm(vscode: typeof vscodeApi, hub: Hub, log
 
 					problem.source = "capabilities";
 					problem.code = index;
-					// (each file that can, a click away)
 					problem.relatedInformation = (callers ?? []).slice(0, 20).map((file) => new vscode.DiagnosticRelatedInformation(new vscode.Location(vscode.Uri.file(`${ROOT}/${file}`), new vscode.Position(0, 0)), `can make the call: ${(can?.get(file) ?? []).filter((capability) => holdsOf(rule.when, rule.then, capability) !== false).join(", ")}`));
 
 					return problem;

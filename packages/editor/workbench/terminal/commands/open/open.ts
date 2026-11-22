@@ -1,4 +1,3 @@
-/** The terminal's `open`: as `code` for what's in the workspace (commands/code), and the browser for an address. */
 import type { CommandHost, Handler } from "../../catalog";
 import { openPaths } from "../code/code";
 

@@ -1,26 +1,3 @@
-/**
- * A writable, zen-fs-backed vscode FileSystemProvider for the workspace — the zen-fs unification.
- *
- * Why: the in-browser tsserver reads on-disk / .d.ts / dependency files by PULLING them through
- * `vscode.workspace.fs` on demand (bridged to sync by VS Code's own @vscode/sync-api SAB), NOT by having content
- * pushed to it. So the type-checker resolves against whatever FileSystemProvider answers — and it only needs that
- * provider to answer promptly, completely, and locally (which is why the async CDN overlay can't feed it, but a
- * local store can). This makes the workspace filesystem a real, editable store we own — a single zen-fs — that
- * the type-checker reads from directly.
- *
- * M0 registered it as a higher-priority overlay than boot's seed (proving the type-checker reads through it).
- * M1 (this): PERSIST it to IndexedDB, so acquired types (from ata.ts) and edits survive a reload — which lets
- * ATA drop its own bespoke cache and write once, here. The baked seed is NOT persisted (only post-boot writes
- * are), so a rebuilt demo file still shows through while a user edit or an acquired type overrides it on restore.
- * Deleting a seeded path persists a TOMBSTONE (a `null` entry), so it stays deleted rather than reseeded — a replaced
- * workspace (a repo, a playground link) reloads as itself, not with the demo back beside it.
- *
- * M3 swapped the backend to a SharedArrayBuffer (SingleBuffer) so the LSP workers attach to this SAME filesystem
- * (see the zenfs-vfs.ts seam). The service worker deliberately does NOT serve from it: the SW can't be
- * cross-origin isolated on a static host (its own script load isn't stampable with COEP), so a SharedArrayBuffer
- * sent to it degrades to a non-shared copy — so the SW only folds node_modules in from the CDN. See
- * coi-serviceworker.js.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { IFileSystemProviderWithFileReadWriteCapability, IStat, WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import type { ArchSink } from "@brianjenkins94/observability";
@@ -38,60 +15,33 @@ import { watchWorkspaceStore, WORKSPACE_CHANGED } from "../shared/workspace-chan
 import { createChangeEvent, notFound, readOnly } from "./provider-base";
 import { statCache } from "./stat-cache";
 
-/** VS Code's platform `FilePermission.Readonly` bit (vs/platform/files/common/files: `Readonly = 1 << 0`). Set in
- *  a file's `stat`, it makes the editor render the read-only lock, disable editing the buffer, and block Save. The
- *  platform enum isn't re-exported by the api surface, so use the constant; `writeFile` enforces the block for real
- *  (the permission is only the UI hint — a provider that answered writes anyway would silently accept them). */
 const FILE_PERMISSION_READONLY = 1 as unknown as NonNullable<IStat["permissions"]>;
 
-/** Handle returned to callers: an existence probe (so ata.ts can skip files already in the store, its
- *  cross-reload dedup), a read-only probe (so a client filesystem — e.g. the just-bash terminal adapter — can
- *  reflect managed configs as un-writable), M0 instrumentation counters, and — when the store is
- *  SharedArrayBuffer-backed — the `buffer` itself, so other realms (the LSP workers, M3b) can attach to the SAME
- *  filesystem. Also on `globalThis.__workspaceFs`. */
 export interface WorkspaceFs {
-	/** The store, as VS Code's file service reads it (holdFiles). */
 	"provider": IFileSystemProviderWithFileReadWriteCapability;
 	"reads": number;
 	"writes": number;
-	/** Stats the provider answered, and how many of those from what it last found (its `stats`, forgotten as each path changes). */
 	"stats": number;
 	"statsCached": number;
 	"has": (path: string) => boolean;
 	"isReadonly": (path: string) => boolean;
 	"buffer"?: SharedArrayBuffer;
-	/** Fire a change event for files that are already in the store, so services that read them once at startup —
-	 *  before this overlay was mounted — re-read them (the configuration service and `.vscode/settings.json`). */
 	"announce": (resources: FileResource[]) => void;
 }
 
-/** The URI type the provider's methods take (vscode's own URI; the extension API's `Uri.file` produces one). */
 type FileResource = Parameters<IFileSystemProviderWithFileReadWriteCapability["writeFile"]>[0];
 
 const PERSIST_DB = "workspace-fs";
 const PERSIST_STORE = "files";
 const FLUSH_MS = 500;
-/** Fixed size of the shared filesystem buffer (SingleBuffer can't grow: it reads its size once). 128 MB: SingleBuffer
- *  takes ~2.5× the files' size, and nothing collects the packs pulls fetch — at 64 MB this repository's clone and its
- *  types took half, and a day of pulls the rest. Not more: the browser's memory measurement counts the buffer at its
- *  size, written or not, against the workbench's budget (ARCHITECTURE.md, *The workspace filesystem*). */
 const BUFFER_BYTES = 128 * 1024 * 1024;
 
-/**
- * Silo's `local/` — what stays on this machine (the edit history, raw profiles, BABLR's verdicts): files like any other
- * under `/workspace`, but mounted from an IndexedDB store of its own (`silo-local`), not kept in the shared buffer —
- * whose fixed size the whole project shares, and which it would otherwise eat. Only this realm mounts it (nothing the
- * workers run needs it), and only this realm writes it. zen-fs keeps a copy of the store in memory, for the provider's
- * synchronous reads, so what's kept here stays small: each user of it caps what it keeps.
- */
 export const LOCAL_MOUNT = `/workspace/${LOCAL_DIR}`;
 const LOCAL_DB = "silo-local";
 const inLocal = (path: string): boolean => path === LOCAL_MOUNT || path.startsWith(LOCAL_MOUNT + "/");
 
-/** Persisted paths an older build wrote that no longer exist (ATA's retired force-reference file). */
 const RETIRED = new Set(["/workspace/ata-ambient.d.ts"]);
 
-/** Ensure the parent directory of `path` exists in zen-fs (recursive mkdir). */
 function ensureParent(path: string): void {
 	const dir = path.slice(0, path.lastIndexOf("/"));
 
@@ -100,7 +50,6 @@ function ensureParent(path: string): void {
 	}
 }
 
-/** `read`'s answer, or, for a path that isn't there (or a file where a folder is on its way), VS Code's not-found. */
 function orNotFound<T>(read: () => T): T {
 	try {
 		return read();
@@ -115,7 +64,6 @@ function orNotFound<T>(read: () => T): T {
 	}
 }
 
-/** Map a zen-fs stat to a vscode FileType. */
 function fileType(stat: { "isDirectory": () => boolean; "isSymbolicLink": () => boolean }): FileType {
 	if (stat.isSymbolicLink()) {
 		return FileType.SymbolicLink;
@@ -124,7 +72,6 @@ function fileType(stat: { "isDirectory": () => boolean; "isSymbolicLink": () => 
 	return stat.isDirectory() ? FileType.Directory : FileType.File;
 }
 
-// ── IndexedDB persistence: post-boot writes (acquired types + edits), keyed by absolute path. ──
 function openPersist(): Promise<IDBDatabase | undefined> {
 	return new Promise((resolve) => {
 		try {
@@ -147,8 +94,6 @@ function openPersist(): Promise<IDBDatabase | undefined> {
 	});
 }
 
-/** All persisted [path, contents] pairs (for restore on boot), in path order: a folder before what's in it. `null`
- *  contents are a tombstone — a seeded path deleted since. */
 function persistLoadAll(db: IDBDatabase): Promise<[string, Uint8Array | null][]> {
 	return new Promise((resolve) => {
 		try {
@@ -170,30 +115,15 @@ function persistLoadAll(db: IDBDatabase): Promise<[string, Uint8Array | null][]>
 }
 
 export interface WorkspaceFsOptions {
-	/** The workbench hub: every realm reports its writes to the workspace as `workspace.changed` on it (see
-	 *  workspace-changes.ts), and they're all persisted and announced here. Without one, only this realm's are. */
 	"hub"?: Hub;
-	/** Puts the workspace on the live architecture diagram: every store operation, by caller (the vscode provider,
-	 *  the boot seed, persistence, or a direct zen-fs user), and every change batch announced to VS Code. */
 	"architecture"?: ArchSink;
 }
 
-// Managed configs are OVERRIDABLE DEFAULTS, not locked files: they're seeded into zen-fs like everything else
-// but left WRITABLE so a repo load can clear/overwrite them. On replace (see workbench-entry.tsx) the TS project
-// configs then fall through to boot's read-only priority-1 base when a repo omits them (tsserver reads via the
-// composite file service), while the worker-consumed ones (eslint.config, .gitignore — read straight off THIS
-// zen-fs by the LSP pod / isomorphic-git, so a priority-1 base is invisible) get the base default MATERIALIZED
-// back into zen-fs. Only the type surface stays locked. Match by workspace-relative path (the snapshot marks
-// root-level configs readonly). Keep in sync with workbench-entry.tsx OVERRIDABLE_DEFAULTS.
 const OVERRIDABLE_DEFAULTS = new Set(["tsconfig.json", "jsconfig.json", "eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", ".gitignore"]);
 const relative = (path: string): string => path.replace(/^\/workspace\//u, "");
 
-/** Write the baked snapshot into zen-fs, adding the files that stay locked to `readonlyPaths`. Returns every path the
- *  seed makes, its folders included: deleting one of these needs a tombstone to stay deleted. */
 function seedFiles(files: WorkbenchFile[], readonlyPaths: Set<string>): Set<string> {
 	const seeded = new Set<string>();
-	// (each folder made once: asking whether it exists is a whole path lookup in zen-fs, for every file of a repository
-	// the address loads)
 	const made = new Set<string>();
 
 	for (const file of files) {
@@ -218,13 +148,7 @@ function seedFiles(files: WorkbenchFile[], readonlyPaths: Set<string>): Set<stri
 	return seeded;
 }
 
-/** Bring the persisted writes back over the seed (`localMounted`: silo's local/ has a store of its own), each file made
- *  by `create` and each folder by `mkdir`, given the folders there already (`folders`: the seed's, and the root). Returns
- *  how many were restored and tombstoned, the retired paths (to drop from persistence) and the ones moved into local/. */
 function restorePersisted(persisted: [string, Uint8Array | null][], localMounted: boolean, folders: Set<string>, mkdir: (path: string) => void, create: (path: string, contents: Uint8Array) => void): { "restored": number; "tombstoned": number; "retired": string[]; "moved": string[] } {
-	// (each folder made once, and only those not there: asking whether one exists is a lookup from the root, and making
-	// it through zen-fs a lookup for each folder above it — 7,100 lookups for this repository's 507 folders, 551 made in
-	// the store, in Node 2026-11-20)
 	const made = new Set(folders);
 	let restored = 0;
 	let tombstoned = 0;
@@ -235,7 +159,6 @@ function restorePersisted(persisted: [string, Uint8Array | null][], localMounted
 		if (RETIRED.has(path)) {
 			retired.push(path); // written by an older build; dropped below rather than brought back
 		} else if (localMounted && inLocal(path)) {
-			// An older build kept silo's local/ in the workspace store: move it into its own (once), and out of here.
 			if (contents !== null && !fs.existsSync(path)) {
 				ensureParent(path);
 				fs.writeFileSync(path, contents);
@@ -248,7 +171,6 @@ function restorePersisted(persisted: [string, Uint8Array | null][], localMounted
 				tombstoned += 1;
 			} catch { /* a file stands where its folder was: already gone */ }
 
-			// (a folder deleted is made again for a file restored under it)
 			for (const folder of made) {
 				if (folder === path || folder.startsWith(path + "/")) {
 					made.delete(folder);
@@ -274,7 +196,6 @@ function restorePersisted(persisted: [string, Uint8Array | null][], localMounted
 	return { "restored": restored, "tombstoned": tombstoned, "retired": retired, "moved": moved };
 }
 
-/** Drop `paths` from the persisted store (what moved into silo's local/ lives in its own store now). */
 function forgetPersisted(db: IDBDatabase | undefined, paths: string[]): void {
 	if (db !== undefined && paths.length > 0) {
 		const objects = db.transaction(PERSIST_STORE, "readwrite").objectStore(PERSIST_STORE);
@@ -285,16 +206,9 @@ function forgetPersisted(db: IDBDatabase | undefined, paths: string[]): void {
 	}
 }
 
-/** How often, and for how long, a provider call whose folder this thread's async work holds asks again. */
 const HELD_RETRY_MS = 5;
 const HELD_FOR_MS = 2000;
 
-/** `body`'s result as a promise, and what it throws as the rejection — as an async function settles. For the
- *  provider's methods, which do all their work synchronously. A folder held by async work on this thread (zen-fs's
- *  `promises`, between its awaits: edit-history.ts, git-engine.ts) is EAGAIN to a synchronous call, which can't wait for
- *  it — so it's asked again shortly, as zen-fs's own async calls wait: a run's keep under `.silo/local` while a save's
- *  edit history was written there was lost (past-runs.spec, fixed in 022d6766). Each method does the same again, asked
- *  again: a parent made, a file written whole, a removal forced. */
 function settled<T>(body: () => T): Promise<T> {
 	const until = Date.now() + HELD_FOR_MS;
 
@@ -315,13 +229,6 @@ function settled<T>(body: () => T): Promise<T> {
 	});
 }
 
-/**
- * VS Code's reads of the workspace, held until the store's mounted (`mounting`) and then answered by it, so the workbench can
- * show before a big workspace is in: a tab restored as it boots loads a moment longer, where it would have said its file
- * wasn't found. Registered before boot, above the store, and gone once the store's there.
- *
- * Not `root` itself or its `.vscode`: boot waits for the configuration service's reads of those, and the store's mounted after boot. They fall through, to the store once it's there; and it tells the service to read them again (`announce`).
- */
 export function holdFiles(mounting: Promise<WorkspaceFs | undefined>, root: string): void {
 	const held = async <T>({ path }: { "path": string }, call: (store: IFileSystemProviderWithFileReadWriteCapability) => Promise<T>): Promise<T> => {
 		const store = path === root || path === `${root}/.vscode` || path.startsWith(`${root}/.vscode/`) ? undefined : await mounting;
@@ -353,24 +260,15 @@ export function holdFiles(mounting: Promise<WorkspaceFs | undefined>, root: stri
 
 export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, options: WorkspaceFsOptions = {}): Promise<WorkspaceFs> {
 	const { "architecture": sink, hub } = options;
-	// A SharedArrayBuffer-backed store (zen-fs SingleBuffer) when cross-origin isolation is available — so the LSP
-	// workers + preview can later attach to the SAME filesystem via this buffer (M3b). Falls back to InMemory
-	// (single-realm) otherwise. COI is required for SharedArrayBuffer and is what the coi service worker provides.
 	const shared = typeof SharedArrayBuffer !== "undefined" && globalThis.crossOriginIsolated === true;
 	const buffer = shared ? new SharedArrayBuffer(BUFFER_BYTES) : undefined;
 
-	// Mount the shared buffer AT /workspace (a clean mount point the LSP workers mount the same buffer at in M3b),
-	// with a plain InMemory root for anything outside the workspace. Without a buffer, everything is InMemory.
-	// Two separate calls (not a ternary): the branches have different mount keys, so a single call would hand
-	// `configure` a UNION of mount shapes it can't infer one `ConfigMounts` type from — each call infers its own.
 	if (buffer !== undefined) {
 		await configure({ "mounts": { "/": InMemory, "/workspace": { "backend": SingleBuffer, "buffer": buffer } } });
 	} else {
 		await configure({ "mounts": { "/": InMemory } });
 	}
 
-	// Silo's local/, from its own IndexedDB store (LOCAL_MOUNT) — before the seed and the restore, which may write there.
-	// Without IndexedDB (a private window), it stays in the workspace store like any folder.
 	let localStore: object | undefined;
 
 	try {
@@ -382,8 +280,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		log.warn("silo's local/ isn't mounted from IndexedDB — it stays in the workspace store", { "error": String(error) });
 	}
 
-	// Who is calling the store right now: the provider and the boot seed say so; anyone else is a direct caller.
-	// Provider methods do all their zen-fs work synchronously (no await before it), so a plain variable is enough.
 	let caller: string | undefined;
 	const as = <Args extends unknown[], Result>(name: string, method: (...args: Args) => Result) => (...args: Args): Result => {
 		caller = name;
@@ -397,29 +293,16 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 
 	const store = defaultContext.mounts.get(buffer !== undefined ? "/workspace" : "/");
 
-	// No atime (POSIX's noatime): zen-fs otherwise marks a file read as changed — its atime — and writes that back on
-	// close with a new ctime, so a file only read looks changed to git. isomorphic-git then re-read .git/index for every
-	// file it checked (2,212 for this repository: the page busy for minutes after a load) and re-hashed every file a
-	// worker had read. Every realm that mounts the store says the same (zenfs-vfs.ts).
 	for (const each of [store, localStore]) {
 		(each as { "attributes"?: Map<string, unknown> } | undefined)?.attributes?.set("no_atime", undefined);
 	}
 
-	// (and whoever names itself to the store: fs-caller.ts — git, by its own fs)
 	observeStores(sink, store, { "store": localStore, "at": LOCAL_DIR }, buffer !== undefined, () => caller ?? fsCaller());
 
-	// Paths seeded read-only (managed configs like tsconfig.json, the baked type surface, ambient files). The
-	// snapshot carries the `readonly` flag; we enforce it here — boot's own seed marks them read-only too, but this
-	// overlay sits ABOVE it and would otherwise answer their stats/writes as writable, shadowing that. A `Set`
-	// (not a per-file bit) so a future "unlock to customize" can just drop the entry. Seeded files only: a file the
-	// user later creates is never in here, so it stays writable.
 	const readonlyPaths = new Set<string>();
 
-	// Seed the baked snapshot (not persisted — a rebuilt demo file stays fresh), then restore persisted writes
-	// (acquired types + edits) on top, so those override the seed for any overlapping path.
 	caller = "seed";
 
-	// Every path the seed makes, its folders included: deleting one of these needs a tombstone to stay deleted.
 	const seeded = seedFiles(files, readonlyPaths);
 
 	caller = undefined;
@@ -433,10 +316,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	if (db !== undefined) {
 		const persisted = await persistLoadAll(db);
 
-		// A file restored is new to the store (only the seed's few are there already), so it's made in the store
-		// itself: a create and a write, a lookup from the root each. Through zen-fs's own writeFileSync, a new file was
-		// ~9 of them (it resolves the path, finds it missing, resolves the folder, stats both again): 27,919 stats for
-		// a reload's 3,759 paths, 1.9 s of the workbench's boot. (In Node, 2,000 files: 2.0 s → 0.65 s.)
 		const mountedAt = buffer !== undefined ? "/workspace" : "";
 		const create = (path: string, contents: Uint8Array): void => {
 			const inStore = path.slice(mountedAt.length);
@@ -456,7 +335,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 			store.writeSync(inStore, contents, 0);
 		};
 
-		// (a folder too: one lookup, its parent's, where zen-fs's mkdirSync looks up each folder above it)
 		let made = 0;
 		const mkdir = (path: string): void => {
 			made += 1;
@@ -475,12 +353,10 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		};
 
 		caller = "restore";
-		// (the folders there: the seed's, every seeded path's parent)
 		const folders = new Set([...seeded].map((path) => path.slice(0, path.lastIndexOf("/"))));
 
 		folders.add("/workspace");
 
-		// (a span: what every boot of a loaded repository waits on)
 		const span = log.span("editor.workbench.workspace-fs.restore", { "count": persisted.length });
 
 		({ restored, tombstoned, retired, moved } = restorePersisted(persisted, localStore !== undefined, folders, mkdir, create));
@@ -488,16 +364,8 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		caller = undefined;
 	}
 
-	// Write-back, from the change stream: batch the paths that changed and, per flush, copy each one's CURRENT state
-	// from zen-fs into IndexedDB in one transaction — a file is put, a directory's files are put (a renamed or copied
-	// tree), and a missing path is deleted along with everything that was under it (a recursive delete, a renamed-away
-	// tree). Reading the state at flush time rather than capturing it per write means a burst of writes to one file
-	// costs one put, and it doesn't matter which realm wrote.
 	const dirty = new Set<string>();
 	let flushTimer: ReturnType<typeof setTimeout> | undefined;
-	// A symlink isn't kept, nor what's under it: install.ts makes the link again each boot. Kept through the link, a
-	// `file:` sibling's files came back at the next boot as a folder where the link goes — which install deleted and
-	// linked again, and the flush kept again: ~1,800 files restored, deleted and re-put every boot, half its main thread.
 	const linked = (path: string): boolean => fs.lstatSync(path).isSymbolicLink();
 	const filesUnder = (path: string): string[] => {
 		const stats = fs.lstatSync(path);
@@ -523,9 +391,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 			return;
 		}
 
-		// A path under a folder in the batch that's still there is that folder's: its walk puts it. Walked again for each
-		// folder above it, a clone's files were each read ~6 times, 145,560 stats for 3,768 paths (13 s of a 15 s
-		// flush, on the main thread). (Under one that's gone, it's still its own: a seeded path's tombstone.)
 		const present = new Map<string, boolean>();
 		const walked = (folder: string): boolean => {
 			let is = present.get(folder);
@@ -550,8 +415,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 			return true;
 		});
 		const started = performance.now();
-		// (the write-back crosses into IndexedDB: its batch's paths, the files it put and their bytes — the transaction
-		// itself commits after, off this thread's clock)
 		const span = log.span("editor.workbench.workspace-fs.flush", { "count": batch.length });
 		let written = 0;
 		let bytes = 0;
@@ -576,8 +439,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 				} else {
 					objects.delete(IDBKeyRange.bound(path + "/", path + "/\uFFFF"));
 
-					// The seed would bring a path it has back on the next boot, so that one gets a tombstone (a later
-					// write replaces it); anything else just goes.
 					if (seeded.has(path)) {
 						objects.put(null, path);
 					} else {
@@ -586,7 +447,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 				}
 			}
 
-			// (now, not when this task ends: it may be the page's last)
 			transaction.commit();
 		} catch (error) {
 			log.warn("workspace persistence failed", { "error": String(error) }); // best-effort: the store still has it
@@ -602,25 +462,16 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		flushTimer ??= setTimeout(flush, FLUSH_MS);
 	};
 
-	// The page going away doesn't wait for the timer: what was saved just before a reload would be lost.
 	window.addEventListener("pagehide", flush);
 
 	for (const path of retired) {
 		persist(path); // gone from zen-fs, so the flush deletes it
 	}
 
-	// What moved into silo's local/ lives in its own store now: out of this one's persistence.
 	forgetPersisted(db, moved);
 
 	const { listeners, onDidChangeFile } = createChangeEvent();
 
-	// Emit change events the way a real vscode provider does: fire the REAL URI (not a `{ path }` stand-in —
-	// the Explorer's file-change reaction calls `dirname(resource)` → `resource.with(...)`, which throws
-	// `e.with is not a function` on a plain object), and fire it BATCHED + DEFERRED off the write's call stack.
-	// Notifying synchronously inside `writeFile` deadlocks first-load type acquisition: the notification makes
-	// tsserver (a worker) request a SYNCHRONOUS file read over the @vscode/sync-api SAB, which blocks its thread
-	// on the MAIN thread — but the main thread is still inside this listener chain and can't service the read.
-	// A short debounce (VS Code's own `fireSoon` pattern) returns control to the event loop and coalesces bursts.
 	interface Change { "resource": Parameters<IFileSystemProviderWithFileReadWriteCapability["writeFile"]>[0]; "type": FileChangeType }
 	let changeBatch: Change[] = [];
 	let changeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -648,7 +499,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		"writes": 0,
 		"stats": 0,
 		"statsCached": 0,
-		// (asked for every file type acquisition might fetch: counted as its own caller)
 		"has": as("has", (path: string) => fs.existsSync(path)),
 		"isReadonly": (path) => readonlyPaths.has(path),
 		"buffer": buffer,
@@ -661,17 +511,8 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		}
 	};
 
-	// THE change path: every write to the workspace, from any realm, arrives here once — persisted, and announced to
-	// VS Code (the explorer, tsserver, open editors) as if the provider had made it. Registered after the seed and the
-	// restore, which are neither.
 	const CHANGE_TYPES: Record<WorkspaceChange["type"], FileChangeType> = { "added": FileChangeType.ADDED, "changed": FileChangeType.UPDATED, "deleted": FileChangeType.DELETED };
-	// `.git/**` is persisted but not announced: the git SCM + service watch `**/*` and refresh, and a refresh writes
-	// .git (the index's stat cache, verdict caches) — announcing those would loop. (VS Code's own watcherExclude
-	// leaves .git out for the same reason.)
 	const inGit = (path: string): boolean => /\/\.git(?:\/|$)/u.test(path);
-	// Each path's stat as the provider last found it (stat-cache.ts), forgotten as it changes: this realm's writes as they're
-	// made (the store's watcher, `onNow`), the provider's own among them, and other realms' as the change stream brings
-	// them (`apply`), before VS Code hears of them.
 	const found = statCache<IStat>();
 	const forget = found.forget;
 	const apply = (changes: WorkspaceChange[]): void => {
@@ -694,8 +535,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		}, undefined, forget);
 	}
 
-	// Silo's local/ changes too: announced to VS Code (a saved profile, say), but neither persisted (its store is its
-	// own) nor told to the other realms (they don't mount it).
 	if (localStore !== undefined) {
 		watchWorkspaceStore(localStore, LOCAL_MOUNT, (changes) => {
 			for (const change of changes) {
@@ -714,8 +553,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		"onDidChangeFile": onDidChangeFile,
 		"watch": () => ({ "dispose": () => undefined }),
 
-		// (each a missing path's not-found, from the call itself: asked first whether it exists, a path found was looked up
-		// twice, each a walk from the store's root — NEXT.md item 1, load cost)
 		"stat": (resource): Promise<IStat> => settled(() => {
 			let result = found.get(resource.path);
 
@@ -741,7 +578,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 				handle.statsCached += 1;
 			}
 
-			// (not found: a lower overlay's, the CDN node_modules provider's, to answer)
 			if (result === null) {
 				throw notFound();
 			}
@@ -758,9 +594,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		}),
 
 		"readdir": (resource): Promise<[string, FileType][]> => settled(() => {
-			// Each entry's type as zen-fs's listing found it (it stats every entry to list it), rather than a walk from the
-			// root again for each — a quarter of a load's main thread, VS Code listing folders. A link is followed, as `stat`
-			// follows it (a `file:` sibling's folder reads as a folder).
 			return orNotFound(() => fs.readdirSync(resource.path, { "withFileTypes": true })).map((entry): [string, FileType] => [entry.name, fileType(entry.isSymbolicLink() ? fs.statSync(resource.path.replace(/\/$/u, "") + "/" + entry.name) : entry)]);
 		}),
 
@@ -796,11 +629,6 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 		})
 	};
 
-	// Priority 2 — above boot's in-memory seed (1) and the CDN node_modules overlay (0). Reads for a path zen-fs
-	// holds are served here; genuine misses (a CDN dep) fall through to the lower overlays.
-	// (each call counted at the boundary: VS Code's file service into the workspace, by operation, with its path —
-	// fs-boundaries.ts, the metrics plane's `fs`)
-	// (by who in VS Code asked, from the call's stack: fs-caller.ts's vscodeCaller — its store calls too)
 	for (const method of ["stat", "readFile", "readdir", "writeFile", "mkdir", "delete", "rename"] as const) {
 		const original = provider[method].bind(provider) as (...args: unknown[]) => unknown;
 

@@ -1,29 +1,10 @@
-/**
- * A just-bash `IFileSystem` backed by the editor's own filesystem (`vscode.workspace.fs`).
- *
- * The terminal (just-bash — a pure-TS bash interpreter) writes through THIS, which routes to `workspace.fs` →
- * the workspace-fs overlay. Two things fall out for free by going through that single chokepoint rather than
- * just-bash's default in-memory FS:
- *   • Permissions — a write to a managed/read-only config (see workspace-fs `readonly`) throws `NoPermissions`,
- *     surfaced here as `EACCES`, so `> tsconfig.json` in the shell prints `permission denied` like a real shell.
- *   • Coherence — files the shell creates/edits fire the provider's change events, so they appear in the
- *     explorer and are visible to tsserver; edits in the editor are visible to the shell. One filesystem.
- *
- * just-bash's FS interface is async, which matches `workspace.fs`. The ops vscode's FS API doesn't offer
- * (symlink/readlink, chmod, utimes) degrade: symlinks are unsupported (thrown), chmod/utimes are no-ops — a
- * shell `chmod` deliberately can't override a managed file's read-only-ness (that's the FS's call, not the
- * user's). The two optional interface methods (`readFileBytes`, `readdirWithFileTypes`) are omitted; just-bash
- * falls back to the required ones.
- */
 import type { FileContent, FsStat, IFileSystem, MkdirOptions, RmOptions } from "just-bash/browser";
 
 import { fs as store } from "@zenfs/core";
 import { callerFs } from "../../shared/fs-caller";
 
-/** The workspace's store as the terminal reaches it past VS Code: its calls the terminal's, in the store's counts. */
 const zenfs = callerFs(store, "terminal");
 
-/** just-bash's `ReadFileOptions`/`WriteFileOptions` aren't re-exported from its `/browser` entry, so mirror the shape we use. */
 interface EncodingOptions { "encoding"?: string | null }
 
 function encodingOf(options: EncodingOptions | string | undefined): string {
@@ -34,19 +15,15 @@ function encodingOf(options: EncodingOptions | string | undefined): string {
 
 type VscodeApi = typeof import("vscode");
 
-// vscode FileType bits (File=1, Directory=2, SymbolicLink=64) and FilePermission.Readonly (=1). Read numerically
-// so this module needs no value import beyond the passed-in api.
 const FILE = 1;
 const DIRECTORY = 2;
 const SYMLINK = 64;
 const READONLY = 1;
 
-/** A minimal Error with a unix `code`, so just-bash commands print sane messages (`cat`: "No such file"). */
 function fsError(code: string, message: string): Error {
 	return Object.assign(new Error(message), { "code": code });
 }
 
-/** Translate a vscode FileSystemError into a unix-coded error the shell understands. */
 function translate(error: unknown, path: string): Error {
 	const name = (error as { "name"?: string } | undefined)?.name ?? "";
 	const code = (error as { "code"?: string } | undefined)?.code ?? "";
@@ -71,15 +48,11 @@ function translate(error: unknown, path: string): Error {
 		return error;
 	}
 
-	// What isn't an Error is stringified as it is (a thrown string, if anything else).
 	const thrown = error as string | number | boolean | null | undefined;
 
 	return new Error(String(thrown));
 }
 
-/** A string as just-bash means it: UTF-8 text, unless `encoding` says otherwise. Its pipes carry bytes as a latin1
- *  string (a char per byte), and a redirect of a command's byte output (`base64 -d > x.png`, `cat a.png > b.png`)
- *  writes it with `"binary"`: those chars are the bytes, and UTF-8 would turn each one above 0x7f into two. */
 function toBytes(content: FileContent, encoding: string): Uint8Array {
 	if (typeof content !== "string") {
 		return content;
@@ -99,8 +72,6 @@ function toBytes(content: FileContent, encoding: string): Uint8Array {
 	}
 }
 
-/** Bytes as a string in `encoding`, the inverse of `toBytes`. TextDecoder's "latin1" is windows-1252, which maps
- *  0x80–0x9f to other characters, so the byte encodings go a char per byte instead. */
 function fromBytes(bytes: Uint8Array, encoding: string): string {
 	if (encoding === "hex") {
 		return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -123,8 +94,6 @@ function fromBytes(bytes: Uint8Array, encoding: string): string {
 		: chars;
 }
 
-/** POSIX path resolution — `path` against `base`, collapsing `.`/`..`. Pure arithmetic (no filesystem), so it
- *  satisfies just-bash's SYNChronous `resolvePath` even though our store is async. */
 function resolvePosix(base: string, path: string): string {
 	const combined = path.startsWith("/")
 		? path
@@ -144,10 +113,6 @@ function resolvePosix(base: string, path: string): string {
 	return `/${stack.join("/")}`;
 }
 
-/**
- * Build a just-bash `IFileSystem` over `api.workspace.fs`. Paths are treated as absolute in the editor's own
- * namespace (`/workspace/...`); pair with `new Bash({ fs, cwd: "/workspace" })`.
- */
 export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 	const { fs } = api.workspace;
 	const uri = (path: string) => api.Uri.file(path);
@@ -165,7 +130,6 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 		const isSymbolicLink = (stat.type & SYMLINK) !== 0;
 		const isFile = !isDirectory && (stat.type & FILE) !== 0;
 		const writable = ((stat.permissions ?? 0) & READONLY) === 0;
-		// A unix-ish mode for `ls -l` etc.: dir 0o755, file 0o644 (0o444 when the FS marks it read-only).
 		let mode = 0o100000 | (writable ? 0o644 : 0o444);
 
 		if (isDirectory) {
@@ -243,7 +207,6 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 		"lstat": async (path: string): Promise<FsStat> => toFsStat(await statRaw(path)),
 
 		"mkdir": async (path: string, _options?: MkdirOptions): Promise<void> => {
-			// vscode createDirectory is already recursive and a no-op if the directory exists.
 			try {
 				await fs.createDirectory(uri(path));
 			} catch (error) {
@@ -287,8 +250,6 @@ export function createWorkspaceTerminalFs(api: VscodeApi): IFileSystem {
 			}
 		},
 
-		// Synchronous helpers. `resolvePath` is pure arithmetic; `getAllPaths` walks the SAME store synchronously
-		// via zen-fs (workspace-fs is zen-fs under /workspace) — the async vscode API can't answer a sync method.
 		"resolvePath": (base: string, path: string): string => resolvePosix(base, path),
 
 		"getAllPaths": (): string[] => {

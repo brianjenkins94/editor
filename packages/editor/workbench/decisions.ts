@@ -1,23 +1,11 @@
-/**
- * What's been decided about a file or a name: `decisions.for` { target } — History's `history.decisions`, the ledger's
- * entries and the docs' lines naming it, and a file's notes. Its readers: a person's *History: What's Been Decided About
- * This File…* (`editor.decisions.show`: the file in front, or a name asked for, shown read-only beside it) and agents'
- * `decisions_for`, which asks the same.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
 import { serve } from "@brianjenkins94/hub";
 
-/** How often, and how far apart, History is asked while it hasn't activated yet (within decisions_for's minute). */
 const TRIES = 25;
 const TRY_MS = 2000;
 
-/** History's answer to `command` with `target`, asked again (`tries` times) while it doesn't answer or says it isn't
- *  `ready` (code-reach.ts's `history.reach` too). */
 export function historyAsker(vscode: typeof vscodeApi): (command: string, target: string, signal: AbortSignal, tries?: number) => Promise<unknown> {
-	// History's answer, asked again until it answers (before it activates its commands aren't there).
-	// History activates with TypeScript, which VS Code starts only for an open TypeScript file: with none open, one is
-	// opened (not shown).
 	let woken: Promise<void> | undefined;
 	const wake = async (): Promise<void> => {
 		woken ??= (async () => {
@@ -56,7 +44,6 @@ export function historyAsker(vscode: typeof vscodeApi): (command: string, target
 	};
 }
 
-/** What `decisions.for` answers. */
 interface Decided {
 	"target"?: string;
 	"ledger"?: { "name": string; "status"?: string; "why"?: string; "since"?: string; "what"?: string }[];
@@ -66,10 +53,8 @@ interface Decided {
 	"error"?: string;
 }
 
-/** The scheme what's been decided is shown under: a read-only document a person reads beside the code. */
 const SCHEME = "editor-decisions";
 
-/** What was decided, as a person reads it. */
 function markdownOf(decided: Decided): string {
 	const lines = [`# What's been decided about ${decided.target ?? "it"}`, ""];
 
@@ -99,7 +84,6 @@ export function installDecisions(vscode: typeof vscodeApi, hub: Hub): void {
 			return { "target": target, "error": "the history extension didn't answer" };
 		}
 
-		// (a file's notes too: the whys kept beside its code, as the Margin shows them)
 		const notes = target.includes("/") ? await Promise.resolve(vscode.commands.executeCommand<Decided["notes"]>("notes.on", target)).catch(() => undefined) ?? [] : [];
 
 		return notes.length === 0 ? decided : { ...decided, "notes": notes };
@@ -115,7 +99,6 @@ export function installDecisions(vscode: typeof vscodeApi, hub: Hub): void {
 		return decide(target.trim(), signal);
 	});
 
-	// A person's: the file in front (or a name, asked for), shown read-only beside it.
 	const shown = new Map<string, string>();
 	const changed = new vscode.EventEmitter<vscodeApi.Uri>();
 

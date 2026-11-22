@@ -1,12 +1,6 @@
-/**
- * The terminal's `ps`: the runs (runs.ts) — what the terminals, Run and the tasks started — as a table: a short id (the
- * first characters of the run's, which `kill` takes), its state, task or service, its port, where it was started, and
- * what was run. The running ones by default, as `ps` shows live processes; `-a` adds the ones that ended.
- */
 import type { RunInfo } from "../../../../shared/runs";
 import type { CommandHost, Handler } from "../../catalog";
 
-/** How much of a run's id `ps` shows and `kill` needs (any unique prefix will do). */
 export const SHORT_ID = 8;
 
 const where = (run: RunInfo): string => ("terminal" in run.origin ? `terminal ${run.origin.terminal}` : run.origin.other);

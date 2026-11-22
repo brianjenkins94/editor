@@ -1,15 +1,3 @@
-/**
- * The filesystems' calls one at a time, for a while, when asked (ARCHITECTURE.md, *Visibility*): the boundaries are
- * counted always (shared/fs-boundaries.ts, the metrics plane's `fs`), and a trace adds each call it sees — at one
- * boundary or all, of a path or every one — as a record in its span, `editor.workbench.fs-trace.window`, with its
- * operation, caller, path, time and bytes, and as a line in the Output channel "File Calls".
- *
- * - the command `editor.fs.trace` ("Trace File Calls…"): picks the boundary, a path to narrow it to and how long;
- * - `fs.trace` { boundary?, path?, seconds? }: the same, for agents' `files_trace`, answered at once.
- *
- * A call's own span isn't possible after the fact (a span starts when it's opened), so a call is a record in the
- * window's span; its time is the call's. One trace at a time, closing on its own.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
@@ -17,14 +5,11 @@ import type { Call } from "../shared/fs-boundaries";
 import { serve } from "@brianjenkins94/hub";
 import { traceCalls } from "../shared/fs-boundaries";
 
-/** How long a trace stays open, by default and at most. */
 const TRACE_SECONDS = 30;
 const TRACE_MOST = 300;
 
-/** Calls written out per trace, at most: a load makes a hundred thousand; past it they're counted, not written. */
 const MOST_CALLS = 10_000;
 
-/** The boundaries, as the command offers them. */
 const BOUNDARIES: Record<string, string> = {
 	"provider": "VS Code's file service into the workspace",
 	"node_modules": "VS Code's file service into node_modules",
@@ -36,10 +21,8 @@ const BOUNDARIES: Record<string, string> = {
 	"refs": "a commit opened beside the work (.refs/)"
 };
 
-/** What a trace is of: a boundary (every one, without), a path (every one, without) and how long. */
 interface Asked { "boundary"?: string; "path"?: string; "seconds": number }
 
-/** A call as its line in the Output channel. */
 function lineOf(call: Call): string {
 	const time = new Date().toISOString().slice(11, 23);
 
@@ -60,7 +43,6 @@ export function installFsTrace(hub: Hub, vscode: typeof vscodeApi, log: Logger):
 		const what = `${boundary ?? "every boundary"}${path === undefined ? "" : ", paths with " + path}`;
 		const span = log.span("editor.workbench.fs-trace.window", { "boundary": boundary ?? "all", "path": path ?? "", "seconds": lasting });
 		let calls = 0;
-		// (what writing a call out does itself isn't the trace's)
 		let seeing = false;
 
 		open = { "until": until };

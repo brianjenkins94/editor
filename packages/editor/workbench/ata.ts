@@ -1,56 +1,19 @@
-/**
- * Runtime Automatic Type Acquisition — fetch a package's type surface on demand and write it into the workbench
- * filesystem, so an arbitrary `import "pkg"` type-checks with NO bake step (build/package-types.ts) and no rebuild.
- *
- * Why it exists (and why it's not the CDN overlay): the type-checker resolves modules against a SYNCHRONOUS view
- * seeded up front (snapshot.ts). The node_modules CDN overlay (node-modules-provider.ts) is async/lazy — great
- * for go-to-definition, but the checker can't await it, which is why baking exists. ATA is the runtime version of
- * the bake: discover a file's imports, fetch their `.d.ts` (+ `@types/<pkg>`, crawling the reference graph), and
- * WRITE the results into the same in-memory FS the seed uses — so the checker resolves them synchronously. The
- * project's manifests add what no import names: package.json's `@types/*`, tsconfig's `types`, and the configs it
- * `extends`. (It replaces TypeScript's own web type acquisition, which installs the whole dependency tree, binaries
- * and all, into the extension host — see settings-defaults.jsonc.)
- *
- * It reuses OUR existing CDN path rather than a third-party acquirer: fetches go same-origin to
- * `<base>/workspace/node_modules/<pkg>/…`, which the service worker proxies to unpkg (with `?meta` for a
- * directory listing and `?v=` to pin a version — see coi-serviceworker.js fetchCdn). Same-origin keeps it clear
- * of the document's COEP, and no `typescript`/@typescript/ata dependency rides along.
- *
- * The crawl resolves references against the package's `?meta` FILE LISTING (so it fetches only files that exist —
- * no blind `.d.ts`/`index.d.ts` probing), pins versions from the workspace's map, and reads the modern `exports`
- * types condition (not just `types`/`typings`) plus each named `exports` subpath's types (`react/jsx-runtime`, which
- * the automatic JSX runtime imports implicitly). When a run adds files, it reloads the TS projects so a resolution
- * that failed before the files landed is retried (see `run`). It writes ONCE, into the workspace filesystem (workspace-fs.ts),
- * and skips anything already present there — which is its cross-reload dedup, since that store persists (so a
- * reload refetches nothing and only genuinely new imports hit the network). No bespoke cache of its own.
- */
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscode from "vscode";
 import { REFS_DIR } from "@brianjenkins94/editor-api/git";
 import { waitFor } from "./readiness";
 import { aliases, installedLocally } from "./versions";
 
-/** Files whose imports are worth acquiring types for. */
 const RELEVANT = /\.(?:tsx?|jsx?|mts|cts)$/u;
-/** Debounce edits — a re-scan only fetches genuinely new modules, so a short wait coalesces typing. */
 const DEBOUNCE_MS = 800;
-/** How long acquisition waits for the workspace's versions to be pinned before it fetches anyway. */
 const PINS_MS = 30_000;
-/** Cap on NETWORK fetches per run (already-present files are free), so a pathological type graph can't runaway. */
 const MAX_NETWORK = 400;
-/** A declaration file. */
 const DECL = /\.d\.[mc]?ts$/u;
 
-/** unpkg `?meta`: a directory node whose `files` recurse (the old listing), or `{ prefix, files }` with every file beneath
- *  it flat, by full path, `type` its MIME type (the current one). */
 interface MetaNode { "type"?: string; "path": string; "files"?: MetaNode[] }
 
-/** A module specifier after `from`/`import`/`require`. The keyword stands alone (not the tail of `"-ms-flow-from"` or the
- *  string `"from"`, which csstype's declarations are full of), and a specifier holds no whitespace — else the text between
- *  two string literals reads as one (`?: Property.MsFlowFrom | undefined;`). */
 const SPECIFIER = String.raw`(?<![\w$."'-])(?:from|import|require)\s*(?:\(\s*)?["']([^"'\s]+)["']`;
 
-/** Bare package specifiers in source (scope-aware), reduced to their package root. Mirrors build/package-types.ts. */
 export function importedPackages(source: string): string[] {
 	const roots = new Set<string>();
 
@@ -65,8 +28,6 @@ export function importedPackages(source: string): string[] {
 	return [...roots];
 }
 
-/** The package subpaths `source` imports (`unenv/node/fs` → `unenv`, `node/fs`): their types aren't the package's main
- *  entry's, and a wildcard export (`"./*"`) names none up front, so each is acquired as it's imported. */
 export function importedSubpaths(source: string): [string, string][] {
 	const found = new Map<string, [string, string]>();
 
@@ -81,8 +42,6 @@ export function importedSubpaths(source: string): [string, string][] {
 	return [...found.values()];
 }
 
-/** The types file a package's `exports` gives `./<subpath>`: its key, or a wildcard key's (`"./*"` →
- *  `./dist/runtime/*.d.mts`) with the rest put in for the `*`. Undefined when none does. */
 export function exportedTypes(exportsField: unknown, subpath: string): string | undefined {
 	if (exportsField === null || typeof exportsField !== "object") {
 		return undefined;
@@ -104,7 +63,6 @@ export function exportedTypes(exportsField: unknown, subpath: string): string | 
 	return undefined;
 }
 
-/** A package.json's `version`, or undefined when it has none (or isn't JSON). */
 function versionOf(packageJson: string | undefined): string | undefined {
 	try {
 		const { version } = JSON.parse(packageJson ?? "") as { "version"?: unknown };
@@ -115,7 +73,6 @@ function versionOf(packageJson: string | undefined): string | undefined {
 	}
 }
 
-/** JSON with comments and trailing commas (a tsconfig) → its value; undefined when it doesn't parse. */
 function parseJsonc(text: string): Record<string, unknown> | undefined {
 	try {
 		return JSON.parse(text.replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//gu, (_, string: string | undefined) => string ?? "").replace(/,(\s*[}\]])/gu, "$1")) as Record<string, unknown>;
@@ -124,8 +81,6 @@ function parseJsonc(text: string): Record<string, unknown> | undefined {
 	}
 }
 
-/** A tsconfig's bare-specifier `extends` (`@tsconfig/node-lts/tsconfig.json`), split into package + file; relative
- *  extends are workspace files, already present. */
 function extendsTargets(tsconfig: Record<string, unknown> | undefined): [string, string][] {
 	const value = tsconfig?.["extends"];
 
@@ -136,7 +91,6 @@ function extendsTargets(tsconfig: Record<string, unknown> | undefined): [string,
 	});
 }
 
-/** The package root of a bare specifier or node_modules-relative path (scope-aware); undefined for relative/node. */
 function packageRootOf(spec: string): string | undefined {
 	if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("node:") || spec.startsWith("#")) {
 		return undefined; // relative, absolute, a builtin, or a package's own `imports` alias — not a package
@@ -148,12 +102,10 @@ function packageRootOf(spec: string): string | undefined {
 	return pkg !== "" && !(pkg.startsWith("@") && !pkg.includes("/")) ? pkg : undefined;
 }
 
-/** The DefinitelyTyped counterpart: `react` → `@types/react`, `@scope/name` → `@types/scope__name`. */
 function typesCounterpart(pkg: string): string {
 	return pkg.startsWith("@") ? "@types/" + pkg.slice(1).replace("/", "__") : "@types/" + pkg;
 }
 
-/** The types entry a package declares — classic `types`/`typings`, then the modern `exports["."]` types condition. */
 function typesEntry(meta: Record<string, unknown>): string | undefined {
 	const classic = meta["types"] ?? meta["typings"];
 
@@ -166,15 +118,10 @@ function typesEntry(meta: Record<string, unknown>): string | undefined {
 	return pickTypes(typeof exportsField === "string" ? exportsField : (exportsField as Record<string, unknown> | undefined)?.["."]) ?? declarationBeside(meta["main"]);
 }
 
-/** The declaration TS looks for beside a JS file, for a package that names only its JS (vite's `exports: { ".":
- *  "./dist/node/index.js" }`): `.js` → `.d.ts`, `.mjs` → `.d.mts`, `.cjs` → `.d.cts`. */
 function declarationBeside(js: unknown): string | undefined {
 	return typeof js === "string" && (/\.[mc]?js$/u).test(js) ? js.replace(/\.([mc]?)js$/u, ".d.$1ts") : undefined;
 }
 
-/** The types entries of a package's named `exports` subpaths (`./jsx-runtime` → its `.d.ts`). TS resolves these
- *  without any textual import — e.g. the automatic JSX runtime implies `react/jsx-runtime` — so they're acquired
- *  up front rather than discovered by crawling. Wildcard patterns are skipped (they'd need a directory walk). */
 function subpathTypes(meta: Record<string, unknown>): string[] {
 	const exportsField = meta["exports"];
 
@@ -197,7 +144,6 @@ function subpathTypes(meta: Record<string, unknown>): string[] {
 	return out;
 }
 
-/** Pull a `.d.ts` path out of an exports subtree: `{types}`, `{types:{default}}`, or a condition's own `types`. */
 function pickTypes(node: unknown): string | undefined {
 	if (node === null || typeof node !== "object") {
 		return declarationBeside(node); // a string here is the JS entry: its types sit beside it, if anywhere
@@ -236,7 +182,6 @@ function pickTypes(node: unknown): string | undefined {
 	return undefined;
 }
 
-/** Flatten a `?meta` tree into the set of file paths it contains (package-relative, no leading slash). */
 function collectFiles(node: MetaNode, out: Set<string>): void {
 	for (const child of node.files ?? []) {
 		if (child.type === "directory" || child.files !== undefined) {
@@ -247,14 +192,11 @@ function collectFiles(node: MetaNode, out: Set<string>): void {
 	}
 }
 
-/** Module specifiers + triple-slash references in a `.d.ts` — the graph to crawl: relative paths, other packages, and
- *  `#` aliases from the package's own `imports` map. */
 export function references(dts: string): { "relative": string[]; "packages": string[]; "imports": string[] } {
 	const relative = new Set<string>();
 	const packages = new Set<string>();
 	const imports = new Set<string>();
 
-	// Comments out first (triple-slash references aside): @types/node's doc examples alone `require("Hello!")` dozens of times.
 	const code = dts.replace(/("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\/|(?<!\/)\/\/(?!\/\s*<reference)[^\n]*/gu, (_, string: string | undefined) => string ?? "");
 
 	for (const match of code.matchAll(new RegExp(SPECIFIER + String.raw`|\/\/\/\s*<reference\s+(path|types)\s*=\s*["']([^"']+)["']`, "gu"))) {
@@ -281,8 +223,6 @@ export function references(dts: string): { "relative": string[]; "packages": str
 	return { "relative": [...relative], "packages": [...packages], "imports": [...imports] };
 }
 
-/** A `#` alias through a package's `imports` map (vite's `"#types/*": "./types/*.d.ts"`) → the package-relative path
- *  it names, for resolveInMeta. */
 function resolveImport(spec: string, imports: unknown): string | undefined {
 	if (imports === null || typeof imports !== "object") {
 		return undefined;
@@ -302,11 +242,9 @@ function resolveImport(spec: string, imports: unknown): string | undefined {
 	return undefined;
 }
 
-/** Resolve a relative reference to an EXISTING package file (from `?meta`) — no blind probing, no escaping. */
 function resolveInMeta(fromSub: string, ref: string, files: Set<string>): string | undefined {
 	const dir = fromSub.includes("/") ? fromSub.slice(0, fromSub.lastIndexOf("/")) : "";
 	const joined = new URL(ref, "file:///" + (dir === "" ? "" : dir + "/")).pathname.slice(1); // package-relative, normalized (a root file's base is file:///, not file:////)
-	// A `.js` specifier in a declaration means the `.d.ts` beside it (as TS reads it) — the JS itself types nothing.
 	const beside = declarationBeside(joined);
 
 	for (const candidate of beside === undefined ? [joined, joined + ".d.ts", joined + ".d.mts", joined + ".d.cts", joined + "/index.d.ts"] : [beside]) {
@@ -318,15 +256,8 @@ function resolveInMeta(fromSub: string, ref: string, files: Set<string>): string
 	return undefined; // not a real file in this package (escaped, or JS-only) — don't chase it
 }
 
-/**
- * Wire runtime type acquisition onto the workbench's vscode API. Runs on the active editor now and on every
- * active-editor change / document edit (debounced). `has(absPath)` probes the workspace store (workspace-fs.ts)
- * so a file already present — from the seed, an edit, or a prior session (the store persists) — is never
- * re-fetched. Writes go through `vscode.workspace.fs` into that same store; ATA keeps no cache of its own.
- */
 export function installTypeAcquisition(api: typeof vscode, workspaceFolder: string, versions: Record<string, string>, has: (absPath: string) => boolean, log: Logger): void {
 	const nodeModules = workspaceFolder.replace(/\/$/u, "") + "/node_modules";
-	// Same-origin base the SW intercepts; it proxies /workspace/node_modules/* to the CDN (unversioned → latest).
 	const deployBase = location.pathname.slice(0, location.pathname.indexOf("/__vscode__/") + 1) || "/";
 
 	const fetchedPath = new Set<string>();          // node_modules-relative paths already handled this session
@@ -335,14 +266,9 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 	const importsOf = new Map<string, unknown>();      // pkg → its package.json `imports` map
 	const dependenciesOf = new Map<string, Set<string>>(); // pkg → what its package.json depends on
 
-	/** Absolute workspace path for a node_modules-relative path. */
 	const abs = (rel: string): string => `${nodeModules}/${rel}`;
-	// A store written before the crawl could read unpkg's listings holds packages with little more than their entry
-	// file, and a stored package is taken to be whole. Until this marker is written, re-crawl what's stored — local
-	// reads, plus the listing and any missing file from the network — so one session heals it.
 	const HEALED = ".ata-crawl-2";
 	const healing = !has(abs(HEALED));
-	/** Read a file already in the workspace store as text — no network. */
 	const readLocal = async (rel: string): Promise<string | undefined> => {
 		try {
 			return new TextDecoder().decode(await api.workspace.fs.readFile(api.Uri.file(abs(rel))));
@@ -351,8 +277,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 	};
 
-	// Fetch text for a node_modules-relative path (or `?meta` of a package) over the network. Consumes `budget`
-	// and pins the package's version when known. Callers skip this entirely for paths already in the store.
 	const cdnText = async (rel: string, meta: boolean, budget: { "n": number }): Promise<string | undefined> => {
 		if (budget.n <= 0) {
 			return undefined;
@@ -370,7 +294,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			search = version === undefined ? "" : "?v=" + version;
 		}
 
-		// (an npm alias, fetched as the package it is: node-modules-provider's `p`)
 		if (aliases[pkg] !== undefined) {
 			search += (search === "" ? "?" : "&") + "p=" + encodeURIComponent(aliases[pkg]);
 		}
@@ -391,7 +314,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 	let written = 0; // files ATA has added to the store this session (see the reload in `acquire`)
 
 	const write = async (rel: string, code: string): Promise<void> => {
-		// (a package the editor installs itself is never written over: a linked one's folder is the workspace's code)
 		if (installedLocally.has(packageRootOf(rel) ?? rel)) {
 			return;
 		}
@@ -453,8 +375,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 
 		const { relative, imports, ...referenced } = references(code);
-		// A DefinitelyTyped package declares every package it uses; any other bare name in it is ambient — @types/node's
-		// `"fs"`, `"worker_threads"`, … are its own `declare module`s, not packages to fetch.
 		const declared = pkg.startsWith("@types/") ? dependenciesOf.get(pkg) : undefined;
 		const packages = declared === undefined ? referenced.packages : referenced.packages.filter((dep) => declared.has(dep) || declared.has(typesCounterpart(dep)));
 		const targets = [
@@ -462,7 +382,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			...imports.map((spec) => resolveImport(spec, importsOf.get(pkg))).filter((path) => path !== undefined).map((path) => resolveInMeta("", path, files))
 		];
 
-		// Siblings in parallel: @types/node's index.d.ts alone references ~80 files, one round trip each.
 		await Promise.all([
 			...targets.filter((target) => target !== undefined).map((target) => acquireFile(pkg, target, files, budget)),
 			...packages.map((dep) => acquirePackage(dep, budget))
@@ -471,8 +390,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		return true;
 	};
 
-	/** A package subpath's types (`unenv/node/fs`): through its package's `exports`, a wildcard's too, else beside it (its
-	 *  `.d.ts`, or its folder's `index.d.ts`) — then what that file references, as acquireFile crawls. */
 	const acquireSubpath = async (pkg: string, sub: string, budget: { "n": number }): Promise<void> => {
 		if (installedLocally.has(pkg) || fetchedPath.has(`${pkg}#${sub}`)) {
 			return;
@@ -480,7 +397,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 		fetchedPath.add(`${pkg}#${sub}`);
 
-		// (its package first: the package.json read here is the pinned version's)
 		await acquirePackage(pkg, budget);
 
 		const pkgJsonRel = pkg + "/package.json";
@@ -492,7 +408,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		} catch { /* malformed package.json */ }
 
 		const exported = exportedTypes(exportsField, sub)?.replace(/^\.\//u, "");
-		// (its listing: what the file references relatively is found in it, and a guess that isn't there isn't fetched)
 		const files = await packageFiles(pkg, budget);
 
 		for (const candidate of exported === undefined ? [sub + ".d.ts", sub + "/index.d.ts"] : [exported]) {
@@ -502,7 +417,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 	};
 
-	/** Each package's acquiring this session, so what needs it done (a subpath of it) can wait for it. */
 	const acquiring = new Map<string, Promise<void>>();
 
 	async function acquirePackage(pkg: string, budget: { "n": number }): Promise<void> {
@@ -527,10 +441,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		seenPackage.add(pkg);
 
 		const pkgJsonRel = pkg + "/package.json";
-		// Present → acquired in a prior session (the store persists): read package.json LOCALLY, no network, and
-		// its whole subtree is already stored (so acquireFile below short-circuits and no ?meta fetch is needed). But one
-		// stored at another version than the one pinned now (fetched before the pins were known: the CDN's latest) is
-		// cleared and fetched again, rather than its files mixed with the pinned version's.
 		let stored = has(abs(pkgJsonRel));
 		let local = stored ? await readLocal(pkgJsonRel) : undefined;
 
@@ -544,7 +454,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		const pkgJson = stored ? local : await cdnText(pkgJsonRel, false, budget);
 
 		if (pkgJson === undefined) {
-			// Not published under this name → try the DefinitelyTyped counterpart (react → @types/react).
 			if (!pkg.startsWith("@types/")) {
 				await acquirePackage(typesCounterpart(pkg), budget);
 			}
@@ -571,14 +480,12 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 		entry = entry?.replace(/^\.\//u, "");
 
-		// The ?meta listing is only needed to crawl FRESH fetches; a present package's subtree is already stored.
 		const files = present ? new Set<string>() : await packageFiles(pkg, budget);
 
 		if (entry === undefined && (present ? has(abs(pkg + "/index.d.ts")) : files.has("index.d.ts"))) {
 			entry = "index.d.ts"; // no declared types but a conventional index.d.ts exists
 		}
 
-		// A declaration guessed beside a JS entry may not exist: with the listing in hand, don't fetch one that isn't there.
 		const listed = (sub: string): boolean => files.size === 0 || files.has(sub);
 
 		if (entry !== undefined && DECL.test(entry) && listed(entry)) {
@@ -592,8 +499,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 	}
 
-	/** A tsconfig file another config `extends`, fetched as-is (it's config, not a types entry), with the package.json
-	 *  module resolution reads beside it — then whatever IT extends. */
 	const acquireConfig = async (pkg: string, sub: string, budget: { "n": number }, depth = 0): Promise<void> => {
 		await acquireFile(pkg, "package.json", new Set(), budget);
 
@@ -606,14 +511,9 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 	};
 
-	// Runs in flight, and what the store held when the first of them started: the projects reload once, when the last
-	// settles. Boot starts three at once (tsconfig's configs, the manifests' types, the open file's imports); a reload
-	// each restarted the TS project load twice more, and the first typed hover waited behind all three.
 	let inFlight = 0;
 	let writtenAtStart = 0;
 
-	/** Acquire `packages` (and `configs`, tsconfigs to extend); the last run in flight reloads the TS projects if anything
-	 *  landed. */
 	const acquire = (what: Record<string, unknown>, packages: string[], configs: [string, string][] = [], subpaths: [string, string][] = []): void => {
 		const span = log.span("editor.workbench.ata.acquire", { ...what, "imports": packages.length });
 		const budget = { "n": MAX_NETWORK };
@@ -625,8 +525,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 		inFlight += 1;
 
-		// (once the workspace's versions are pinned — versions.ts's first sync — or a while on: fetched before, a package
-		// comes at the CDN's latest, and stays that version in the store)
 		void waitFor(["versions"], PINS_MS)
 			.then(async () => Promise.all([...packages.map((pkg) => acquirePackage(pkg, budget)), ...configs.map(([pkg, sub]) => acquireConfig(pkg, sub, budget)), ...subpaths.map(([pkg, sub]) => acquireSubpath(pkg, sub, budget))]))
 			.then(async () => {
@@ -644,11 +542,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			.finally(() => {
 				inFlight -= 1;
 
-				// tsserver may have resolved these imports (and failed) before the writes landed. Its failed-lookup
-				// watchers are registered asynchronously through the extension host, so on a cold boot the writes'
-				// change events can arrive before anyone is listening and the failure sticks. Reload the projects
-				// (NOT restartTsServer — killing the server mid-open orphans the "Analyzing…" progress) so resolution
-				// reruns against files that are now present. Nothing new written → nothing to pick up → no reload.
 				if (inFlight === 0 && written > writtenAtStart) {
 					void api.commands.executeCommand("typescript.reloadProjects");
 				}
@@ -668,9 +561,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		}
 	};
 
-	// What the PROJECT needs that no source file imports: every package.json's `@types/*` dependencies (the ambient
-	// `process` of @types/node), every tsconfig's `compilerOptions.types`, and the configs a tsconfig `extends` — a
-	// monorepo's packages' as well as the root's, hoisted into the root's node_modules.
 	const runProject = async (): Promise<void> => log.span("editor.workbench.ata.project", {}, async (span) => {
 		const root = workspaceFolder.replace(/\/$/u, "");
 		const read = async (uri: vscode.Uri): Promise<Record<string, unknown> | undefined> => {
@@ -681,7 +571,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 			}
 		};
 
-		// (both in one search: each is a walk of the whole tree)
 		const found = await api.workspace.findFiles(new api.RelativePattern(api.Uri.file(root), "**/{package.json,tsconfig.json}"), `{**/node_modules/**,${REFS_DIR}/**}`);
 		const named = async (name: string): Promise<(Record<string, unknown> | undefined)[]> => Promise.all(found.filter((uri) => uri.path.endsWith("/" + name)).map(read));
 		const [manifests, tsconfigs] = await Promise.all([named("package.json"), named("tsconfig.json")]);
@@ -694,7 +583,6 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 		const packages = [...new Set([...declared, ...listed])];
 		const configs = [...new Map(tsconfigs.flatMap((tsconfig) => extendsTargets(tsconfig)).map((target) => [target.join("/"), target])).values()];
 
-		// Apart, so the few config files land (and reload the project) without waiting on a big types crawl.
 		if (configs.length > 0) {
 			acquire({ "file": root + "/tsconfig.json" }, [], configs);
 		}
@@ -708,10 +596,8 @@ export function installTypeAcquisition(api: typeof vscode, workspaceFolder: stri
 
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let projectTimer: ReturnType<typeof setTimeout> | undefined;
-	// A repo load replaces the manifests: re-read them once it settles.
 	const manifests = api.workspace.createFileSystemWatcher(new api.RelativePattern(api.Uri.file(workspaceFolder), "**/{package.json,tsconfig.json}"));
 	const scheduleProject = (uri?: vscode.Uri): void => {
-		// (what this writes — a package's own package.json, in node_modules — isn't the project's)
 		if (uri?.path.includes("/node_modules/") === true) {
 			return;
 		}

@@ -1,18 +1,9 @@
-/**
- * Source maps, read: where a position in generated code (what the dev server serves) came from in the source (what's in
- * the workspace). Enough of the format (v3) to answer that — `sources` and `mappings`, the base64 VLQ segments — for the
- * inline maps the preview's dev server writes (`//# sourceMappingURL=data:…`), so a profile's hotspot lands on the line
- * you wrote rather than the line it compiled to.
- */
-
 export interface SourceMap { "sources": string[]; "sourceRoot"?: string; "mappings": string }
 
-/** A generated position's origin: its source file (as the map names it) and its 0-based line and column there. */
 export interface OriginalPosition { "source": string; "line": number; "column": number }
 
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-/** One segment's numbers: each a base64 VLQ (5 value bits a digit, continuation in the 6th, sign in the lowest bit). */
 function decodeSegment(segment: string): number[] {
 	const values: number[] = [];
 	let value = 0;
@@ -39,7 +30,6 @@ function decodeSegment(segment: string): number[] {
 	return values;
 }
 
-/** The map inlined in `code` (`//# sourceMappingURL=data:application/json;base64,…`), if there is one — the last. */
 export function inlineSourceMap(code: string): SourceMap | undefined {
 	const match = [...code.matchAll(/\/\/[#@] sourceMappingURL=data:application\/json;(?:charset=utf-8;)?base64,([A-Za-z0-9+/=]+)/gu)].at(-1);
 
@@ -56,13 +46,7 @@ export function inlineSourceMap(code: string): SourceMap | undefined {
 	}
 }
 
-/**
- * Where generated `line`:`column` (0-based) came from: the mapping at or before it on that line (the segment that
- * covers it), or — when the line's first mapping is after it — that first one. Undefined for a line with none.
- */
 export function originalPosition(map: SourceMap, line: number, column: number): OriginalPosition | undefined {
-	// Source, line and column are relative to the previous segment's across the whole map; the generated column, to the
-	// previous segment's on the same line. So decode up to `line`, carrying them.
 	let source = 0;
 	let sourceLine = 0;
 	let sourceColumn = 0;

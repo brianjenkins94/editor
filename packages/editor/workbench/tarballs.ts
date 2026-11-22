@@ -1,9 +1,3 @@
-/**
- * A package's published tarball, at the version the editor pins (versions.ts) — what a debug run's `require` installs
- * into its own memory when nothing in node_modules has the package (the bridge asks for it, for the debug worker:
- * `packages.tarball`). Nothing is written to the workspace: its filesystem is a fixed-size shared buffer, too small for
- * anyone's node_modules.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
 import type { VersionsFile } from "./versions";
@@ -13,13 +7,10 @@ import { serve } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import { versionsPath } from "@brianjenkins94/util/silo/layout";
 
-// Each fetch is a span: it crosses the network, and a debug run waits on it.
 const log = logger({ "source": "workbench" });
 
-/** Each tarball fetched this session, by URL (its bytes never change: a version is published once). */
 const fetched = new Map<string, Promise<Uint8Array>>();
 
-/** `name`@`version`'s published tarball, gzipped (fetched once a session). */
 export function tarball(name: string, version: string, resolved?: string): Promise<Uint8Array> {
 	const url = tarballUrl(name, version, resolved);
 
@@ -46,16 +37,8 @@ export function tarball(name: string, version: string, resolved?: string): Promi
 	return fetched.get(url)!;
 }
 
-/** The most of a package's dependencies prefetched at once (prefetchDependencies): a closure that big is a mistake's. */
 const PREFETCH_MAX = 64;
 
-/**
- * What `name` depends on, and theirs in turn (versions.json's `dependencies`), fetched alongside it and not waited on.
- * A debug run installs a package as its code first requires it, waiting on each — its worker blocks until the tarball
- * is in, so a package with a dozen dependencies was a dozen waits, one after another (2–10 s each on a busy page). Asked
- * for together, each is in or on its way when the run gets to it (each is kept once a page). A linked folder or a
- * platform build is nothing to fetch.
- */
 function prefetchDependencies(name: string, packages: VersionsFile["packages"]): void {
 	const seen = new Set([name]);
 	const queue = [...packages[name]?.dependencies ?? []];
@@ -74,8 +57,6 @@ function prefetchDependencies(name: string, packages: VersionsFile["packages"]):
 	}
 }
 
-/** A package a debug run's require found nothing of: its tarball, at the version the run read pinned (the bridge asks,
- *  for the run — the debug worker installs it in its own memory). From the lockfile's URL when it names that version. */
 export function installTarballs(vscode: typeof vscodeApi, hub: Hub): void {
 	const exists = async (path: string): Promise<boolean> => Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`/workspace/${path}`))).then(() => true, () => false);
 

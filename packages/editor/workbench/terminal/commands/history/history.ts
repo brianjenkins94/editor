@@ -1,4 +1,3 @@
-/** The terminal's `history`: what ↑ goes back through, as lines. A terminal's own, as a shell's is, and gone with it. */
 import type { CommandHost, Handler } from "../../catalog";
 
 export function create({ history }: CommandHost): Handler {

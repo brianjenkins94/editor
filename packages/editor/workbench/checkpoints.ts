@@ -1,16 +1,3 @@
-/**
- * Experiments that undo themselves: *Workspace: Save Checkpoint* notes the working tree as it stands against HEAD (every changed
- * file's text, and which files weren't there), and *Workspace: Restore Checkpoint…* puts every file changed since back as it was
- * then: a file made since deleted, one deleted since made again, the rest's text as it was. Agents' `workspace_checkpoint` and
- * `workspace_restore` do the same (`workspace.checkpoint`, `workspace.restore`), so they try a change, see what it breaks, and
- * undo it whole.
- *
- * What a checkpoint covers is what git sees (the git service's status): not what it ignores, and not `.silo/`, where the editor
- * keeps its records as it goes, as a restore would undo the editor's work, not yours. A restore is one WorkspaceEdit, so an open
- * editor shows it and undo takes it back, and every file it changes is saved. A commit since moves HEAD, and a restore would have
- * to undo the commit too, which is git's to do: it refuses, saying so. Checkpoints are this window's, the last few, until a
- * reload.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Observed } from "@brianjenkins94/observability";
 import type * as vscodeApi from "vscode";
@@ -20,16 +7,12 @@ import { saveDocument } from "./workspace-tools";
 
 const ROOT = "/workspace";
 
-/** The editor's own records, which it writes as it goes: not a change to put back. */
 const RECORDS = /^\.silo\//u;
 
-/** The checkpoints kept, at most (the oldest goes first). */
 const KEPT = 10;
 
-/** A checkpoint: HEAD then, and each file that differed from it, its text or null where there was none. */
 interface Checkpoint { "id": string; "label"?: string; "at": string; "head"?: string; "files": Map<string, string | null> }
 
-/** A checkpoint, as it's listed. */
 interface Listed { "id": string; "label"?: string; "at": string; "files": number }
 
 export function installCheckpoints(vscode: typeof vscodeApi, hub: Hub, git: GitReader, log: Observed["log"]): void {
@@ -66,7 +49,6 @@ export function installCheckpoints(vscode: typeof vscodeApi, hub: Hub, git: GitR
 			throw new Error(`HEAD has moved since checkpoint ${made.id} (${made.head?.slice(0, 8) ?? "no commit"} then, ${head?.slice(0, 8) ?? "none"} now): restoring would mean undoing a commit, which is git's to do`);
 		}
 
-		// What each file should be: as the checkpoint had it, or, one that matched HEAD then, HEAD's (none, where HEAD hasn't it).
 		const edit = new vscode.WorkspaceEdit();
 		const saving: vscodeApi.Uri[] = [];
 		const restored: string[] = [];
@@ -107,7 +89,6 @@ export function installCheckpoints(vscode: typeof vscodeApi, hub: Hub, git: GitR
 		return { "checkpoint": made.id, "restored": restored, "removed": removed };
 	});
 
-	/** A checkpoint as a person picks it: its name or time, and how many files it noted. */
 	const said = ({ label, at, files }: Listed): string => `${label ?? new Date(at).toLocaleTimeString()} (${String(files)} ${files === 1 ? "file" : "files"} changed then)`;
 
 	vscode.commands.registerCommand("editor.workspace.checkpoint", async (given?: unknown) => {

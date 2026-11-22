@@ -1,17 +1,3 @@
-/**
- * How a commit did in CI: GitHub Actions on the workspace's github.com origin, for HEAD unless asked of another.
- * - **In the status bar:** HEAD's runs, passed, failed (naming what failed) or going, asked again when HEAD changes and
- *   while a run goes; hidden with no github.com origin or no commit. Clicking it (or CI: How HEAD Did in CI) lists the
- *   runs, and the jobs of each that didn't pass with their failed steps; a job opens its log up to its first error, the
- *   tests it failed first; a run opens on GitHub.
- * - **As data:** `ci.status` { commit?, run?, job?, lines? }: a commit's runs (and the jobs of each that didn't pass), a
- *   run's jobs, or one job's log up to its first error (else its end), its `##[error]` lines and the tests its node:test
- *   report failed (lib's `nodeTestOutcomes`). Its reader: agents' `ci_status`.
- *
- * The shell asks GitHub (`github.actions`, shell/github.ts): through the API's proxy signed in with GitHub, otherwise with
- * no credential, a public repository's runs and no logs (and GitHub's 60 requests an hour, so it's asked only on a
- * change). What GitHub refused is said with why, as this sign-in sees it.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Observed } from "@brianjenkins94/observability";
 import type * as vscodeApi from "vscode";
@@ -19,16 +5,13 @@ import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { nodeTestOutcomes } from "@brianjenkins94/util/silo/outcomes";
 import * as engine from "./git-engine";
 
-/** The runs asked for a commit, at most; a log's lines shown by default, and at most; its error lines listed. */
 const RUNS = 20;
 const LINES = 200;
 const MOST_LINES = 2000;
 const ERRORS = 50;
 
-/** A run that passed (or had nothing to do): its jobs aren't asked. */
 const PASSED = new Set(["success", "skipped", "neutral"]);
 
-/** What the shell answers (`github.actions`): GitHub's, or its refusal. */
 export interface Asked {
 	"signedIn"?: boolean;
 	"refused"?: { "status": number; "message": string };
@@ -40,7 +23,6 @@ export interface Asked {
 
 export type Ask = (request: Record<string, unknown>) => Promise<Asked>;
 
-/** Why GitHub refused, for what this sign-in can see. */
 export function refusal(asked: Asked): string {
 	const message = asked.refused?.message ?? "GitHub refused";
 
@@ -59,7 +41,6 @@ function text(value: unknown): string | undefined {
 		: undefined;
 }
 
-/** A run as an agent reads it. */
 function runOf(run: Record<string, unknown>): Record<string, unknown> {
 	return {
 		"id": run.id,
@@ -75,7 +56,6 @@ function runOf(run: Record<string, unknown>): Record<string, unknown> {
 	};
 }
 
-/** A job as an agent reads it: the steps that failed, by name. */
 function jobOf(job: Record<string, unknown>): Record<string, unknown> {
 	const steps = Array.isArray(job.steps)
 		? job.steps as Record<string, unknown>[]
@@ -96,8 +76,6 @@ function jobOf(job: Record<string, unknown>): Record<string, unknown> {
 	};
 }
 
-/** A job's log read for an agent: `lines` of it (timestamps and colors off) up to its first error, else its last; its
- *  error lines; the tests it failed. */
 export function logOf(log: string, lines = LINES): { "lines": { "total": number; "shown": number }; "failedTests": string[]; "errors": string[]; "log": string } {
 	const all = log.replaceAll(/\u001B\[[\d;]*m/gu, "").split(/\r?\n/u).map((line) => line.replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z ?/u, ""));
 
@@ -105,7 +83,6 @@ export function logOf(log: string, lines = LINES): { "lines": { "total": number;
 		all.pop();
 	}
 
-	// (up to its first error, where the step that failed ends — after it is the runner's cleanup — or its last)
 	const first = all.findIndex((line) => line.startsWith("##[error]"));
 	const end = first === -1
 		? all.length
@@ -123,7 +100,6 @@ export function logOf(log: string, lines = LINES): { "lines": { "total": number;
 	};
 }
 
-/** `ci.status`'s answer, from what `ask` (the shell, or a test's) answers. */
 export async function ciStatus(ask: Ask, query: { "repository": string; "commit"?: string; "run"?: number; "job"?: number; "lines"?: number }): Promise<Record<string, unknown>> {
 	const { repository, commit, run, job, lines } = query;
 
@@ -171,7 +147,6 @@ export async function ciStatus(ask: Ask, query: { "repository": string; "commit"
 
 	const runs: Record<string, unknown>[] = [];
 
-	// (the jobs of a run that didn't pass, or hasn't finished: where to look next)
 	for (const each of asked.workflow_runs ?? []) {
 		const summary = runOf(each);
 
@@ -196,13 +171,10 @@ export async function ciStatus(ask: Ask, query: { "repository": string; "commit"
 	};
 }
 
-/** How often HEAD is looked at (the workspace's git, no network); and how often GitHub's asked while a run goes, or
- *  while a commit has none yet (just pushed), and for how long. */
 const LOOK_MS = 15_000;
 const GOING_MS = 60_000;
 const UNSEEN_TRIES = 5;
 
-/** What the status bar says of a commit's runs (from `github.actions`' answer). */
 export interface Summary {
 	"state": "passed" | "failed" | "going" | "none" | "refused";
 	"text": string;
@@ -216,7 +188,6 @@ export function summaryOf(asked: Asked, commit: string): Summary {
 		return { "state": "refused", "text": "$(warning) CI", "tooltip": `CI for ${short}: ${refusal(asked)}` };
 	}
 
-	// (each workflow's latest run: a rerun's the one that counts)
 	const latest = new Map<string, Record<string, unknown>>();
 
 	for (const run of asked.workflow_runs ?? []) {
@@ -249,7 +220,6 @@ export function summaryOf(asked: Asked, commit: string): Summary {
 		: { "state": "passed", "text": "$(check) CI", "tooltip": tooltip };
 }
 
-/** A job's log, read: the tests it failed and its errors first, then its lines up to its first error. */
 export function logText(name: string, repository: string, job: number, read: ReturnType<typeof logOf>): string {
 	return [
 		`${name}: ${repository}, job ${String(job)}`,
@@ -274,7 +244,6 @@ export function logText(name: string, repository: string, job: number, read: Ret
 	].join("\n");
 }
 
-/** What's asked of GitHub: a job's log, a run's jobs, or a commit's runs. */
 function opOf(request: Record<string, unknown>): string {
 	if (typeof request.job === "number") {
 		return "job";
@@ -285,7 +254,6 @@ function opOf(request: Record<string, unknown>): string {
 		: "runs";
 }
 
-/** A run's or a job's state, as a codicon. */
 function iconOf(state: { "status"?: string; "conclusion"?: string | null }): string {
 	if (state.status !== "completed") {
 		return "$(sync~spin)";
@@ -301,7 +269,6 @@ export function installCiStatus(vscode: typeof vscodeApi, hub: Hub, log: Observe
 	const ask: Ask = async (request) => log.span("editor.workbench.ci-status.ask", {
 		"op": opOf(request)
 	}, async () => shell.request("github.actions", request, { "timeoutMs": 60_000 }));
-	/** The workspace's repository on github.com (`owner/repo`), or undefined. */
 	const repositoryOf = async (): Promise<string | undefined> => /github\.com\/(.+)\.git$/u.exec(await engine.githubRemote() ?? "")?.[1];
 
 	serve(hub, "ci.status", async (args) => {
@@ -315,7 +282,6 @@ export function installCiStatus(vscode: typeof vscodeApi, hub: Hub, log: Observe
 		const wanted = typeof commit === "string" && commit.trim() !== ""
 			? commit.trim()
 			: await engine.headCommit();
-		// (a short sha, expanded from the history here: GitHub matches a run's whole sha)
 		const full = wanted === undefined || /^[\da-f]{40}$/u.test(wanted)
 			? wanted
 			: (await engine.history(500)).find(({ oid }) => oid.startsWith(wanted))?.oid;
@@ -343,9 +309,7 @@ export function installCiStatus(vscode: typeof vscodeApi, hub: Hub, log: Observe
 		});
 	});
 
-	// HEAD's runs in the status bar.
 	const item = vscode.window.createStatusBarItem("editor.ci", vscode.StatusBarAlignment.Left, -10);
-	/** The commit the item says, what it said, and when GitHub's to be asked again. */
 	let shown: { "commit": string; "summary": Summary; "tries": number; "next": number } | undefined;
 	let asking = false;
 
@@ -395,7 +359,6 @@ export function installCiStatus(vscode: typeof vscodeApi, hub: Hub, log: Observe
 				: undefined;
 			item.show();
 		} catch {
-			// (the shell not there yet, or GitHub not reached: looked at again later)
 		} finally {
 			asking = false;
 		}
@@ -405,14 +368,12 @@ export function installCiStatus(vscode: typeof vscodeApi, hub: Hub, log: Observe
 		void look();
 	}, LOOK_MS);
 
-	// A job's log, read (ci-log:/<owner>/<repo>/<job>/<name>.log).
 	const logs = new Map<string, string>();
 
 	vscode.workspace.registerTextDocumentContentProvider("ci-log", {
 		"provideTextDocumentContent": (uri) => logs.get(uri.toString()) ?? ""
 	});
 
-	// HEAD's, or `commit`'s (its whole sha: another view's, a commit picked).
 	vscode.commands.registerCommand("editor.ci.show", async (commit?: unknown) => {
 		const repository = await repositoryOf();
 		const head = repository === undefined || (typeof commit === "string" && /^[\da-f]{40}$/u.test(commit))
@@ -437,7 +398,6 @@ export function installCiStatus(vscode: typeof vscodeApi, hub: Hub, log: Observe
 		void look(true);
 
 		const status = await ciStatus(ask, { "repository": repository, "commit": head });
-		// (each workflow's latest run, as the status bar counts them: a rerun's the one)
 		const runs = ((status.runs ?? []) as { "workflow"?: string }[]).filter((run, index, all) => all.findIndex((other) => other.workflow === run.workflow) === index) as { "workflow"?: string; "status"?: string; "conclusion"?: string | null; "url"?: string; "jobs"?: { "id": number; "name": string; "conclusion"?: string | null; "status"?: string; "failedSteps"?: string[] }[] | string }[];
 		const icon = iconOf;
 

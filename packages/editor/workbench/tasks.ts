@@ -1,11 +1,3 @@
-/**
- * Every package.json script is a task (RUNNING.md, *The model*): in VS Code's Run Task and in the shell's Run menu
- * (shell/run-menu.tsx), each run by the workspace's terminal in a terminal of its own, ending when the script does and with its
- * exit code. `npm run` there is what runs it, so a dev server's a service like any other (workbench/runs.ts).
- *
- * `tasks.list`: each script, and whether it's up already. `tasks.run`: a script, unless it's a service that's up: then its
- * preview's shown, rather than a second copy started. `tasks.runFile`: the file in sight (extensions/tsval/run-file.ts).
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
@@ -13,7 +5,6 @@ import type { NodeRunner } from "./node-runner";
 import { serve } from "@brianjenkins94/hub";
 import { createBashProcess } from "./terminal";
 
-/** Where the terminal says what it's running, and how that ended (terminal/integration.ts). */
 const EXECUTED = "\u001B]633;C\u0007";
 const FINISHED = /\u001B\]633;D;(?<code>\d+)\u0007/u;
 
@@ -41,10 +32,8 @@ export function installTasks(vscode: typeof vscodeApi, runner: NodeRunner, hub: 
 			: `${relative}: ${name}`;
 	};
 
-	// Its service: asked for by its name, or by what it runs (`vite`, typed in a terminal, for a script that's `vite`).
 	const serviceOf = ({ name, folder, line }: Script): number | undefined => runner.runs.runningService((run) => run.cwd === folder && (run.title === `npm run ${name}` || run.title === line.split(" ")[0]))?.port;
 
-	/** A script, as a task: the workspace's terminal running it, what it says shown from where it starts, and over when it is. */
 	const taskOf = (script: Script): vscodeApi.Task => new vscode.Task({ "type": "run", "script": script.name, "folder": script.folder }, vscode.TaskScope.Workspace, labelOf(script), "run", new vscode.CustomExecution(async () => {
 		const written = new vscode.EventEmitter<string>();
 		const closed = new vscode.EventEmitter<number>();

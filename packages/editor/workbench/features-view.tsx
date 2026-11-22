@@ -1,19 +1,4 @@
 /** @jsxImportSource preact */
-/**
- * Features and tests (packages/silo/README.md, *Tests by feature, in your face*), a table in the panel: each feature of the
- * ledger, with its test files under it, each opening to its tests (each with its own effects). A feature's row says how
- * much of its own code (what its `paths` hold) the tests here ran, by statements, and which of its files none loaded
- * (test-runs.ts, `tests.coverage`). A file's row says what kind
- * of test it is, whether it can't run beside the others and why, the effects its last run had, how much code it reaches and
- * how much of that only it does, when it last passed and failed, how long it typically takes (and which of its tests last
- * ran slower than they typically do, by more than `run.tests.slowerBy`), whether code it ran has changed since (the lines it ran: test-runs.ts `selectionOf`), how it
- * has come out in CI (its tests' last verdicts, how many runs in a row, which flaked), and a button that runs it; and above
- * it, what's changed since the last commit that no test here checks. Tests are meant to run at once, so only one that
- * can't says anything in that column.
- *
- * What it says comes from the ledger and the runs kept here (test-runs.ts, `tests.history`); a file not run here says so.
- * CI's column is GitHub's runs of the branch (ci-outcomes.ts, `ci.outcomes`), read as the view opens.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type { Ledger, LedgerEntry } from "@brianjenkins94/util/silo/ledger";
@@ -42,43 +27,27 @@ import "theme/components/spinner";
 const ROOT = "/workspace";
 
 
-/** What a run answers (test-runs.ts): a question, what it's still doing, or each file's tests. */
 interface Answer { "run"?: string; "running"?: string; "ask"?: { "message": string; "key": string } }
 
-/** What the table draws: the ledger's features, each file's kind, and the runs kept. */
 interface Model {
 	"features": [string, LedgerEntry][];
 	"files": Map<string, string[]>;
 	"kinds": Map<string, Kind>;
 	"history": RunRecord[];
-	/** What each test file reaches, in lines of code, and how many of them no other file does. */
 	"reach": Map<string, { "lines": number; "only": number }>;
-	/** The test files whose code has changed since they last ran. */
 	"touched": Set<string>;
-	/** The changes since the last commit that no test here checks (code no test runs, lines no test ran), and those every
-	 *  test runs under (config): what selecting by reach can't say. */
 	"unchecked": Record<"not run" | "lines not run" | "config", string[]>;
-	/** How much slower than typical a passing test may run before it's said to be (setting `run.tests.slowerBy`). */
 	"slowerBy": number;
-	/** The titles each test file declares, to join CI's tests to their files by. */
 	"titles": Map<string, Set<string | RegExp>>;
-	/** How each file's tests have come out in CI (`ci.outcomes`), how many runs that's over, or why it couldn't be read. */
 	"ci": { "byFile": Map<string, TestStanding[]>; "runs": number; "refused"?: string };
-	/** How much of each feature's own code the tests here ran: its statements, how many ran, and its code files no test's
-	 *  last run loaded. */
 	"coverage": Map<string, FeatureCoverage>;
-	/** What each feature's own code can do, and what its tests' last runs did. */
 	"capabilities": Map<string, FeatureCapabilities>;
 }
 
-/** What a feature's own code can do (each file's text, as lib's `detect` reads it: a capability, never what it reaches),
- *  and what the last run of each of its test files did (its effects that reached the world, or were given back). */
 interface FeatureCapabilities { "can": string[]; "used": string[] }
 
-/** Each feature's capabilities: its code files' (by the ledger's owners, not a test's own), and its tests' last runs'. */
 function capabilitiesByFeature(ledger: Ledger, canOf: Map<string, string[]>, history: RunRecord[], files: Map<string, string[]>): Map<string, FeatureCapabilities> {
 	const byFeature = new Map<string, FeatureCapabilities>();
-	// (history is latest last: each file's last run is the last kept)
 	const last = new Map(history.map((run) => [run.file, run]));
 
 	for (const [file, can] of canOf) {
@@ -101,7 +70,6 @@ function capabilitiesByFeature(ledger: Ledger, canOf: Map<string, string[]>, his
 	return byFeature;
 }
 
-/** A feature's capabilities, said: what its code can do, and what of that no last run of its tests did. */
 function Capabilities({ of }: { "of": FeatureCapabilities | undefined }): JSX.Element | null {
 	if (of === undefined || of.can.length === 0) {
 		return null;
@@ -117,12 +85,8 @@ function Capabilities({ of }: { "of": FeatureCapabilities | undefined }): JSX.El
 	);
 }
 
-/** How much of a feature's own code the tests here ran (`coverageByFeature`), and which of its files other features'
- *  tests run, with those features (its code shared, whatever the ledger's one owner says). */
 interface FeatureCoverage { "statements": number; "ran": number; "unloaded": string[]; "shared": Map<string, string[]> }
 
-/** Each feature's coverage: the statements of its code files (what its `paths` hold, by the ledger's owners) that the
- *  tests here ran, of those their runs loaded, and the files none loaded. */
 function coverageByFeature(ledger: Ledger, code: string[], ofFile: Record<string, { "statements": number; "ran": number; "by"?: string[] }>, featuresOf: Map<string, string[]>): Map<string, FeatureCoverage> {
 	const byFeature = new Map<string, FeatureCoverage>();
 
@@ -151,12 +115,10 @@ function coverageByFeature(ledger: Ledger, code: string[], ofFile: Record<string
 	return byFeature;
 }
 
-/** The features each test file is declared by. */
 const featuresOfTests = (files: Map<string, string[]>): Map<string, string[]> => new Map([
 	...Map.groupBy([...files].flatMap(([feature, tests]) => tests.map((test) => [test, feature] as const)), ([test]) => test)
 ].map(([test, pairs]) => [test, pairs.map(([, feature]) => feature)]));
 
-/** A feature's coverage, said: what share of its loaded code ran, and the files no test loads (named in its title). */
 function Covered({ coverage }: { "coverage": FeatureCoverage | undefined }): JSX.Element | null {
 	if (coverage === undefined) {
 		return null;
@@ -182,19 +144,14 @@ const KIND_TITLE: Record<Kind, string> = {
 
 const median = (values: number[]): number | undefined => values.toSorted((one, other) => one - other)[Math.floor(values.length / 2)];
 
-/** A duration, as someone reads one. */
 const lasted = (ms: number | undefined): string => (ms === undefined ? "" : ms < 1000 ? `${String(Math.round(ms))} ms` : `${(ms / 1000).toFixed(1)} s`);
 
-/** Whether a run came out well: a file that dies before its tests have run has no failed test, and has failed. */
 const passed = (run: RunRecord): boolean => run.exitCode === 0 && run.tests.length > 0 && run.tests.every((test) => test.outcome === "pass");
 
-/** The run in `runs` (latest last) that came out `well` or didn't. */
 const lastWhere = (runs: RunRecord[], well: boolean): RunRecord | undefined => runs.findLast((run) => passed(run) === well);
 
-/** Code a test's reach counts: not a test's own, nor what's installed. */
 const isCode = (path: string): boolean => !path.includes("node_modules/") && !isTestFile(path);
 
-/** What each test file reaches, from what each test ran. */
 function reachOf(reach: Record<string, Record<string, [number, number][]>>): Model["reach"] {
 	const byFile = new Map<string, Set<string>>();
 	const reachers = new Map<string, Set<string>>();
@@ -220,8 +177,6 @@ function reachOf(reach: Record<string, Record<string, [number, number][]>>): Mod
 	return new Map([...byFile].map(([file, lines]) => [file, { "lines": lines.size, "only": [...lines].filter((key) => reachers.get(key)?.size === 1).length }]));
 }
 
-/** Why `file` can't run beside the others, if it can't: what stops it, or what it touches that another does too (every
- *  contention in its title, by the tests that did it). */
 function blockOf(kind: Kind, contentions: Contention[] | undefined): { "said": string; "title"?: string } | undefined {
 	if (kind === "browser suite") {
 		return { "said": "started from outside" };
@@ -238,21 +193,16 @@ function blockOf(kind: Kind, contentions: Contention[] | undefined): { "said": s
 			};
 }
 
-/** A test file's name, without its folders. */
 const nameOf = (file: string): string => file.split("/").at(-1) ?? file;
 
-/** A contention said whole: which test, what it does, and which test of which file does what too. */
 const saidOf = (contention: Contention): string => `${contention.test === undefined ? "the file" : `"${contention.test.split(" › ").slice(1).join(" › ")}"`} ${contention.touches} ${contention.resource}; ${contention.otherTest === undefined ? nameOf(contention.other) : `${nameOf(contention.other)}'s "${contention.otherTest.split(" › ").slice(1).join(" › ")}"`} ${contention.otherTouches} it`;
 
-/** An effect as runs of a test compare: not what's different every time, a temporary folder's name or an address's query. */
 const shapeOf = ({ capability, resource }: RunRecord["effects"][number]): string => `${capability} ${resource.replace(/^(\/tmp\/[^/]*?)-?[A-Za-z0-9]{6}(?=\/|$)/u, "$1*").replace(/\?.*$/u, "")}`;
 
-/** Effects by kind, and against `before` (a run's, or a test's in the run before): what's new, and what's stopped. */
 function Effects({ effects, before }: { "effects": RunRecord["effects"] | undefined; "before": RunRecord["effects"] | undefined }): JSX.Element | null {
 	const byKind = Map.groupBy(effects ?? [], (effect) => effect.capability);
 	const was = new Set(before?.map(shapeOf));
 	const now = new Set(effects?.map(shapeOf));
-	// (what it uses now that it didn't, and what it's stopped: how its reach of the world changes, run to run)
 	const grew = before === undefined ? [] : [...now].filter((shape) => !was.has(shape));
 	const shrank = before === undefined ? [] : [...was].filter((shape) => !now.has(shape));
 
@@ -269,15 +219,12 @@ function Effects({ effects, before }: { "effects": RunRecord["effects"] | undefi
 	);
 }
 
-/** How a test ran slower than it typically does, as a badge, saying by what. */
 function SlowerBadge({ slower }: { "slower": Slower }): JSX.Element {
 	const typical = slower.measure === "statements" ? `${String(slower.typical)} statements` : lasted(slower.typical);
 
 	return <wa-badge variant="warning" appearance="outlined" title={`Its last run took ${String(slower.by)}% more ${slower.measure === "statements" ? "statements" : "time"} than its typical ${typical}.`}>{`${String(slower.by)}% slower`}</wa-badge>;
 }
 
-/** How a test file's tests have come out in CI: any failing, else how many runs in a row they've passed; and which flaked.
- *  Each test's standing in its title. */
 function Ci({ standings }: { "standings": TestStanding[] | undefined }): JSX.Element | null {
 	if (standings === undefined || standings.length === 0) {
 		return null;
@@ -305,10 +252,8 @@ function When({ run }: { "run": RunRecord | undefined }): JSX.Element | null {
 	return run === undefined ? null : <wa-relative-time date={run.at} title={run.at} />;
 }
 
-/** How many changed files to name before saying how many more. */
 const NAMED = 3;
 
-/** Changes selecting by reach can't vouch for, named (the first few; all of them in its title). */
 function Unchecked({ label, title, paths }: { "label": string; "title": string; "paths": string[] }): JSX.Element | null {
 	if (paths.length === 0) {
 		return null;
@@ -322,11 +267,8 @@ function Unchecked({ label, title, paths }: { "label": string; "title": string; 
 function Table({ model, running, onRun, onOpen }: { "model": Model; "running": Set<string>; "onRun": (files: string[]) => void; "onOpen": (file: string) => void }): JSX.Element {
 	const [all, setAll] = useState(false);
 	const [open, setOpen] = useState<Set<string>>(new Set());
-	// (a feature by its name or what it's for, or a test file by its path: a feature found by itself shows all its files,
-	// one found by a file only those that match)
 	const [filter, setFilter] = useState("");
 	const runsOf = Map.groupBy(model.history, (run) => run.file);
-	// (what each file touches that another does too, over every run kept)
 	const contentions = contentionsOf(model.history);
 
 	const runnable = (file: string): boolean => {
@@ -387,7 +329,6 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 								const kind = model.kinds.get(file) ?? "not a test";
 								const block = blockOf(kind, contentions.get(file));
 								const typical = median(runs.filter(passed).map((run) => run.ms));
-								// (each test of its last run against its runs before)
 								const slower = new Map((last?.tests ?? []).flatMap((test) => {
 									const found = test.outcome === "pass" ? slowerOf(runs.slice(0, -1), test.id, test, model.slowerBy) : undefined;
 
@@ -467,7 +408,6 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 
 	const textOf = async (uri: vscodeApi.Uri): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
 
-	/** The test files a ledger's `tests` entry is: itself, or what's in the folder it names. */
 	const filesIn = async (entry: string): Promise<string[]> => {
 		const uri = vscode.Uri.file(`${ROOT}/${entry}`);
 		const type = await Promise.resolve(vscode.workspace.fs.stat(uri)).then((stat) => stat.type, () => undefined);
@@ -479,7 +419,6 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		return (await vscode.workspace.findFiles(new vscode.RelativePattern(uri, "**/*"), "**/node_modules/**")).map((each) => vscode.workspace.asRelativePath(each, false)).filter((path) => isTestFile(path)).toSorted((one, other) => one.localeCompare(other));
 	};
 
-	/** CI's standings as read last, each joined to the test file it's of. */
 	let standings: TestStanding[] = [];
 	const joined = (ofCi: TestStanding[]): Map<string, TestStanding[]> => {
 		const byFile = new Map<string, TestStanding[]>();
@@ -495,7 +434,6 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		return byFile;
 	};
 
-	/** The ledger, what kind each of its tests is, and the runs kept, read again. */
 	const read = async (): Promise<void> => log.span("editor.workbench.features-view.read", { "path": ledgerPath() }, async (span) => {
 		const ledger = parseLedger(await textOf(ledgerUri));
 		const features = Object.entries(ledger).toSorted(([one], [other]) => one.localeCompare(other));
@@ -506,7 +444,6 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 
 		const { reach } = await rpc.request("tests.reach", {}, { "timeoutMs": 60_000 }) as { "reach": Record<string, Record<string, [number, number][]>> };
 		const { coverage } = await rpc.request("tests.coverage", {}, { "timeoutMs": 60_000 }) as { "coverage": Record<string, { "statements": number; "ran": number; "by"?: string[] }> };
-		// (the workspace's code a feature could own: not a test, nothing installed or built)
 		const code = (await vscode.workspace.findFiles("**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}", "**/node_modules/**")).map((uri) => vscode.workspace.asRelativePath(uri, false)).filter((path) => isOwnedCode(path) && !isTestFile(path));
 		const { "capabilities": canOf, "read": capabilitiesRead } = await capabilitiesOf(vscode, ROOT, code);
 		const { "tests": affected, why } = await rpc.request("tests.affected", { "glance": true }, { "timeoutMs": 60_000 }) as { "tests": { "file": string; "stale": boolean }[]; "why": { "path": string; "why": Why }[] };
@@ -518,7 +455,6 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		redraw();
 	});
 
-	/** How each test has come out in CI, read again (GitHub's: as the view opens, not on every save). */
 	const readCi = async (): Promise<void> => {
 		const answer = await rpc.request("ci.outcomes", {}, { "timeoutMs": 300_000, "waitForResponderMs": 60_000 }).catch((error: unknown) => ({ "standings": [], "runs": 0, "refused": error instanceof Error ? error.message : String(error) })) as { "standings": TestStanding[]; "runs": number; "refused"?: string };
 
@@ -527,7 +463,6 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		redraw();
 	};
 
-	/** `files` run in the debugger; a capability stop is put to the person, and on their yes the run goes on from there. */
 	const run = async (files: string[]): Promise<void> => log.span("editor.workbench.features-view.run", { "count": files.length }, async (span) => {
 		for (const file of files) {
 			running.add(file);
@@ -545,7 +480,6 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 					}
 
 					approved.push(answer.ask.key);
-					// (the run goes on from the file that asked)
 					answer = await rpc.request("tests.run", { "run": answer.run, "approved": approved }, { "timeoutMs": 120_000 }) as Answer;
 				} else if (answer.running === undefined) {
 					break;
@@ -570,7 +504,6 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 			const again = (): void => { drawn((count) => count + 1); };
 
 			redraws.add(again);
-			// (what was read between its first draw and this)
 			again();
 
 			return () => { redraws.delete(again); };
@@ -597,17 +530,14 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		void readCi();
 	});
 
-	// (a save may have touched a test's code)
 	vscode.workspace.onDidSaveTextDocument(() => {
 		void read();
 	});
 
-	// (a run anyone started: an agent's, or one of the table's own)
 	hub.subscribe("tests.kept", () => {
 		void read();
 	});
 
-	// (how much slower a test may run, changed)
 	vscode.workspace.onDidChangeConfiguration((event) => {
 		if (event.affectsConfiguration("run.tests.slowerBy")) {
 			void read();

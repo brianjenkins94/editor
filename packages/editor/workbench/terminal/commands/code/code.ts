@@ -1,13 +1,8 @@
-/**
- * The terminal's `code`: a file into the editor from a prompt, as VS Code's own does. A file that isn't there opens unsaved at that
- * path, as `code new.ts` does; a folder is shown in the Explorer, as the window it would open already has it.
- */
 import type { ResolvedCommandContext } from "just-bash/browser";
 import type { CommandHost, CommandResult, Handler } from "../../catalog";
 
 const TARGET = /^(?<path>.*?)(?::(?<line>\d+)(?::(?<column>\d+))?)?$/u;
 
-/** `paths`, opened where they are from `ctx.cwd`; what couldn't be is said. */
 export async function openPaths(api: CommandHost["api"], paths: string[], ctx: ResolvedCommandContext, goto = false): Promise<CommandResult> {
 	const errors: string[] = [];
 

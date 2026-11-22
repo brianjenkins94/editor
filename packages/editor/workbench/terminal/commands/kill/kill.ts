@@ -1,8 +1,3 @@
-/**
- * The terminal's `kill`: stop runs (runs.ts) by their id, or any unique beginning of it, as `ps` shows them — the same
- * stop as the running list's and the debug toolbar's. `-9` is accepted and means nothing more: a run is stopped,
- * however it's asked.
- */
 import type { CommandHost, Handler } from "../../catalog";
 
 export function create({ runner }: CommandHost): Handler {

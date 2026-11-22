@@ -1,26 +1,14 @@
-/**
- * The pane's native face (ARCHITECTURE.md, *Extension points* 4, natively): a pane view's content — the same data pane-views.ts draws
- * beside the code, placed the same way — drawn with VS Code's own contribution points instead, for when there's no
- * pane (a desktop build) or it's hidden (`editor.pane.toggleNative`): a row as an inlay hint at the end of its line
- * (its label and latest value; every cell on hover), prose as a CodeLens (its first line) and a hover (all of it),
- * buttons as CodeLenses running their commands (a menu's ways in a quick pick), a one-line input as a CodeLens asking
- * for it, a card's label as a CodeLens above its first line, and a gutter mark as an overview-ruler mark (its title on
- * hover). Public API only.
- */
 import type { PaneAction, PaneCommand, PaneGroup, PaneItem } from "@brianjenkins94/editor-api/pane";
 import type * as vscodeApi from "vscode";
 
-/** A file's content, placed: each item, card and mark on the lines it's on now (0-based). */
 export interface NativeDrawing {
 	"items": { "item": PaneItem; "fromLine": number; "toLine": number }[];
 	"groups": { "group": PaneGroup; "fromLine": number; "toLine": number }[];
 	"marks": { "line": number; "kind": string; "title"?: string }[];
 }
 
-/** How a mark is shown in the overview ruler, by its kind. */
 const MARK_COLORS: Record<string, string> = { "ran": "#2ea04380", "partial": "#d29922a0", "missed": "#f85149a0", "crashed": "#f85149", "stopped": "#d29922", "rule": "#a371f7", "rule-uncertain": "#a371f780" };
 
-/** A markdown text's first line, plain: what a CodeLens says of it. */
 function plain(markdown: string): string {
 	const first = markdown.split("\n").find((line) => line.trim() !== "") ?? "";
 
@@ -67,7 +55,6 @@ export function installNativeFace(vscode: typeof vscodeApi): { "show": (uri: str
 			lensesChanged,
 			...decorations.values(),
 			vscode.window.onDidChangeVisibleTextEditors((editors) => { editors.forEach(decorate); }),
-			// A row: its label and latest value at the end of its line.
 			vscode.languages.registerInlayHintsProvider({ "scheme": "file" }, {
 				"onDidChangeInlayHints": hintsChanged.event,
 				"provideInlayHints": (document, range) => (drawings.get(document.uri.toString())?.items ?? []).flatMap(({ item, fromLine }) => {
@@ -85,7 +72,6 @@ export function installNativeFace(vscode: typeof vscodeApi): { "show": (uri: str
 					return [hint];
 				})
 			}),
-			// Prose's first line, a card's label, each button and input: above their lines.
 			vscode.languages.registerCodeLensProvider({ "scheme": "file" }, {
 				"onDidChangeCodeLenses": lensesChanged.event,
 				"provideCodeLenses": (document) => {
@@ -105,7 +91,6 @@ export function installNativeFace(vscode: typeof vscodeApi): { "show": (uri: str
 					].filter((each) => each.range.start.line < document.lineCount);
 				}
 			}),
-			// Prose, whole, on its lines.
 			vscode.languages.registerHoverProvider({ "scheme": "file" }, {
 				"provideHover": (document, position) => {
 					const texts = (drawings.get(document.uri.toString())?.items ?? []).filter(({ item, fromLine, toLine }) => "markdown" in item.content && fromLine <= position.line && position.line <= toLine).map(({ item }) => ("markdown" in item.content ? item.content.markdown : ""));
@@ -113,7 +98,6 @@ export function installNativeFace(vscode: typeof vscodeApi): { "show": (uri: str
 					return texts.length === 0 ? undefined : new vscode.Hover(texts.map((text) => new vscode.MarkdownString(text)));
 				}
 			}),
-			// A menu's ways (this call, this run, always), picked.
 			vscode.commands.registerCommand("editor.pane.native.more", async (ways: PaneCommand[]) => {
 				const picked = await vscode.window.showQuickPick(ways.filter((way) => way.disabled !== true).map((way) => ({ "label": way.title, ...way.tooltip === undefined ? {} : { "detail": way.tooltip }, "way": way })));
 
@@ -121,7 +105,6 @@ export function installNativeFace(vscode: typeof vscodeApi): { "show": (uri: str
 					await vscode.commands.executeCommand(picked.way.command, ...picked.way.arguments ?? []);
 				}
 			}),
-			// A one-line input, asked for.
 			vscode.commands.registerCommand("editor.pane.native.input", async (input: { "value": string; "placeholder"?: string; "submit": PaneCommand }) => {
 				const value = await vscode.window.showInputBox({ "value": input.value, ...input.placeholder === undefined ? {} : { "placeHolder": input.placeholder } });
 

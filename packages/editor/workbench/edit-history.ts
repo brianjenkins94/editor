@@ -1,22 +1,3 @@
-/**
- * Edit-history — the FINE-GRAINED local tier of the two-tier history (Automerge = live edits, git = published commits).
- * Git only ever sees the saved snapshot; this records the sequence of edit-bursts BETWEEN commits into a per-file
- * Automerge doc, so the changes pane can show "the changes you introduced" as small, attributable chunks instead of
- * one monolithic diff.
- *
- * CAPTURE (this module, workbench realm): coalesce keystrokes into idle-debounced BURSTS; each burst is one
- * `Automerge.change` on a doc holding the file text. Lossless + append-only — grouping into meaningful units happens
- * at DISPLAY time (by BABLR node), so the capture format never has to commit to a grouping. Persisted per file as the
- * `Automerge.save` binary in silo's local/ (`.silo/local/edit-history/`, its own IndexedDB-backed mount — on this
- * machine, never committed), so it survives reload; the synced version is the Keyhive milestone. Automerge (WASM) is
- * lazily imported so its weight never lands on cold start.
- *
- * BASELINE ("since the last commit"): the doc is seeded with the HEAD text as its first change, so the most recent
- * history entry whose snapshot equals current HEAD marks the last commit — chunks are everything after it. This
- * self-corrects on commit (the committed text becomes the latest snapshot, so the list empties) with nothing to store.
- * And a file whose saved history ends at HEAD — nothing since the last commit — starts afresh: what came before it is
- * never shown, and silo's local/ is kept in memory, so it isn't kept.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
@@ -31,7 +12,6 @@ const DIR = "/workspace";
 const CLASSIFIABLE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 const BURST_IDLE_MS = 600;
 
-// Lazily loaded Automerge (base64-inlined WASM build — see build.ts alias). Typed loosely: we use a small slice.
 interface AutomergeDoc { "text": string }
 interface AutomergeApi {
 	"init": () => AutomergeDoc;
@@ -50,10 +30,8 @@ async function automerge(): Promise<AutomergeApi> {
 	return amPromise;
 }
 
-/** Where each file's history is kept. */
 const HISTORY = `${DIR}/${LOCAL_DIR}/edit-history`;
 
-/** A file's saved history, or null if none has been recorded. */
 async function readHistory(path: string): Promise<Uint8Array | null> {
 	try {
 		const data = await fs.promises.readFile(`${HISTORY}/${encodeURIComponent(path)}.bin`);
@@ -69,7 +47,6 @@ async function writeHistory(path: string, bytes: Uint8Array): Promise<void> {
 	await fs.promises.writeFile(HISTORY + "/" + encodeURIComponent(path) + ".bin", bytes);
 }
 
-/** Repo-relative path for a classifiable workspace file, else undefined. */
 function repoRelative(uri: vscodeApi.Uri): string | undefined {
 	if (uri.scheme !== "file" || !uri.path.startsWith(DIR + "/")) {
 		return undefined;
@@ -83,11 +60,9 @@ function repoRelative(uri: vscodeApi.Uri): string | undefined {
 }
 
 export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Bablr, log: Logger): void {
-	// Per-file in-memory doc + its pending-flush timer. The doc is the source of truth; the binary on disk is a mirror.
 	const docs = new Map<string, AutomergeDoc>();
 	const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
-	// Get (or lazily create) the Automerge doc for a path: load the persisted binary, else seed from HEAD text.
 	const load = async (path: string): Promise<AutomergeDoc> => {
 		const AM = await automerge();
 		const saved = await readHistory(path);
@@ -96,7 +71,6 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 			? undefined
 			: AM.load(saved);
 
-		// Nothing since the last commit: what came before it is never shown, so the history starts afresh at HEAD.
 		if (doc === undefined || doc.text === head) {
 			doc = AM.change(AM.init(), "seed", (draft) => {
 				draft.text = head;
@@ -108,8 +82,6 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 		return doc;
 	};
 
-	// (loaded once: two asking at once, before it's in `docs`, would each start one, and the later would replace the
-	// earlier, its bursts with it)
 	const loading = new Map<string, Promise<AutomergeDoc>>();
 	const docFor = async (path: string): Promise<AutomergeDoc> => {
 		const existing = docs.get(path);
@@ -129,7 +101,6 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 		}
 	};
 
-	// Flush the current editor text as ONE burst (no-op when the text is unchanged from the doc's latest snapshot).
 	const flushNow = async (path: string, text: string): Promise<void> => {
 		const AM = await automerge();
 		const doc = await docFor(path);
@@ -154,8 +125,6 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 		}
 	};
 
-	// A file's bursts are kept one after another: one flushed while the last still waits (on Automerge loading, the first
-	// time) would start from the same doc, and the later would replace the earlier.
 	const flushing = new Map<string, Promise<void>>();
 	const flush = async (path: string, text: string): Promise<void> => {
 		const next = (flushing.get(path) ?? Promise.resolve()).then(async () => flushNow(path, text));
@@ -165,7 +134,6 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 		return next;
 	};
 
-	/** Each file's burst still being typed: the text it's at, flushed once the typing pauses. */
 	const typing = new Map<string, string>();
 	const schedule = (path: string, text: string): void => {
 		const pending = timers.get(path);
@@ -195,8 +163,6 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 		}
 	});
 
-	// A save starting: what was typed is a burst of its own, before anything the save itself changes (ESLint's fixes), so
-	// the two are separate steps in your edits.
 	vscode.workspace.onWillSaveTextDocument((event) => {
 		const path = repoRelative(event.document.uri);
 		const pending = path === undefined
@@ -216,7 +182,6 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 		}
 	});
 
-	// A save is a natural burst boundary — flush immediately so the timeline lines up with what's on disk.
 	vscode.workspace.onDidSaveTextDocument((document) => {
 		const path = repoRelative(document.uri);
 
@@ -238,11 +203,6 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 		}
 	});
 
-	// The "your edits" timeline: the reviewer's uncommitted work SINCE the last commit, decomposed into node-grouped
-	// chunks. Base = the LAST history snapshot equal to current HEAD (self-resets on commit); the burst chain from there
-	// [HEAD, …afters] is fed to the identity core (off-thread), which returns the net-changed nodes + their line ranges.
-	/** The file's history since the last commit: [HEAD, …each burst after it] (the last, the text as it is now) — from
-	 *  the LAST snapshot equal to current HEAD, so it self-resets on commit — and when the latest burst was made. */
 	const sinceCommit = async (path: string): Promise<{ "chain": string[]; "lastTime": number }> => {
 		const AM = await automerge();
 		const doc = await docFor(path);
@@ -271,7 +231,6 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 		}
 
 		return log.span("editor.workbench.edit-history.chunks", { "path": path }, async (span) => {
-			// (the file's edits so far: a burst still being typed flushed now, and those already flushing finished)
 			const pending = timers.get(path);
 			const text = typing.get(path);
 
@@ -290,8 +249,6 @@ export function installEditHistory(vscode: typeof vscodeApi, hub: Hub, bablr: Ba
 				return { "groups": [], "bursts": 0, "lastTime": 0 }; // nothing since the last commit
 			}
 
-			// The last entry is the current working text, so line ranges land in working coords.
-			// (decomposed by the BABLR worker: node-grouped chunks over the burst chain [HEAD, …afters])
 			const { groups, bursts } = await bablr.editGroups(chain);
 
 			span.end({ "count": groups.length, "bursts": bursts });

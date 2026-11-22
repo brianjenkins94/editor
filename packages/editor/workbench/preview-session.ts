@@ -1,10 +1,3 @@
-/**
- * A dev server, in Run and Debug (RUNNING.md, *The model*): as it comes up it's a session there, with Restart and Stop on the debug toolbar (a session on its own has no row in Call Stack), what it says going
- * to the Debug Console as well as its terminal. It's a window onto the service, not a way of running it: the server's the terminal's
- * (workbench/runs.ts), stopping the session stops it, and however it ends, the session does. It claims nothing a debugging session
- * would: no status bar, and Run and Debug isn't brought forward. Nothing here steps: it has no threads, and the toolbar has Restart
- * and Stop. What its pages' recorded stops (a breakpoint in their code) record, it tells the Margin (recorded-stops.ts).
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
@@ -14,7 +7,6 @@ import { installRecordedStops, recordedStops } from "./recorded-stops";
 
 interface Request { "seq": number; "command": string }
 
-/** The Debug Adapter Protocol, as far as a service has it. */
 function adapterOf(vscode: typeof vscodeApi, runner: NodeRunner, hub: Hub, log: Logger, service: string): vscodeApi.DebugAdapter {
 	const sent = new vscode.EventEmitter<vscodeApi.DebugProtocolMessage>();
 	const stops: (() => void)[] = [];
@@ -30,7 +22,6 @@ function adapterOf(vscode: typeof vscodeApi, runner: NodeRunner, hub: Hub, log: 
 		event("output", { "category": "stdout", "output": text });
 	};
 	const run = runner.runs.list().find((each) => each.id === service);
-	// (its port's pages' recorded stops: told as its values)
 	const recorded: RecordedStops | undefined = run?.port === undefined ? undefined : recordedStops(hub, log, run.port, event);
 	const follow = (): void => {
 		stops.push(runner.runs.follow(service, say), runner.runs.onEnd((ended) => {
@@ -85,7 +76,6 @@ export function installPreviewSessions(vscode: typeof vscodeApi, runner: NodeRun
 		"createDebugAdapterDescriptor": (session) => new vscode.DebugAdapterInlineImplementation(adapterOf(vscode, runner, hub, log, session.configuration["service"] as string))
 	});
 
-	// (a restart is ready again, in the session it has)
 	const sessions = new Set<string>();
 
 	runner.runs.onEnd((run) => {
@@ -102,7 +92,6 @@ export function installPreviewSessions(vscode: typeof vscodeApi, runner: NodeRun
 				"request": "launch",
 				"name": `Preview :${String(port)}`,
 				"service": service.id,
-				// (the preview window its toolbar is drawn in too: extensions/bridge/debug-toolbar.ts)
 				"__port": port,
 				"internalConsoleOptions": "neverOpen"
 			}, { "noDebug": true, "suppressDebugStatusbar": true, "suppressDebugView": true }));

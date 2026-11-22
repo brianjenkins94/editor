@@ -1,41 +1,20 @@
-/**
- * What the editor shows, as data — for agents (the `editor_state`, `editor_problems` and `editor_notifications` tools, tools/),
- * which would otherwise read it off the DOM or know VS Code's API and which frame it's in:
- *
- * - `editor.state`: the file in front of you — its cursor, selections and the lines in view, unsaved or not — and every
- *   editor tab open, by group;
- * - `problems.list` { file?, limit? }: the Problems view's diagnostics, each with its source (TypeScript, eslint, notes,
- *   a capability tripwire), severity, range and message;
- * - `notifications.list`: the notifications showing — the toasts and the notification center's — which the extension API
- *   can't list (the component reads the notification service's model);
- * - `editor.trace` { component, seconds? }: VS Code's own log at trace, for a while, for one component — the messages
- *   naming it (`text file model`, `extension host`) — forwarded into the editor's log stream (source `vscode-trace`),
- *   where logs_query and logs_wait read it. It answers at once; the window closes on its own. A person's way to the same:
- *   *Developer: Trace a VS Code Component…* (`editor.trace.show`), its messages in the Output channel "VS Code Trace" too.
- *
- * Lines and columns are 1-based, as an agent reads code. Runs in the workbench realm (core), with its own extension API.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type * as vscodeApi from "vscode";
 import { serve } from "@brianjenkins94/hub";
 import { shownNotifications, traceLog } from "@brianjenkins94/monaco-vscode-api/main";
 
-/** A selection's text, at most this long (a whole file selected isn't what the tool is for). */
 const MAX_SELECTED = 500;
 
-/** Diagnostics answered, by default, at most. */
 const PROBLEMS = 200;
 
 const SEVERITIES = ["error", "warning", "info", "hint"] as const;
 
-/** How long a trace window stays open, by default and at most. */
 const TRACE_SECONDS = 30;
 const TRACE_MOST = 300;
 
 export function installEditorState(hub: Hub, vscode: typeof vscodeApi, log: Logger): void {
 	const at = (position: vscodeApi.Position): { "line": number; "column": number } => ({ "line": position.line + 1, "column": position.character + 1 });
-	/** A file's path in the workspace — relative, as the tools take it — or its URI when it isn't a file. */
 	const pathOf = (uri: vscodeApi.Uri): string => (uri.scheme === "file" ? vscode.workspace.asRelativePath(uri, false) : uri.toString());
 
 	serve(hub, "editor.state", () => {
@@ -78,7 +57,6 @@ export function installEditorState(hub: Hub, vscode: typeof vscodeApi, log: Logg
 			...diagnostic.code === undefined ? {} : { "code": String(typeof diagnostic.code === "object" ? diagnostic.code.value : diagnostic.code) },
 			"message": diagnostic.message
 		}))));
-		// Errors first, then by file and line.
 		const sorted = all.toSorted((left, right) => SEVERITIES.indexOf(left.severity) - SEVERITIES.indexOf(right.severity) || left.file.localeCompare(right.file) || left.line - right.line);
 		const most = typeof limit === "number" && limit > 0 ? limit : PROBLEMS;
 
@@ -87,11 +65,9 @@ export function installEditorState(hub: Hub, vscode: typeof vscodeApi, log: Logg
 
 	serve(hub, "notifications.list", async () => shownNotifications());
 
-	/** VS Code's trace for `component`, for `seconds`: each message into the log stream, and to `also` (a person's Output). */
 	const trace = (component: string, seconds: unknown, also?: (line: string) => void): { "lasting": number; "window": Promise<void> } => {
 		const lasting = Math.min(typeof seconds === "number" && seconds > 0 ? seconds : TRACE_SECONDS, TRACE_MOST);
 		const wanted = component.trim().toLowerCase();
-		// (opened now and closed on its own; one already going is said by the window's error)
 		const window = traceLog((message) => message.toLowerCase().includes(wanted), (level, message) => {
 			log.info(message, { "source": "vscode-trace", "level": level, "component": component });
 			also?.(`${new Date().toISOString().slice(11, 23)} [${String(level)}] ${message}`);
@@ -114,7 +90,6 @@ export function installEditorState(hub: Hub, vscode: typeof vscodeApi, log: Logg
 		}).then(() => ({ "tracing": component, "until": new Date(Date.now() + lasting * 1000).toISOString(), "read": `logs_query or logs_wait with source vscode-trace (or the text "${component}")` }))]);
 	});
 
-	// A person's: which component, then its messages in an Output channel of their own as they come, for the window.
 	let output: vscodeApi.OutputChannel | undefined;
 
 	vscode.commands.registerCommand("editor.trace.show", async () => {

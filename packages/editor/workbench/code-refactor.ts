@@ -1,18 +1,3 @@
-/**
- * Refactoring, as the editor does it (Refactoring for agents). A file moved or renamed in the Explorer keeps its imports right:
- * every import of it, and its own relative ones, changed as TypeScript works them out (history's tsserver plugin,
- * `_history.fileRename`), once the move's made and TypeScript can say, as VS Code's own TypeScript support does: worked out
- * before it, a slow start lost them (VS Code waits a minute for what a move waits on, then moves without it). And what an agent
- * asks, each the same thing a person does:
- *
- * - `code.references` { path, line, name }: Find All References on the name on that line, each place's file, line, column and
- *   text, its declaration included.
- * - `code.rename` { path, line, name, to }: Rename Symbol, everywhere TypeScript renames it, every file saved.
- * - `code.move` { from, to }: the Explorer's rename, answered once its imports are right as above, every file it touched saved.
- *
- * The projects are told of files made since first (`_history.files`), then the file asked its symbols, so the TypeScript server
- * holds its project: in the browser it isn't told of files made, and opening a document doesn't hand it over.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Observed } from "@brianjenkins94/observability";
 import type * as vscodeApi from "vscode";
@@ -21,15 +6,11 @@ import { saveDocument } from "./workspace-tools";
 
 const ROOT = "/workspace";
 
-/** The places `code.references` lists at most (`total` is all of them). */
 const LISTED = 500;
 
-/** How far apart a move's edits are asked for while TypeScript isn't answering or doesn't hold the file yet (a workspace just
- *  opened, its server still starting), and for how long before it's said that they couldn't be worked out. */
 const TRY_MS = 1000;
 const WAIT_MS = 180_000;
 
-/** What history's plugin answers of a move (`_history.fileRename`). */
 interface Moved { "edits"?: { "file": string; "changes": { "start": number; "length": number; "text": string }[] }[]; "outside"?: boolean; "error"?: string }
 
 export function installCodeRefactor(vscode: typeof vscodeApi, hub: Hub, log: Observed["log"]): void {
@@ -47,17 +28,13 @@ export function installCodeRefactor(vscode: typeof vscodeApi, hub: Hub, log: Obs
 		return vscode.Uri.file(absolute);
 	};
 	const relative = (uri: vscodeApi.Uri): string => (uri.path.startsWith(`${ROOT}/`) ? uri.path.slice(ROOT.length + 1) : uri.path);
-	// (the projects told of files made since, then the file asked its symbols, so the server holds its project)
 	const held = async (uri: vscodeApi.Uri): Promise<void> => {
 		await Promise.resolve(vscode.commands.executeCommand("typescript.tsserverRequest", "_history.files", {})).catch(() => undefined);
 		await Promise.resolve(vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", uri)).catch(() => undefined);
 	};
 
-	/** Each move's import edits under way, by the move (`from to`): what `code.move` waits on and saves. */
 	const following = new Map<string, Promise<vscodeApi.Uri[]>>();
 
-	/** Keep the imports right once `oldUri` is at `newUri`: TypeScript's edits, asked for until it can say, applied as one edit.
-	 *  The files changed. */
 	const follow = async (oldUri: vscodeApi.Uri, newUri: vscodeApi.Uri): Promise<vscodeApi.Uri[]> => log.span("editor.workbench.code-refactor.move", { "path": oldUri.path }, async () => {
 		const deadline = Date.now() + WAIT_MS;
 		let answer: Moved | undefined;
@@ -102,7 +79,6 @@ export function installCodeRefactor(vscode: typeof vscodeApi, hub: Hub, log: Obs
 		return touched;
 	});
 
-	/** Where `name` is on `line` (1-based) of `path`: the document and the position of its first character. */
 	const at = async (args: unknown): Promise<{ "document": vscodeApi.TextDocument; "position": vscodeApi.Position; "name": string }> => {
 		const { path, line, name } = (args ?? {}) as { "path"?: unknown; "line"?: unknown; "name"?: unknown };
 
@@ -128,7 +104,6 @@ export function installCodeRefactor(vscode: typeof vscodeApi, hub: Hub, log: Obs
 		return { "document": document, "position": new vscode.Position(line - 1, column), "name": name };
 	};
 
-	/** Save each of `uris` that's open with changes. */
 	const saveAll = async (uris: vscodeApi.Uri[]): Promise<string[]> => {
 		const unique = [...new Map(uris.map((uri) => [uri.toString(), uri])).values()];
 
@@ -139,7 +114,6 @@ export function installCodeRefactor(vscode: typeof vscodeApi, hub: Hub, log: Obs
 		return unique.map(relative);
 	};
 
-	// The Explorer's moves and renames, and anything else's (an extension's edit, code.move): their imports kept right.
 	vscode.workspace.onDidRenameFiles((event) => {
 		for (const { oldUri, newUri } of event.files) {
 			if (oldUri.scheme === "file" && !/\.(?:json|md|txt|css|html)$/u.test(oldUri.path)) {
@@ -209,7 +183,6 @@ export function installCodeRefactor(vscode: typeof vscodeApi, hub: Hub, log: Obs
 			throw new Error("VS Code didn't make the move");
 		}
 
-		// (its imports, once TypeScript says: the rename's own listener is under way by now)
 		const updated = await saveAll(await following.get(`${source.path} ${target.path}`) ?? []);
 
 		return { "moved": relative(source), "to": relative(target), "updated": updated.filter((file) => file !== relative(target)) };

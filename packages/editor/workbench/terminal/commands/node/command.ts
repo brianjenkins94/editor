@@ -4,7 +4,6 @@ export default {
 	"name": "node",
 	"summary": "Run a program in the debugger, its output and input here.",
 	"streaming": true,
-	// Node's options come before the file; the file and everything after it are the program's.
 	"stopEarly": true,
 	"options": {
 		"eval": { "format": String, "default": "", "short": "e", "doc": "Run this code." },

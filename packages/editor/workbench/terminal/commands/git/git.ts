@@ -1,12 +1,3 @@
-/**
- * The terminal's `git`: the workspace's one git (isomorphic-git, git-engine.ts — the same that Source Control and the
- * review panel show), spoken as git is: status, diff, log, add, restore, commit and branch, printed as git prints them,
- * each a subcommand juvy routes and parses (command.ts). What changes the repository says so (`git.changed`), as git-service does, so Source Control and the review
- * panel refresh.
- *
- * `diff` compares the working tree with HEAD: without `--staged` the files with unstaged changes, with it the staged
- * ones. A file staged and then changed again shows all of its changes either way — the index's own version isn't read.
- */
 import type { Juvy } from "@brianjenkins94/util/juvy";
 import type { CommandHost, CommandResult, Handler } from "../../catalog";
 import { createRpcClient } from "@brianjenkins94/hub";
@@ -20,7 +11,6 @@ const ROOT = "/workspace";
 const ok = (stdout: string): Result => ({ "stdout": stdout, "stderr": "", "exitCode": 0 });
 const fail = (stderr: string, exitCode = 1): Result => ({ "stdout": "", "stderr": stderr + "\n", "exitCode": exitCode });
 
-/** `path`, as typed in `cwd`, relative to the repository — or undefined outside it. */
 function inRepo(cwd: string, path: string): string | undefined {
 	const parts: string[] = [];
 
@@ -41,7 +31,6 @@ function inRepo(cwd: string, path: string): string | undefined {
 	return absolute.startsWith(ROOT + "/") ? absolute.slice(ROOT.length + 1) : undefined;
 }
 
-/** Whether `file` is `path` or under it ("" is everything). */
 const under = (file: string, path: string): boolean => path === "" || file === path || file.startsWith(path + "/");
 
 const VERBS = { "A": "new file", "M": "modified", "D": "deleted" } as const;
@@ -111,7 +100,6 @@ async function log(config: Juvy): Promise<Result> {
 		return fail("fatal: your current branch does not have any commits yet", 128);
 	}
 
-	// (where a shallow clone's history ends — a clone is one commit deep — said, and how to see further)
 	const ends = (await engine.shallowEnds()).includes(entries.at(-1)!.oid) ? "(the clone's history ends here: git fetch --deepen=<n> brings n commits more, --unshallow all of it)\n" : "";
 
 	if (config.get("oneline") === true) {
@@ -121,7 +109,6 @@ async function log(config: Juvy): Promise<Result> {
 	return { ...ok(entries.map((entry) => `commit ${entry.oid}\nAuthor: ${entry.author.name} <${entry.author.email}>\nDate:   ${new Date(entry.author.timestamp * 1000).toString()}\n\n${entry.message.trimEnd().split("\n").map((line) => "    " + line).join("\n")}\n`).join("\n")), "stderr": ends };
 }
 
-/** The changed files `paths` (as typed in `cwd`) name: a file, a folder's changed files, `.` — or an error. */
 async function changedUnder(paths: string[], cwd: string): Promise<string[] | Result> {
 	const { unstaged } = await engine.status();
 	const files: string[] = [];
@@ -150,7 +137,6 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 		hub.publish("git.changed");
 	};
 
-	/** `git switch [-c] <name>`, `git checkout [-b] <name>`. */
 	const switchTo = async (config: Juvy): Promise<Result> => {
 		const name = config.get("name") as string;
 		const create = config.get("create") === true;
@@ -164,7 +150,6 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 				return fail(`fatal: invalid reference: ${name} (git switch -c ${name} makes it; git restore <path> undoes a file's changes)`, 128);
 			}
 
-			// (one the clone hasn't fetched: the git service fetches it, through the shell's sign-in, and makes it from origin's)
 			await createRpcClient(hub).request("git.checkout", { "name": name }, { "timeoutMs": 300_000 });
 
 			return { "stdout": "", "stderr": `branch '${name}' set up to track 'origin/${name}'.\nSwitched to a new branch '${name}'\n`, "exitCode": 0 };
@@ -176,7 +161,6 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 		return { "stdout": "", "stderr": `Switched to ${create ? "a new " : ""}branch '${name}'\n`, "exitCode": 0 };
 	};
 
-	// Each handler's failure is git's: `fatal: …`, 128.
 	const guarded = (handler: Handler): Handler => async (config, ctx) => {
 		try {
 			return await handler(config, ctx);
@@ -292,7 +276,6 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 			}
 
 			const branch = config.get("branch") as string;
-			// (the git service's fetch: it asks the shell, which has the sign-in, to send its requests)
 			const fetched = await createRpcClient(hub).request("git.fetch", { ...branch === "" ? {} : { "ref": branch }, ...deepen === "" ? {} : { "deepen": Number(deepen) }, "unshallow": config.get("unshallow") === true }, { "timeoutMs": 300_000 }) as { "ref": string; "tip": string; "commits": number; "shallow": boolean; "url": string };
 
 			return { "stdout": "", "stderr": `From ${fetched.url}\n * branch            ${fetched.ref} -> origin/${fetched.ref} (${fetched.tip.slice(0, 7)})\n${String(fetched.commits)} commit${fetched.commits === 1 ? "" : "s"} from HEAD here${fetched.shallow ? ", where the clone's history ends" : ", all of its history"}\n`, "exitCode": 0 };
@@ -303,7 +286,6 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 			}
 
 			const branch = config.get("branch") as string;
-			// (the git service's pull: it asks the shell, which has the sign-in, to send its requests)
 			const pulled = await createRpcClient(hub).request("git.pull", branch === "" ? {} : { "ref": branch }, { "timeoutMs": 300_000 }) as engine.Pulled & { "url": string };
 			const from = `From ${pulled.url}\n * branch            ${pulled.ref} -> origin/${pulled.ref}\n`;
 			const files = (pulled.files ?? []).map((file) => ` ${file}\n`).join("");
@@ -345,7 +327,6 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 			}
 
 			const branch = config.get("branch") as string;
-			// (the git service's push: it asks the shell, which has the sign-in, to send it)
 			const pushed = await createRpcClient(hub).request("git.push", { ...branch === "" ? {} : { "ref": branch }, "force": config.get("force") === true }, { "timeoutMs": 300_000 }) as { "ref": string; "ok": boolean; "error"?: string; "url": string };
 
 			return pushed.ok

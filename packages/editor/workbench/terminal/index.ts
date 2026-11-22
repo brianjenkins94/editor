@@ -1,24 +1,4 @@
 /// <reference types="vite/client" />
-/**
- * The workspace terminal — just-bash (a pure-TS bash interpreter) on the editor's own filesystem (fs.ts), with the
- * editor's own commands beside its (catalog.ts: a folder each under commands/ — `node` runs a program in the debugger,
- * through node-runner.ts). It IS the default terminal: the editor
- * registers this as the vendored backend's process factory (setTerminalProcessFactory, in workbench-entry), so
- * every terminal the workbench opens is this one — `> tsconfig.json` hits the read-only guard (permission denied)
- * and files the shell creates show up in the explorer.
- *
- * Session model — and DON'T "fix" the probe below thinking it's a workaround for using just-bash wrong: it is
- * stateless per `exec` BY DESIGN (each call is a one-shot, isolated run, so a `cd`/`export` doesn't stick; only the
- * filesystem, being external, persists). just-bash's OWN interactive shell
- * (`just-bash-shell`) has the identical limitation — it calls `Bash.exec(line)` exactly like we do, and `cd`/
- * `export` don't persist across its prompts either. There is no persistent-session API to use instead. So the
- * interactive session layer is ours to add: we hold cwd + env here and thread them through every `exec`. env
- * round-trips via the result (`BashExecResult.env` — the only state just-bash returns); cwd is read back with a
- * `$PWD` probe appended to each command — the same technique VS Code's own shell integration uses (emit `$PWD`
- * after each command), and semantically correct (it captures the top-level shell's final dir and respects
- * subshell isolation, which intercepting `cd` would not) — see session.ts. One line editor, one prompt, sync
- * input handling.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { TerminalProcess } from "@brianjenkins94/monaco-vscode-api/main";
 
@@ -34,17 +14,12 @@ import { execInSession, outputCaptured, statementsOf } from "./session";
 
 type VscodeApi = typeof import("vscode");
 
-/** Each command's implementation (`commands/<name>/<name>.ts`), loaded the first time the command runs. */
 const implementations = import.meta.glob<CommandFactory>(["./commands/*/*.ts", "!./commands/*/command.ts", "!./commands/**/*.test.*"], { "import": "create" });
 
-/** The shell's own words that aren't commands (just-bash's `getCommandNames` lists commands): offered on Tab too. */
 const BUILTINS = ["cd", "eval", "exit", "export", "read", "set", "source", "test", "type", "unset"];
 
-/** What Tab offers in command position: the shell's builtins, just-bash's commands (as this build has them — no
- *  `tar` in a browser), and ours. Known once just-bash has loaded (with the first command, or warmed at start). */
 let completions: string[] = [...BUILTINS, ...COMMANDS.map((command) => command.name)];
 
-/** The longest string that every item starts with (for extending a partial to the common prefix on Tab). */
 function longestCommonPrefix(items: string[]): string {
 	if (items.length === 0) {
 		return "";
@@ -61,18 +36,11 @@ function longestCommonPrefix(items: string[]): string {
 	return prefix;
 }
 
-/** Terminals opened so far: each one's number names it as the origin of what it runs (runs.ts). */
 let terminalsOpened = 0;
 
-/** How much of a terminal's output is kept, its latest: what an agent reads of it (debug-mcp's `terminal`). */
 const TAIL = 8000;
 
-/** Each terminal's latest output (ANSI escapes stripped), by its number — and whether it's still open, and the one
- *  command it runs (a task's). VS Code's extension API can't read a terminal's buffer, but every byte it shows goes
- *  through here. */
 const tails = new Map<number, { "terminal": number; "command"?: string; "open": boolean; "text": string }>();
-
-/** The escapes a terminal's output carries (colors, cursor moves, shell integration), for reading it as text. */
 
 export const ESCAPES = /\u001B(?:\[[^A-Za-z@~]*[A-Za-z@~]|\][^\u0007\u001B]*(?:\u0007|\u001B\\)|[A-Z=>\\^_])/gu;
 
@@ -81,14 +49,12 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 
 	const terminal = terminalsOpened;
 	const tail: { "terminal": number; "open": boolean; "text": string } = { "terminal": terminal, "open": true, "text": "" };
-	// What the terminal shows, kept (its latest) as it's shown.
 	const fire = (data: string): void => {
 		tail.text = (tail.text + data.replaceAll(ESCAPES, "").replaceAll("\r\n", "\n")).slice(-TAIL);
 		show(data);
 	};
 
 	tails.set(terminal, tail);
-	// The session: cwd + env, carried from command to command (session.ts).
 	const state: SessionState = { "cwd": cwd0, "env": {} };
 	let line = "";
 	let pos = 0; // cursor position within `line`
@@ -101,16 +67,12 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	let controller: AbortController | undefined; // the running command's Ctrl-C handle
 	let stdinBuffer = ""; // the line being typed into a running process's stdin (flushed on Enter)
 
-	// terminals want CRLF; the shell emits LF.
 	const write = (text: string): void => {
 		fire(text.replace(/\r?\n/gu, "\r\n"));
 	};
 
-	// Whether the statement running goes into a pipe or a file (session.ts outputCaptured): a streaming command's output
-	// is then the shell's to pass on.
 	let captured = false;
 
-	// Live output from a streaming process (node): written to the terminal as it arrives, stderr in red.
 	const writeLive: NodeOutput = (stream, data) => {
 		const text = data.replace(/\r?\n/gu, "\r\n");
 
@@ -119,7 +81,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 
 	let sessionPromise: Promise<BashSession> | undefined;
 	const getSession = (): Promise<BashSession> => {
-		// just-bash, and the custom commands (which build on its defineCommand), load with the first command run.
 		sessionPromise ??= import("just-bash/browser").then((module) => {
 			const host: CommandHost = { "history": {
 				"lines": () => [...history],
@@ -129,8 +90,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 				}
 			}, "api": api, "runner": runner, "hub": hub, "writeLive": writeLive, "captured": () => captured, "terminal": terminal, "session": getSession };
 			const theirs = new Set(module.getCommandNames());
-			// Ours, each loaded the first time it runs (just-bash's lazy command), through juvy (invoke.ts): its options parsed
-			// and `--help` made from its definition.
 			const commands = COMMANDS.map((command) => ({ "name": command.name, "load": async () => toCommand(command, command.notHere === undefined ? (await implementations[`./commands/${command.name}/${command.name}.ts`]())(host) : undefined) }));
 
 			completions = [...new Set([...BUILTINS, ...theirs, ...COMMANDS.map((command) => command.name)])];
@@ -141,8 +100,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		return sessionPromise;
 	};
 
-	// Marked for VS Code's shell integration (integration.ts), as a desktop shell's prompt is: where it is, where
-	// the prompt starts, where the command line starts. (A redrawn prompt is marked again, as a shell's PS1 would be.)
 	const prompt = (): void => {
 		fire(`\r\n${workingDirectory(state.cwd)}${promptStart()}[1;36m${state.cwd}[0m $ ${commandStart()}`);
 	};
@@ -153,7 +110,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 
 		running = true;
 		controller = abort;
-		// Shell integration: what runs and that it's running, then how it ended. A blank line runs nothing.
 		const runs = input.trim() !== "";
 		let exitCode = 0;
 
@@ -163,10 +119,7 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 
 		try {
 			const session = await getSession();
-			// Whether what's been written for this line ends a line: a statement's output after another's goes on a new one.
 			let fresh = true;
-			// stdout then stderr, each with its trailing newline trimmed (the prompt supplies one), joined so the two streams
-			// land on separate lines rather than run together. (A streamed `node` wrote its output live and returns empty.)
 			const show = (result: { "stdout": string; "stderr": string }): void => {
 				const blocks: string[] = [];
 
@@ -184,10 +137,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 				}
 			};
 
-			// A line with a streaming command (`node`) runs a statement at a time (session.ts statementsOf): just-bash
-			// hands back a line's output only when the whole line's done, so what came before the command would otherwise
-			// show after it. `;`, `&&` and `||` keep their meaning: a statement after `&&` runs if the last one ran succeeded,
-			// after `||` if it failed. Any other line runs whole.
 			const statements = statementsOf(input, STREAMING) ?? [{ "text": input, "then": "" as const }];
 
 			for (let index = 0; index < statements.length && !signal.aborted; index += 1) {
@@ -195,14 +144,11 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 				const skipped = (joined === "&&" && exitCode !== 0) || (joined === "||" && exitCode === 0);
 
 				if (!skipped) {
-					// (a streaming command's output, written as it runs, starts on a line of its own)
 					if (!fresh) {
 						write("\n");
 						fresh = true;
 					}
 
-					// `signal` is the shell's Ctrl-C: just-bash stops at the next statement boundary and forwards it to a custom
-					// command's `ctx.signal` (so `node` kills its worker). An interrupted run may not reach the PROBE.
 					captured = outputCaptured(statements[index].text);
 
 					const result = await execInSession(session, state, statements[index].text, signal);
@@ -223,16 +169,11 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 			stdinBuffer = "";
 			line = "";
 			pos = 0;
-			// Interrupted is 130, as a shell reports SIGINT.
 			fire(runs ? commandFinished(signal.aborted ? 130 : exitCode) : commandFinished());
 			prompt();
 		}
 	};
 
-	// While a process runs, keystrokes drive it, not the line editor: a foreground `node` process gets them as
-	// stdin, and Ctrl-C interrupts whatever is running. Like a terminal in cooked mode we buffer a line locally
-	// (with echo and backspace) and deliver it whole on Enter, so a `stdin.on('data')` reader sees a line at a
-	// time rather than a byte per keystroke.
 	const feedRunning = (data: string): void => {
 		for (const character of data) {
 			const code = character.charCodeAt(0);
@@ -245,7 +186,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 				return;
 			}
 
-			// (a non-node command is running: only Ctrl-C reaches it)
 			if (runner.isRunning()) {
 				if (code === 0x0D || code === 0x0A) { // Enter → flush the buffered line into stdin
 					fire("\r\n");
@@ -271,9 +211,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		}
 	};
 
-	// A small line editor over `line`/`pos` — cursor movement (←/→, Home/End, Ctrl-A/E), in-place insert/delete, and
-	// ↑/↓ command history. Redraws are done with bare escapes: `\b` (cursor left), `\x1b[C` (cursor right),
-	// `\x1b[0K` (erase to end of line). After an in-place edit we reprint the tail and step the cursor back onto it.
 	const setLine = (next: string): void => {
 		fire("\b".repeat(pos) + "\x1B[0K" + next); // cursor to start, erase to EOL, print the replacement
 		line = next;
@@ -361,7 +298,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		setLine(histIndex === history.length ? draft : history[histIndex]);
 	};
 
-	// Resolve a (possibly relative) directory path against cwd, collapsing "." and ".." — for path completion.
 	const resolveDir = (part: string): string => {
 		const raw = part.startsWith("/") ? part : state.cwd.replace(/\/+$/u, "") + "/" + part;
 		const segments: string[] = [];
@@ -377,9 +313,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		return "/" + segments.join("/");
 	};
 
-	// Tab completion (only at end of line — the common case). First word → command names; later words / anything
-	// with a slash → filesystem entries under cwd. One match completes inline (dir → "/", else " "); several extend
-	// to their common prefix, or list when there's nothing more to share.
 	const complete = async (): Promise<void> => {
 		if (running || pos !== line.length) {
 			return;
@@ -437,14 +370,11 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 			return;
 		}
 
-		// Ambiguous with nothing more in common — list the candidates (dirs marked with "/"), then restore the line.
 		fire("\r\n" + matches.map((name) => (isCommand || isDir.get(name) !== true ? name : name + "/")).join("  "));
 		prompt();
 		fire(line);
 	};
 
-	// Dispatch a completed escape sequence — the part AFTER the ESC, e.g. "[A" (up), "[3~" (delete), "OD" (left in
-	// application-cursor mode). Anything unmapped (modified arrows like "[1;5C") is ignored rather than echoed.
 	const handleEscape = (seq: string): void => {
 		switch (seq) {
 			case "[A":
@@ -496,12 +426,9 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		}
 	};
 
-	// One character of an escape sequence in progress.
 	const feedEscape = (character: string, code: number): void => {
 		esc += character;
 
-		// The final byte of a CSI/SS3 sequence is a letter or `~` (0x40–0x7E); digits and `;` are parameters.
-		// The introducer (`[` or `O`) is the first char and never terminates on its own.
 		if (esc.length >= 2 && code >= 0x40 && code <= 0x7E) {
 			inEscape = false;
 			handleEscape(esc);
@@ -568,7 +495,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 		prompt();
 	};
 
-	// The terminal closing stops what it's running — a dev server, a script — rather than leaving it running unseen.
 	return {
 		"start": start,
 		"input": input,
@@ -579,8 +505,6 @@ export function createBashProcess(api: VscodeApi, runner: NodeRunner, hub: Hub, 
 	};
 }
 
-/** The terminals, as data (the `terminal_output` tool): each one's number, whether it's open, the command it runs (a
- *  task's), its latest output (`lines` of it, 50 by default) and what it's running (runs.ts, by its origin). */
 export function serveTerminalState(runner: NodeRunner, hub: Hub): void {
 	serve(hub, "terminal.state", (args) => {
 		const { terminal, lines = 50 } = (args ?? {}) as { "terminal"?: number; "lines"?: number };

@@ -1,23 +1,3 @@
-/**
- * Which files BABLR parses, and a warning on each one it can't (*Unparsable files flagged*): nothing can attach to code
- * BABLR can't parse — no note, no runtime evidence — so a file it can't take is said in Problems, with why, until it
- * parses again. And how much of a folder it takes, for the rewrite's Measure (ARCHITECTURE.md, *Comments become
- * notes*: what of the scope BABLR parses is measured first).
- *
- * - the command `editor.bablr.check` ("BABLR: Check Which Files Parse…"): a folder's code files parsed one at a time,
- *   with a progress notification to cancel it by, the ones BABLR can't take in Problems, and what it took said;
- * - `bablr.check` { path, exclude? }: the same, for agents' `code_parses`, with each file it can't parse and why.
- *
- * And a text with its comments blanked (`stripped`), for the code alone (git-refs.ts' `.refs/<name>~stripped/`).
- *
- * And what's placed on code stays on it: `editor.annotations.spans`, `.refer` and `.resolve`, for anything an extension attaches to
- * code (editor-api's annotations.ts is their contract; RUNTIME-EVIDENCE.md, *Durable annotations on spans*). A reference not
- * found by its own id is looked for further: followed from the commit or text it was made against, and in the other changed files.
- *
- * BABLR runs in its own worker (workers/bablr-worker.ts), started the first time it's asked — not at boot: it's a big
- * bundle — and asked one text at a time, each kept by its blob oid there, so a file is parsed once. A file whose warning
- * shows is parsed again as it's saved.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
 import type { ChangeVerdict } from "@brianjenkins94/editor-api/git";
@@ -29,38 +9,24 @@ import { blobText, status } from "./git-engine";
 
 const DIR = "/workspace";
 
-/** The files BABLR's grammar may take. */
 const CODE_FILES = "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}";
 
-/** Where a moved span may be looked for, and in how many changed files at most. */
 const CODE_FILE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 const MOST_OTHERS = 50;
 
-/** A why, at most this long in a warning or an answer (BABLR's can carry the parser's state). */
 const MOST_WHY = 300;
 
-/** What the worker says of a text: whether BABLR parses it, why not, and where its comments are (each one's start and
- *  end, in turn). */
 interface Parse { "parsed": boolean; "why"?: string; "comments"?: number[]; "ms": number; "cached": boolean }
 
-/** What else reads BABLR: a text with its comments blanked (git-refs.ts' stripped view). */
 export interface Bablr {
-	/** `text` with each comment's characters spaces but its line breaks — line for line the text as it is — or
-	 *  undefined where BABLR can't parse it. */
 	"stripped": (text: string, signal?: AbortSignal) => Promise<string | undefined>;
-	/** Every span of `source` (evidence.ts keys a site on the one that's exactly its node), or why BABLR can't parse it. */
 	"spans": (source: string) => Promise<{ "spans"?: { "id": string; "type"?: string; "start": number; "end": number }[]; "unparsable"?: string }>;
-	/** The span each range anchors to, as a reference (evidence.ts keys a statement on it), or why BABLR can't parse it. */
 	"refer": (source: string, file: string, ranges: { "start": number; "end": number }[]) => Promise<{ "refs"?: (SpanRef | null)[]; "unparsable"?: string }>;
-	/** A file's texts since the last commit, [HEAD, …each burst after it], as the code each change touched (edit-history.ts):
-	 *  none where BABLR can't parse one. */
 	"editGroups": (chain: string[]) => Promise<{ "groups": EditGroup[]; "bursts": number }>;
 }
 
-/** What a file's edits since the last commit touched: a node's label and kind, its working lines, and how many bursts. */
 export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
 
-/** A folder's files, checked. */
 interface Checked {
 	"path": string;
 	"files": number;
@@ -84,8 +50,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		diagnostics.set(uri, [warning]);
 	};
 
-	// (a file gone — from the terminal or a shared editor's reset as much as the Explorer — takes its warning with it: one
-	// said of a text since deleted outlived its file in Problems)
 	vscode.workspace.createFileSystemWatcher("**/*", true, true, false).onDidDelete((uri) => {
 		const under: vscodeApi.Uri[] = [];
 
@@ -100,7 +64,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		}
 	});
 
-	/** The worker, started on first use, asked one text at a time: BABLR is slow, and a check is many. */
 	const worker = (): NonNullable<typeof started> => {
 		if (started !== undefined) {
 			return started;
@@ -122,7 +85,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 				const combined = signal === undefined
 					? dead.signal
 					: AbortSignal.any([signal, dead.signal]);
-				// (no timeout: the first waits out the worker's bundle loading, and a parse takes what it takes)
 				const run = tail.then(async () => rpc.request(`bablr.${name}`, args, { "timeoutMs": Infinity, "waitForResponderMs": 60_000, "signal": combined }) as Promise<T>);
 
 				tail = run.catch(() => undefined);
@@ -134,7 +96,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		return started;
 	};
 
-	/** `uri`'s text parsed, and its warning set or cleared by what BABLR says. */
 	const parse = async (uri: vscodeApi.Uri, text: string, signal?: AbortSignal): Promise<Parse> => {
 		const answer = await worker().ask<Parse>("parse", { "source": text }, signal);
 
@@ -147,7 +108,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		return answer;
 	};
 
-	/** Every code file under `path` (relative to the workspace) parsed, but those `exclude` matches: what BABLR takes. */
 	const check = async (path: string, exclude: string | undefined, signal: AbortSignal, progress?: (done: number, of: number) => void): Promise<Checked> => log.span("editor.workbench.bablr.check", { "path": path }, async (span) => {
 		const base = vscode.Uri.file(path === "" || path === "."
 			? DIR
@@ -219,7 +179,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		return checked;
 	});
 
-	// (a file whose warning shows is parsed again as it's saved: it goes when it parses)
 	vscode.workspace.onDidSaveTextDocument((document) => {
 		if (diagnostics.has(document.uri)) {
 			void parse(document.uri, document.getText()).catch(() => undefined);
@@ -260,7 +219,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		}
 	});
 
-	/** `file` parses, or doesn't and why: its warning, as a check's, until it does. */
 	const told = (file: string, why: string | undefined): void => {
 		const uri = vscode.Uri.file(`${DIR}/${file}`);
 
@@ -271,7 +229,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		}
 	};
 
-	/** An annotation's question, answered as editor-api's Answer: the value, or why BABLR can't parse the text. */
 	const answering = async (file: string | undefined, name: string, args: unknown, take: (answer: Record<string, unknown[]>) => unknown): Promise<unknown> => {
 		const answer = await worker().ask<Record<string, unknown[]> & { "unparsable"?: string }>(name, args);
 
@@ -286,7 +243,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 			: { "unparsable": answer.unparsable };
 	};
 
-	/** The other changed files, for a span that may have moved to one. */
 	const changedFiles = async (file: string): Promise<Record<string, string>> => {
 		const { files } = await status();
 		const others = files.filter((change) => change.status !== "D" && change.path !== file && CODE_FILE.test(change.path)).slice(0, MOST_OTHERS);
@@ -310,7 +266,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 			"texts": options.texts ?? []
 		};
 		const first = await answering(file, "resolve", asked, ({ resolutions }) => resolutions) as { "value"?: { "status": string }[] };
-		// (one that's what ran fades instead of being looked for; one made by a person is looked for further)
 		const lost = options.observed === true || first.value === undefined
 			? []
 			: refs.flatMap((ref, index) => (first.value?.[index]?.status === "attached"
@@ -353,12 +308,8 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		return first;
 	}));
 
-	// What a change from one text to another is (the worker's verdict, from its kept parses): cosmetic, formatting or
-	// comments only, or meaningful, with the nodes that changed and their lines. The same two texts answer the same, kept
-	// for the next ask (the cosmetic extension reads every changed file again after each change).
 	const verdicts = new Map<string, ChangeVerdict | "unparsable">();
 	const classify = async (before: string, after: string): Promise<ChangeVerdict | "unparsable"> => {
-		// (identical: the only answer that needs no parse)
 		if (before === after) {
 			return { "verdict": "cosmetic", "changedNodeIds": [], "changedLines": [] };
 		}
@@ -383,7 +334,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		return verdict;
 	};
 
-	// …asked by extensions through the bridge's `editor.annotations.classify` (editor-api's annotations().classify).
 	serve(hub, "annotations.classify", async (args) => {
 		const { before, after } = (args ?? {}) as { "before"?: unknown; "after"?: unknown };
 

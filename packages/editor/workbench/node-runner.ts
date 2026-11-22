@@ -1,9 +1,3 @@
-/**
- * Main-thread side of running programs: every run is a debug run (RUNNING.md) — `debug` launches one under the tsval
- * debug adapter (the ext host), its output, listening and exit on `node.out/listening/exit.<runId>`, its stdin
- * `node.stdin.<runId>` — what's running, in one registry (runs.ts), and the dev servers: the dev-server worker
- * (workers/node-worker.ts), started for the first one and never stopped, so stopping a run takes no server with it.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { RunRegistry } from "./runs";
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
@@ -11,54 +5,34 @@ import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
 import { virtualUrl } from "../shared/virtual-path";
 import { createRunRegistry } from "./runs";
 
-/** How long a run waits for the debugger to listen (a run typed as the editor starts): past it, the debugger couldn't
- *  take it. The extension host's start can be slow on a first load, so a minute. */
 const LAUNCH_WAIT_MS = 60_000;
 
-/** Streamed output from a run: `stream` is stdout ("out") or stderr ("err"). */
 export type NodeOutput = (stream: "out" | "err", data: string) => void;
 export interface NodeRunHooks {
-	/** The run's id in the registry (runs.ts), carried by `debug.launch`; a fresh one if it has none. */
 	"runId"?: string;
 	"onOutput": NodeOutput;
 	"signal"?: AbortSignal;
-	/** The run started a server on `port`. */
 	"onListening"?: (port: number) => void;
-	/** Run without stopping at breakpoints (VS Code's `noDebug`): an unattended run — nobody there to continue it. Its
-	 *  gated calls still stop, as the policy says. */
 	"noDebug"?: boolean;
 }
 
 export interface NodeRunner {
-	/** What's running — every terminal's runs, in one registry (runs.ts). */
 	"runs": RunRegistry;
-	/** Launch `file` under the tsval DEBUG adapter (breakpoints, step-back, capability stops).
-	 *  Resolves `{ attached: true, exitCode }` when the debug session ends, or `{ attached: false }` when the ext
-	 *  host declined (debugger unavailable) — the caller says so and fails (no fallback). Signals the ext host over the
-	 *  hub (`debug.launch`); Ctrl-C sends `debug.stop`. */
 	"debug": (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks & { "args"?: string[] }) => Promise<{ "attached": boolean; "exitCode": number }>;
-	/** Feed a chunk to the running process's stdin (no-op when nothing is running). */
 	"sendStdin": (data: string) => void;
-	/** Signal end-of-input (EOF) to the running process's stdin (no-op when nothing is running). */
 	"endStdin": () => void;
-	/** Whether a process is currently running (the terminal routes keystrokes to stdin while it is). */
 	"isRunning": () => boolean;
-	/** Start a dev server on `root` of the shared workspace, on `port`. Its address, which the service worker answers. */
 	"startDevServer": (port: number, root: string) => Promise<string>;
 	"stopDevServer": (port: number) => Promise<void>;
-	/** Each hot update of the dev server on `port`. Returns an unsubscribe. */
 	"onDevServerUpdate": (port: number, handler: (message: unknown) => void) => () => void;
-	/** When the dev server on `port` is dismissed from elsewhere: its last window closed. Returns an unsubscribe. */
 	"onDevServerClosed": (port: number, handler: () => void) => () => void;
 }
 
-/** The runner the terminal and the test runner drive, on `hub`. */
 export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer): NodeRunner {
 	let currentRunId: string | undefined;
 	const rpc = createRpcClient(hub);
 	let devWorker: Worker | undefined;
 
-	/** The dev-server worker, started once: for the first dev server, or the first run's server to answer. */
 	const startWorker = (): void => {
 		if (devWorker === undefined) {
 			devWorker = new Worker(new URL("./lsp/node-worker.js", location.href), { "type": "module" });
@@ -67,11 +41,8 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		}
 	};
 
-	// (what it mounts: the same zen-fs. Null without cross-origin isolation: it then runs on its own root.)
 	serve(hub, "workspace.buffer", () => workspaceBuffer ?? null);
 
-	// A run: launched under the tsval debug adapter (ext host), on `node.out/exit.<runId>` — the adapter (or its
-	// terminate) relays onto them. The adapter spawns its own debug worker.
 	const startDebug = (file: string, cwd: string, env: Record<string, string>, hooks: NodeRunHooks & { "args"?: string[] }): Promise<{ "attached": boolean; "exitCode": number }> => new Promise((resolve) => {
 		const runId = hooks.runId ?? crypto.randomUUID();
 
@@ -83,7 +54,6 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 
 			hooks.onOutput(message.stream, message.data);
 		});
-		// It listens: a service, with its port.
 		const offListening = hub.subscribe(`node.listening.${runId}`, (data) => {
 			startWorker();
 			hooks.onListening?.((data as { "port": number }).port);
@@ -92,7 +62,6 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 		const offExit = hub.subscribe(`node.exit.${runId}`, (data) => {
 			finish(true, (data as { "exitCode"?: number }).exitCode ?? 0);
 		});
-		// The ext host couldn't attach a debug session (debugger API unavailable / start failed) → the caller says so.
 		const offDeclined = hub.subscribe(`debug.declined.${runId}`, () => {
 			finish(false, 0);
 		});
@@ -130,8 +99,6 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 			hooks.signal.addEventListener("abort", onAbort, { "once": true });
 		}
 
-		// Once the debugger listens: the bridge subscribes as the editor's start-up finishes, and a launch published before
-		// that went to no one — the run waited for ever, saying nothing. Nobody there in time, it couldn't start: said so.
 		void hub.whenInterested("debug.launch", LAUNCH_WAIT_MS).then((listening) => {
 			if (settled) {
 				return;
@@ -149,9 +116,6 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 
 	const runs = createRunRegistry(hub);
 
-	// A debug session VS Code starts itself (F5, Run and Debug, debug-mcp's debug_start) is a run too — tsval's, or another
-	// extension's debugger's (its debug type the run's runtime): the pod asks for its id as the session starts, and puts it in the session's launch config. Its end is the session's (`node.exit`,
-	// as for a terminal's debug run); stopping it from here stops the session (`debug.stop`).
 	serve(hub, "runs.begin", (args) => {
 		const { title, cwd, entry, runtime } = (args ?? {}) as { "title"?: unknown; "cwd"?: unknown; "entry"?: unknown; "runtime"?: unknown };
 		let stopped = false;
@@ -159,7 +123,6 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 			stopped = true;
 			hub.publish("debug.stop", { "runId": run.id });
 		});
-		// A server it starts listening: a service, with its port — as a script's is.
 		const offListening = hub.subscribe(`node.listening.${run.id}`, (data) => {
 			const port = (data as { "port"?: unknown } | null)?.port;
 
@@ -194,12 +157,10 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 			startWorker();
 			await rpc.request("preview.start", { "port": port, "root": root }, { "timeoutMs": 30_000, "waitForResponderMs": 30_000 });
 
-			// (this tab's, as the one service worker serves every tab: the app realm knows which it is)
 			const tab = await rpc.request("virtual.tab", undefined, { "timeoutMs": 5000, "waitForResponderMs": 5000 }) as string;
 
 			const url = virtualUrl(location.href.split("__vscode__/")[0]!, tab, port);
 
-			// (what shows it: the shell's windows)
 			hub.publish("preview.ready", { "port": port, "url": url });
 
 			return url;

@@ -1,4 +1,3 @@
-/** The terminal's `less` and `more` (commands/more): what they'd page, whole. The terminal scrolls, and a pager would need keys it doesn't get. */
 import type { CommandHost, Handler } from "../../catalog";
 
 export const pager = (name: string) => (_host: CommandHost): Handler => async (config, ctx) => {

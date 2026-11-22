@@ -2,7 +2,6 @@ import type { CommandDefinition } from "../../catalog";
 
 const PATHS = { "format": Array, "default": [], "positional": "rest", "doc": "Paths (files or folders); none: all." } as const;
 
-/** What this git doesn't do, as much as there's to say. */
 const NOT_HERE = "isn't here: this git has status, diff, log, add, restore, commit, branch, switch, fetch, pull, merge --abort and push.";
 const NO_HISTORY_EDITS = "isn't here: nothing in this git rewrites history, and git pull is what merges. It has status, diff, log, add, restore, commit, branch, switch, fetch, pull, merge --abort and push.";
 

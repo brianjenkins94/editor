@@ -1,23 +1,3 @@
-/**
- * The workspace as an agent works in it — as it would on a local machine (ARCHITECTURE.md, *Workspace tools*;
- * debug-mcp's files_* tools, app/tools/):
- *
- * - `files.read` { path, offset?, limit? }: a file's text, numbered as `cat -n` numbers it — what's open in an editor,
- *   unsaved edits included, else what's on disk;
- * - `files.write` { path, content }: a file made, or its whole text replaced;
- * - `files.edit` { path, old, new, all? }: an exact string replaced — found once, or every time with `all`;
- * - `files.replace` { edits: [{ path, old, new, all?, count? }], preview? }: exact strings replaced across files, all or
- *   nothing — each must be found as it says (once, `count` times, or every time with `all`) and none may overlap
- *   another, or nothing changes and the answer says each that didn't hold; then one edit, every file saved. With
- *   `preview`, the diff it would make, and nothing changed;
- * - `files.glob` { pattern, limit? }: the workspace's files a glob matches;
- * - `files.grep` { pattern, glob?, ignoreCase?, limit? }: the lines a regular expression matches, in the files a glob
- *   (default: every file) matches.
- *
- * A write or an edit goes through VS Code's documents, as typing would: an open editor shows it, undo takes it back, the
- * edit history records it, and saving runs what saving runs (format on save). Paths are the workspace's: relative to it,
- * or absolute under it. Runs in the workbench realm (core), with its own extension API.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
 import { REFS_DIR } from "@brianjenkins94/editor-api/git";
@@ -26,28 +6,20 @@ import { unifiedDiff } from "./git-service";
 
 const ROOT = "/workspace";
 
-/** Lines read at most, by default; and a line's characters at most (a minified file's one line). */
 const READ_LINES = 2000;
 const LINE_CHARACTERS = 2000;
 
-/** Matches found, files listed, at most, by default. */
 const GREP_RESULTS = 200;
 const GLOB_RESULTS = 500;
 
-/** A file grep reads, at most (bigger is data, not code). */
 const GREP_BYTES = 1_000_000;
 
-/** Saves tried before an edit says it couldn't be saved (see saveDocument). */
 const SAVE_ATTEMPTS = 3;
 
-/** What `files.*` leave out, unless a glob asks for it. */
 const EXCLUDE = "{**/node_modules/**,**/.git/**}";
 
-/** The same, and the commits opened beside the work (git-refs.ts): a glob or grep reaches them when its pattern names
- *  `.refs/`. */
 const EXCLUDE_REFS = `{**/node_modules/**,**/.git/**,${REFS_DIR}/**}`;
 
-/** What a glob or grep leaves out: nothing of what its pattern names (node_modules, .git, a commit opened). */
 function excludeFor(pattern: string): string | undefined {
 	if (/node_modules|\.git\//u.test(pattern)) {
 		return undefined;
@@ -56,12 +28,6 @@ function excludeFor(pattern: string): string | undefined {
 	return pattern.startsWith(REFS_DIR + "/") ? EXCLUDE : EXCLUDE_REFS;
 }
 
-/**
- * Save `document`, as the workspace's tools save an edit: VS Code abandons a save, and `save()` answers false, when its
- * code actions on save are cancelled — getCodeActions cancels itself if a code action provider is registered while it
- * waits, as extensions starting up do, and ESLint's first fix (its worker starting) is a long wait. That save is tried
- * again, so the edit lands on disk; one that still doesn't throws, naming `file`.
- */
 export async function saveDocument(document: vscodeApi.TextDocument, file: string): Promise<void> {
 	for (let attempt = 1; !await document.save(); attempt += 1) {
 		if (attempt === SAVE_ATTEMPTS) {
@@ -70,7 +36,6 @@ export async function saveDocument(document: vscodeApi.TextDocument, file: strin
 	}
 }
 
-/** Where `old` is in `text`: each start, none overlapping. */
 function occurrences(text: string, old: string): number[] {
 	const at: number[] = [];
 
@@ -84,7 +49,6 @@ function occurrences(text: string, old: string): number[] {
 export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void {
 	const decoder = new TextDecoder();
 
-	/** `path`'s file: relative to the workspace, or absolute under it. */
 	const uriOf = (path: unknown): vscodeApi.Uri => {
 		if (typeof path !== "string" || path === "") {
 			throw new TypeError("a path: relative to the workspace, or absolute under it");
@@ -100,8 +64,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 	};
 
 	const relative = (uri: vscodeApi.Uri): string => vscode.workspace.asRelativePath(uri, false);
-	/** A file's text as the editor has it: an open document's with unsaved edits, else what's on disk. (Not an unedited
-	 *  document's: VS Code keeps one after its file is deleted, and it would read as there.) */
 	const textOf = async (uri: vscodeApi.Uri): Promise<{ "text": string; "dirty": boolean }> => {
 		const open = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString());
 
@@ -116,7 +78,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		}
 	};
 
-	/** Edits to `uri`'s text, as typing makes them (an open editor, undo, the edit history), then saved. */
 	const applyAndSave = async (uri: vscodeApi.Uri, edits: (document: vscodeApi.TextDocument) => { "range": vscodeApi.Range; "text": string }[]): Promise<void> => {
 		const document = await vscode.workspace.openTextDocument(uri);
 		const edit = new vscode.WorkspaceEdit();
@@ -132,13 +93,8 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		await saveDocument(document, relative(uri));
 	};
 
-	/** The notes on `uri` as the Margin shows them (the notes extension's `notes.on`): each with its line, or none where it
-	 *  lost its place. */
 	const notesOn = async (uri: vscodeApi.Uri): Promise<{ "line"?: number; "text": string; "by": string }[]> => await Promise.resolve(vscode.commands.executeCommand<{ "line"?: number; "text": string; "by": string }[]>("notes.on", relative(uri))).catch(() => undefined) ?? [];
 
-	/** `edit` made to `uris`, and its answer with the notes it orphaned, if any: each one beside code before it and beside
-	 *  none after, its code gone — as Problems says "A note lost its place" to a person (NEXT.md item 2, *Notes for
-	 *  comments*: an orphan warning). */
 	const orphaning = async <T extends object>(uris: vscodeApi.Uri[], edit: () => Promise<T>): Promise<T & { "orphaned"?: { "path": string; "text": string; "by": string }[] }> => {
 		const before = new Map<string, { "line"?: number; "text": string; "by": string }[]>();
 
@@ -175,7 +131,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		const count = typeof limit === "number" && limit > 0 ? Math.floor(limit) : READ_LINES;
 		const shown = lines.slice(from - 1, from - 1 + count);
 		const width = String(from + shown.length - 1).length;
-		// (the notes the Margin shows beside these lines, and any that lost their place: what's said about the code, not in it)
 		const notes = (await notesOn(uri)).filter(({ line }) => line === undefined || (line >= from && line < from + shown.length));
 
 		return {
@@ -212,9 +167,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		});
 	});
 
-	// A file or a folder deleted, as the Explorer's Delete does (a folder with what's in it). Not the repository's own
-	// git: `.git` is the git tools' to change.
-	// A note on code, as Add Note does on a selection: `at` is the code it's about as it's written, found once, else it says so.
 	serve(hub, "notes.add", async (args) => {
 		const { path, at, text } = (args ?? {}) as { "path"?: unknown; "at"?: unknown; "text"?: unknown };
 		const uri = uriOf(path);
@@ -267,7 +219,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		const { path, old, "new": replacement, all, lines } = (args ?? {}) as { "path"?: unknown; "old"?: unknown; "new"?: unknown; "all"?: unknown; "lines"?: unknown };
 		const uri = uriOf(path);
 
-		// Whole lines, by their numbers (as files_read numbers them): a long cut needn't carry what it cuts.
 		if (Array.isArray(lines)) {
 			const [from, to] = lines as unknown[];
 
@@ -290,7 +241,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			return orphaning([uri], async () => {
 				await applyAndSave(uri, (document) => [{ "range": new vscode.Range(document.positionAt(start), document.positionAt(end)), "text": replacement }]);
 
-				// (what went, its first and last lines: that it was the lines meant)
 				return { "path": relative(uri), "replaced": 1, "lines": (to as number) - (from as number) + 1, "first": cut[0], "last": cut.at(cut.at(-1) === "" ? -2 : -1) };
 			});
 		}
@@ -324,7 +274,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			throw new TypeError("files.replace takes { edits: [{ path, old, new, all?, count? }] }: the exact texts to replace, in which files");
 		}
 
-		// Every edit checked against its file as the editor has it now, before any is made.
 		const texts = new Map<string, string>();
 		const planned: { "uri": vscodeApi.Uri; "start": number; "end": number; "text": string; "edit": number }[] = [];
 		const problems: string[] = [];
@@ -360,7 +309,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			}
 		}
 
-		// (two edits on the same text: which wins isn't the agent's to guess)
 		planned.sort((left, right) => left.uri.toString().localeCompare(right.uri.toString()) || left.start - right.start);
 
 		for (const [index, each] of planned.entries()) {
@@ -375,7 +323,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 			throw new Error(`nothing was changed: ${problems.join("; ")}`);
 		}
 
-		// (a preview: each file as the edit would leave it, as git's diff, and nothing changed)
 		if (preview === true) {
 			const diffs: string[] = [];
 
@@ -438,7 +385,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		return { "files": files.slice(0, most), "truncated": files.length > most };
 	});
 
-	/** What grep searches in `uri`: the open document's text, else the file's — undefined for data, binary or unreadable. */
 	const searchableText = async (uri: vscodeApi.Uri): Promise<string | undefined> => {
 		try {
 			const bytes = await vscode.workspace.fs.readFile(uri);
@@ -461,7 +407,6 @@ export function installWorkspaceTools(vscode: typeof vscodeApi, hub: Hub): void 
 		}
 
 		const expression = new RegExp(pattern, ignoreCase === true ? "iu" : "u");
-		// (a folder or a file named without a wildcard is what's in it, or it: a folder's name alone matches no file)
 		const named = typeof glob === "string" && glob !== "" ? glob.replace(/^\/workspace\//u, "").replace(/\/+$/u, "") : undefined;
 		const folder = named !== undefined && !/[*?{[]/u.test(named) && await Promise.resolve(vscode.workspace.fs.stat(uriOf(named))).then((stat) => stat.type === vscode.FileType.Directory, () => false);
 		const include = named === undefined ? "**/*" : folder ? `${named}/**/*` : named;

@@ -1,6 +1,5 @@
 import type { CommandDefinition } from "../../catalog";
 
-/** A command line's rest, passed on as it is. */
 const REST = { "format": Array, "default": [], "positional": "rest" } as const;
 
 export default {

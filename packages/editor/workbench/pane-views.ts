@@ -1,14 +1,3 @@
-/**
- * Pane views (ARCHITECTURE.md, *Extension points* 4): the tabs on the pane's first line, and what each draws beside the code. Every view
- * is an extension's — the Margin too (extensions/margin), shown first — declared in its manifest
- * (`contributes.paneViews`) and provided by its command `<id>.paneView`, run with a file's URI whenever the view is shown, the file is, or
- * it changes (or the provider says so: `editor.pane.refresh`). Its content is data (@brianjenkins94/editor-api/pane):
- * drawn here, in the Margin's look, each item on the lines its `at` is on now — lines as given, a span reference
- * resolved by the editor's BABLR, or a range in a text that ran followed from it (editor-api's anchors). A view declared
- * `into` another adds its items to that one's. The pane's look is theme/styles/pane-views.
- *
- * Runs in the workbench realm (core), with the workbench's own extension API.
- */
 import type { PaneAction, PaneAt, PaneCell, PaneCommand, PaneContent, PaneGroup, PaneItem, PaneViewDeclaration } from "@brianjenkins94/editor-api/pane";
 import type { PaneMark as FrameMark, PaneEntry, PaneView } from "@brianjenkins94/monaco-vscode-api/main";
 import type WaButton from "theme/components/button";
@@ -27,28 +16,20 @@ import "theme/components/dropdown";
 import "theme/components/dropdown-item";
 import "theme/components/input";
 
-/** The Margin (the margin extension's): the view shown first, and the one shown until another is chosen. */
 const MARGIN = "margin";
 
-/** How a mark's kind is styled in the pane's gutter column (theme/styles/pane-views). */
 const MARK_CLASSES: Record<string, string> = { "ran": "coverage-ran", "partial": "coverage-partial", "missed": "coverage-missed", "crashed": "run-crashed", "stopped": "run-stopped", "rule": "rule-placed", "rule-uncertain": "rule-placed uncertain" };
 
-/** How a group's state reads on its card. */
 const STATE_TEXT: Record<string, string> = { "ran": "ran", "partial": "partly ran", "missed": "didn't run" };
 
-/** An item placed: on the lines it's on now. */
 interface Placed { "item": PaneItem; "fromLine": number; "toLine": number }
 
-/** A row's place among the rows lined up with it: its run of rows (by its first row's id), and their column widths. */
 interface Columns { "run": string; "label": number; "cells": number[] }
 
-/** What one draw of a file shares among its items: each column's cells, lit together as one is hovered. */
 interface DrawState { "columns": Map<string, HTMLElement[]> }
 
 let api: typeof vscodeApi | undefined;
 let active = MARGIN;
-/** Where the shown view is drawn: beside the code (the pane), or with VS Code's own annotations (pane-native.ts) — the
- *  pane hidden. Remembered, the same for every editor. */
 const NATIVE_KEY = "pane.native";
 let native = ((): boolean => {
 	try {
@@ -59,23 +40,18 @@ let native = ((): boolean => {
 })();
 let nativeFace: ReturnType<typeof installNativeFace> | undefined;
 let declared: PaneViewDeclaration[] = [];
-/** Each text that ran, its anchors (by file and text). */
 const anchored = new Map<string, Anchors>();
-/** The latest draw of each file, so an older one finishing late doesn't overwrite it. */
 const drawing = new Map<string, number>();
 
-/** Where each item is now, in `document`: undefined for one whose code is gone. */
 async function placeAll(document: vscodeApi.TextDocument, ats: PaneAt[]): Promise<([number, number] | undefined)[]> {
 	const vscode = api;
 	const text = document.getText();
 	const file = vscode.workspace.asRelativePath(document.uri, false);
 	const last = Math.max(document.lineCount - 1, 0);
 	const placed: ([number, number] | undefined)[] = ats.map((at) => ("lines" in at ? [Math.min(Math.max(at.lines[0], 0), last), Math.min(Math.max(at.lines[1], at.lines[0], 0), last)] : undefined));
-	// Span references, resolved together.
 	const refs = ats.flatMap((at, index) => ("ref" in at ? [{ "index": index, "ref": at.ref }] : []));
 
 	if (refs.length > 0) {
-		// (none when the text can't be parsed as it is, or there's no BABLR: not drawn this time — the next draw looks again)
 		const answer = await annotations(vscode.commands).resolve(text, file, refs.map(({ ref }) => ref));
 		const found = "value" in answer ? answer.value : [];
 
@@ -88,7 +64,6 @@ async function placeAll(document: vscodeApi.TextDocument, ats: PaneAt[]): Promis
 		});
 	}
 
-	// Ranges in texts that ran, each text's together.
 	const ran = new Map<string, { "index": number; "start": number; "end": number }[]>();
 
 	ats.forEach((at, index) => {
@@ -108,7 +83,6 @@ async function placeAll(document: vscodeApi.TextDocument, ats: PaneAt[]): Promis
 		ranges.forEach(({ index, start, end }, at) => {
 			const line = lines[at];
 
-			// (as many lines down as the range spans in the text that ran)
 			if (line !== undefined) {
 				placed[index] = [line, Math.min(line + (source.slice(start, end).match(/\n/gu)?.length ?? 0), last)];
 			}
@@ -118,12 +92,10 @@ async function placeAll(document: vscodeApi.TextDocument, ats: PaneAt[]): Promis
 	return placed;
 }
 
-/** Run `command` (a click on an item's button or cell), with `last` after its own arguments. */
 async function run(command: PaneCommand, ...last: unknown[]): Promise<unknown> {
 	return api?.commands.executeCommand(command.command, ...command.arguments ?? [], ...last);
 }
 
-/** Each row's column widths, lined up with the rows on the lines next to it (or its own line). */
 function columnsOf(placed: Placed[]): Map<string, Columns> {
 	const rows = placed.filter(({ item }) => "cells" in item.content).toSorted((left, right) => left.fromLine - right.fromLine);
 	const widths = new Map<string, Columns>();
@@ -184,13 +156,10 @@ function cellOf(cell: PaneCell, className: string, width?: number): HTMLSpanElem
 	return span;
 }
 
-/** Draw `item` into `element`, in the Margin's look, level with line `line`; what it returns is called when it goes. */
 function renderItem(item: PaneItem, element: HTMLElement, line: number, columns: Columns | undefined, state: DrawState): (() => void) | undefined {
 	const { content } = item;
 	const buttons: (WaButton | WaDropdownItem)[] = [];
 	let dispose: (() => void) | undefined;
-	// A button's command: the item's buttons off until it's drawn again, this one marked — and why, if it fails. If it comes
-	// back with the item still drawn as it was (a picker cancelled, say), they're on again.
 	const act = (command: PaneCommand, chosen: WaButton): void => {
 		const before = buttons.map((each) => each.disabled);
 
@@ -221,7 +190,6 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 		return made;
 	};
 
-	// A button — and, with `more`, a split button: its caret a menu of the ways it can go.
 	const actionOf = (action: PaneAction): HTMLElement => {
 		const main = button(action, "live-values-choice", (self) => {
 			act(action, self);
@@ -304,7 +272,6 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 				row.append(span);
 			});
 
-			// A row's buttons at its end, shown as it's hovered, or always if it has something to say (`tone`).
 			if (item.actions !== undefined && item.actions.length > 0) {
 				const tools = Object.assign(document.createElement("span"), { "className": `live-values-mock wa-cluster wa-gap-2xs${item.tone === undefined ? "" : " shown"}` });
 
@@ -336,7 +303,6 @@ function renderItem(item: PaneItem, element: HTMLElement, line: number, columns:
 	return dispose;
 }
 
-/** A card's label: its title, its detail, how it ran; its title on hover. */
 function renderGroup(group: PaneGroup, element: HTMLElement): void {
 	element.append(
 		Object.assign(document.createElement("span"), { "className": "live-values-step-title", "textContent": group.label }),
@@ -349,7 +315,6 @@ function renderGroup(group: PaneGroup, element: HTMLElement): void {
 	}
 }
 
-/** What `view` and the views `into` it provide for `uri` — none from one that has nothing, or isn't there. */
 async function contentOf(view: string, uri: string): Promise<PaneContent[]> {
 	const providers = [view, ...declared.filter((each) => each.into === view).map((each) => each.id)];
 	const answers = await Promise.all(providers.map(async (id) => Promise.resolve(api?.commands.executeCommand<PaneContent | undefined>(`${id}.paneView`, uri)).catch(() => undefined)));
@@ -357,7 +322,6 @@ async function contentOf(view: string, uri: string): Promise<PaneContent[]> {
 	return answers.filter((answer): answer is PaneContent => answer !== undefined && answer !== null && Array.isArray(answer.items));
 }
 
-/** Draw `uri`'s pane: the shown view's content, with what's `into` it — or, with none, no pane. */
 async function draw(uri: string): Promise<void> {
 	const file = api?.workspace.textDocuments.find((each) => each.uri.toString() === uri);
 	const token = (drawing.get(uri) ?? 0) + 1;
@@ -370,7 +334,6 @@ async function draw(uri: string): Promise<void> {
 
 	const contents = await contentOf(active, uri);
 
-	// Nothing: the Margin's no pane (a file that isn't code); another view's an empty one, its tabs still there.
 	if (contents.length === 0) {
 		if (drawing.get(uri) === token) {
 			nativeFace?.show(uri, undefined);
@@ -383,7 +346,6 @@ async function draw(uri: string): Promise<void> {
 	const items = contents.flatMap((content) => content.items);
 	const groups = contents.flatMap((content) => content.groups ?? []);
 	const marks = contents.flatMap((content) => content.marks ?? []);
-	// The runs kept of the file, and where the one shown went (RUNNING.md, unattended runs): the view's that has them.
 	const runs = contents.find((content) => content.runs !== undefined)?.runs ?? [];
 	const path = contents.find((content) => content.path !== undefined)?.path;
 	const places = await placeAll(file, [...items.map((item) => item.at), ...groups.map((group) => group.at), ...marks.map((mark) => mark.at), ...path?.at ?? []]);
@@ -423,7 +385,6 @@ async function draw(uri: string): Promise<void> {
 		return undefined;
 	};
 
-	// With VS Code's own annotations instead, the pane hidden.
 	if (native) {
 		const nativeDrawing: NativeDrawing = {
 			"items": placed,
@@ -442,10 +403,7 @@ async function draw(uri: string): Promise<void> {
 	}
 
 	nativeFace?.show(uri, undefined);
-	// (the pane stays, its tabs with it, whatever the view has: an empty view is still shown)
 	showPane(uri, placed.map(({ item, fromLine, toLine }) => ({ "id": `item:${item.id}`, "fromLine": fromLine, "toLine": toLine })), render, frameMarks, placedGroups.map(({ group, fromLine, toLine }) => ({ "id": `group:${group.id}`, "fromLine": fromLine, "toLine": toLine })));
-	// A ball per run kept, the one shown held — a click picks another, by its command — and the shown run's ball rolled
-	// down the gutter through the lines it went, once (or, while it's going, beside the line it's on).
 	showPaneRuns(uri, runs.map((run) => ({ "id": run.id, "title": run.title, ...run.state === undefined ? {} : { "state": run.state }, ...run.picked === undefined ? {} : { "picked": run.picked } })), (id) => {
 		const command = runs.find((run) => run.id === id)?.command;
 
@@ -462,19 +420,16 @@ async function draw(uri: string): Promise<void> {
 	}
 }
 
-/** Every file shown in an editor. */
 function shownFiles(): string[] {
 	return [...new Set((api?.window.visibleTextEditors ?? []).filter((editor) => editor.document.uri.scheme === "file").map((editor) => editor.document.uri.toString()))];
 }
 
-/** The views with tabs, the Margin first (a view `into` another has none). */
 function tabs(): PaneView[] {
 	const own = declared.filter((view) => view.into === undefined);
 
 	return [...own.filter((view) => view.id === MARGIN), ...own.filter((view) => view.id !== MARGIN)].map((view) => ({ "id": view.id, "label": view.label ?? view.id, ...view.title === undefined ? {} : { "title": view.title } }));
 }
 
-/** Show view `id`, every shown file's. */
 function choose(id: string): void {
 	active = id;
 	showStrip();
@@ -484,13 +439,10 @@ function choose(id: string): void {
 	}
 }
 
-/** The strip: the views with tabs, the one shown chosen. */
 function showStrip(): void {
 	showPaneViews(tabs(), active, choose);
 }
 
-/** Draw `uri` again — or every shown file — for `view`, if it's the one shown (or in it): its provider's word that its
- *  content changed (`editor.pane.refresh`). */
 function refreshView(view: string, uri?: string): void {
 	if (view !== active && !declared.some((each) => each.id === view && each.into === active)) {
 		return;
@@ -501,10 +453,8 @@ function refreshView(view: string, uri?: string): void {
 	}
 }
 
-/** Read the views extensions declare, offer them, and draw the one shown as files show and change. */
 export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable[] {
 	api = vscode;
-	// (and the Margin's frame around each editor, which the component draws: pane.ts)
 	marginStyles();
 	paneViewsStyles();
 
@@ -518,7 +468,6 @@ export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable
 	};
 
 	const changed = new Map<string, ReturnType<typeof setTimeout>>();
-	// (typing paused: a file's content asked for again)
 	const redrawLater = (uri: string): void => {
 		clearTimeout(changed.get(uri));
 		changed.set(uri, setTimeout(() => {
@@ -536,7 +485,6 @@ export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable
 
 	return [
 		...nativeFace.disposables,
-		// Beside the code, or as VS Code's own annotations (the pane hidden): the shown view drawn the other way.
 		vscode.commands.registerCommand("editor.pane.toggleNative", () => {
 			native = !native;
 
@@ -550,7 +498,6 @@ export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable
 
 			return native;
 		}),
-		// Which view is shown — the pane's tabs, when there's no pane to show them.
 		vscode.commands.registerCommand("editor.pane.chooseView", async (id?: unknown) => {
 			const picked = typeof id === "string" ? id : (await vscode.window.showQuickPick(tabs().filter((view) => view.disabled !== true).map((view) => ({ "label": view.label, ...view.title === undefined ? {} : { "detail": view.title }, "id": view.id, ...view.id === active ? { "description": "shown" } : {} }))))?.id;
 
@@ -560,13 +507,11 @@ export function installPaneViews(vscode: typeof vscodeApi): vscodeApi.Disposable
 
 			return active;
 		}),
-		// A provider's word that its content changed: one file's, or every file's.
 		vscode.commands.registerCommand("editor.pane.refresh", (view: unknown, uri?: unknown) => {
 			if (typeof view === "string") {
 				refreshView(view, typeof uri === "string" ? uri : undefined);
 			}
 		}),
-		// The shown view's content, for a file as it's shown and as it changes.
 		vscode.window.onDidChangeVisibleTextEditors(() => {
 			for (const uri of shownFiles()) {
 				void draw(uri);

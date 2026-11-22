@@ -1,21 +1,3 @@
-/**
- * A commit beside the work, read-only: a branch, tag or commit opened is a folder of the workspace, `.refs/<name>/`, its
- * files as that commit has them, read from git's objects — no copy in the workspace's store. It's how a removed
- * feature's code is read at its tombstone, and the rewrite's Measure reads `full-editor` (ARCHITECTURE.md, *The
- * rewrite, in place*). The Explorer, Quick Open, Find in Files and agents' files_* read it as any folder; git doesn't
- * see it (it reads the store), nor does TypeScript's project (a dot-folder), and the walks for the project's manifests
- * leave it out (editor-api's `REFS_DIR`). Nothing is written there: a write is refused, not let fall through to the workspace.
- *
- * - the command `editor.git.openRef` ("Git: Open a Commit Read-Only…"): a branch, tag or commit, fetched one commit deep
- *   when the clone hasn't it, then shown in the Explorer;
- * - `git.openRef` { ref, stripped? }: the same, for agents' `git_open`.
- *
- * Or with its comments stripped, at `.refs/<name>~stripped/`: the code alone, as the rewrite's zero-knowledge pass reads
- * it (ARCHITECTURE.md, *What's self-explanatory*) — each code file with its comments blanked by BABLR (bablr.ts' `stripped`,
- * line for line the file as it is), and no docs: no Markdown, no `.silo/`.
- *
- * Open until the window reloads.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { IFileSystemProviderWithFileReadWriteCapability, IStat } from "@brianjenkins94/monaco-vscode-api/main";
 import type { Logger } from "@brianjenkins94/util/logger";
@@ -33,24 +15,18 @@ import { createChangeEvent, notFound } from "./provider-base";
 const DIR = "/workspace";
 const ROOT = `${DIR}/${REFS_DIR}`;
 
-/** An entry of a commit's tree. */
 type Entry = NonNullable<Awaited<ReturnType<typeof engine.treeAt>>>[number];
 
-/** A commit opened: its oid, when it was made (its files' times), and whether it's the code alone. */
 interface Opened { "oid": string; "time": number; "stripped": boolean }
 
-/** Code BABLR strips comments from. */
 const CODE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
 
-/** What the code alone leaves out: a doc, and silo's records (the ledger's whys, the manifest's whats). */
 const DOCS = (name: string): boolean => /\.mdx?$/iu.test(name) || name === ".silo";
 
-/** A write somewhere under `.refs/`, refused — an error the overlay doesn't pass on to the workspace's provider. */
 function refused(path: string): FileSystemProviderError {
 	return FileSystemProviderError.create(`${path} is a commit's, read-only`, FileSystemProviderErrorCode.FileWriteLocked);
 }
 
-/** Not this provider's to write: the overlay tries the next one. */
 function notOurs(): FileSystemProviderError {
 	return FileSystemProviderError.create("not a commit's", FileSystemProviderErrorCode.Unavailable);
 }
@@ -83,7 +59,6 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 		return blob;
 	};
 
-	/** Where `path` is: `.refs/` itself (no name), a commit's folder or a path in it; undefined outside `.refs/`. */
 	const where = (path: string): { "name"?: string; "path": string } | undefined => {
 		if (path === ROOT) {
 			return { "path": "" };
@@ -98,7 +73,6 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 		return { "name": name, "path": rest.join("/") };
 	};
 
-	/** `path`'s entry in the commit opened as `name`: its root is a tree. */
 	const entryOf = async (name: string, path: string): Promise<{ "commit": Opened; "entry": Pick<Entry, "type" | "oid"> } | undefined> => {
 		const commit = opened.get(name);
 
@@ -144,7 +118,6 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 	};
 
 	const readdir = async (resource: { "path": string }): Promise<[string, FileType][]> => {
-		// (the workspace's root lists `.refs/` once a commit's open: the overlay merges each provider's listing)
 		if (resource.path === DIR) {
 			if (opened.size === 0) {
 				throw notFound();
@@ -189,7 +162,6 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 			return bytes;
 		}
 
-		// (a file BABLR can't parse is as it is: its comments can't be told from its code)
 		const stripped = await bablr.stripped(new TextDecoder().decode(bytes));
 
 		return stripped === undefined ? bytes : new TextEncoder().encode(stripped);
@@ -200,16 +172,12 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 	};
 
 	const provider: IFileSystemProviderWithFileReadWriteCapability = {
-		// (not Readonly: the overlay skips a read-only provider's writes, and the workspace's would take them)
 		"capabilities": FileSystemProviderCapabilities.FileReadWrite | FileSystemProviderCapabilities.PathCaseSensitive,
 		"onDidChangeCapabilities": (() => ({ "dispose": function() {
-			// capabilities never change — nothing to dispose
 		} })) as never,
 		"onDidChangeFile": onDidChangeFile,
 		"watch": () => ({ "dispose": function() {
-			// a commit never changes — nothing to watch
 		} }),
-		// (each call counted at the boundary, as the workspace's are: fs-boundaries.ts' `refs`)
 		"stat": async (resource) => timeCall("refs", "stat", vscodeCaller(), resource.path, async () => stat(resource)),
 		"readdir": async (resource) => timeCall("refs", "readdir", vscodeCaller(), resource.path, async () => readdir(resource)),
 		"readFile": async (resource) => timeCall("refs", "readFile", vscodeCaller(), resource.path, async () => readFile(resource)),
@@ -219,10 +187,8 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 		"rename": async (from, to) => write(where(from.path) === undefined ? to.path : from.path)
 	};
 
-	// Above the workspace's (2): a write under `.refs/` is refused here before the workspace's provider could take it.
 	registerFileSystemOverlay(3, provider);
 
-	/** Open `ref` at `.refs/<name>/` (`<name>~stripped`, the code alone), fetched one commit deep when the clone hasn't it. */
 	const open = async (ref: string, stripped = false): Promise<{ "ref": string; "commit": string; "path": string }> => log.span("editor.workbench.git-refs.open", { "ref": ref, "stripped": stripped }, async (span) => {
 		let commit = await engine.commitOf(ref);
 
@@ -274,7 +240,6 @@ export function installGitRefs(vscode: typeof vscodeApi, hub: Hub, log: Logger, 
 		}
 	});
 
-	// Every commit opened, closed: `.refs/` goes from the workspace (and what was read of them from memory).
 	vscode.commands.registerCommand("editor.git.closeRefs", () => {
 		if (opened.size === 0) {
 			return;

@@ -1,20 +1,3 @@
-/**
- * CDN-backed, read-only, *eventually-consistent* filesystem provider for node_modules.
- *
- * The other half of the resolution stack: the synchronous snapshot (build/package-types.ts → editorTypesPlugin)
- * seeds the .d.ts surface the TS type-checker needs up front; this overlay lazily fetches FULL package
- * source from unpkg on demand so go-to-definition / hover reaches the real implementation (and
- * transitive deps) without baking any of it into the page. It works in a static deploy (no filesystem).
- *
- * Registered as a low-priority `file` overlay: it only answers `<workspaceFolder>/node_modules/<pkg>/…`
- * and throws FileNotFound otherwise, so the in-memory snapshot wins for everything else (the overlay
- * falls through on FileNotFound). Built from primitives re-exported by
- * `@brianjenkins94/monaco-vscode-api/main` so editor doesn't depend on @codingame packages directly.
- *
- * Note: this satisfies go-to-definition/browsing into CDN deps, but NOT the TS type-checker, which
- * resolves package.json/exports against a synchronous worker view the async provider can't populate —
- * type-checked source imports must be seeded synchronously instead (editorTypesPlugin).
- */
 import type { IFileChange, IFileSystemProviderWithFileReadWriteCapability, IStat } from "@brianjenkins94/monaco-vscode-api/main";
 import {
 	FileChangeType,
@@ -29,8 +12,6 @@ import { normalized, packagesNamedBy, relativeImports, splitPackage } from "./no
 import { tarball } from "./tarballs";
 import { aliases } from "./versions";
 
-/** unpkg `?meta`: the old listing (`type: "directory"`, its immediate `files`), or the current one — `{ prefix, files }`
- *  with every file beneath the prefix flat, by full path (`type` is then a MIME type, and directories aren't listed). */
 interface UnpkgMeta {
 	"type"?: string;
 	"prefix"?: string;
@@ -38,7 +19,6 @@ interface UnpkgMeta {
 	"files"?: { "path": string; "type"?: string; "size"?: number }[];
 }
 
-/** A directory's immediate children from either `?meta` shape; in the flat one, a deeper path means a subdirectory. */
 function childEntries(meta: UnpkgMeta): [string, FileType][] {
 	if (meta.type === "directory") {
 		return (meta.files ?? []).map((entry) => [
@@ -60,32 +40,20 @@ function childEntries(meta: UnpkgMeta): [string, FileType][] {
 	return [...children];
 }
 
-/** A spurious TypeScript-SOURCE probe: `.ts`/`.tsx`/`.mts`/`.cts` that is NOT a declaration (`.d.ts` …).
- *  Published packages never ship `.ts` source; tsserver probes `<pkg>/index.ts` before `.d.ts`, and the CDN
- *  answers those with content (a redirect to the real file), which tsserver then RESOLVES the import to
- *  ("is not a module") — shadowing the @types surface. Serving them notFound keeps the probe a failed lookup. */
 function isTsSourceProbe(rel: string): boolean {
 	return (/\.(?:tsx?|mts|cts)$/u).test(rel) && !(/\.d\.(?:ts|mts|cts)$/u).test(rel);
 }
 
-/** How deep `prefetchFor` follows a config's relative imports: a config and the few files of its own it imports. */
 const PREFETCH_DEPTH = 3;
 
-/** What a relative import may name, a file as written or with Node's extensions. */
 const IMPORT_TRIES = ["", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", "/index.js"];
 
-// Each prefetch is a span: it crosses the network, and what asked for it waits on it.
 const log = logger({ "source": "workbench" });
 
-/** The provider, and `prefetchFor`: what `files` name, read ahead. */
 export type NodeModulesProvider = IFileSystemProviderWithFileReadWriteCapability & { "prefetchFor": (files: string[], read: (path: string) => Promise<string | undefined>) => Promise<string[]> };
 
 export function createNodeModulesProvider(workspaceFolder: string, versions: Record<string, string>): NodeModulesProvider {
 	const prefix = workspaceFolder.replace(/\/$/u, "") + "/node_modules";
-	// The deploy base ("/editor/" on GitHub Pages, "/" locally): this provider runs in the workbench iframe at
-	// <base>/__vscode__/host.html, and the service worker is scoped to <base>, so requests must sit under <base>
-	// to be intercepted (the SW matches /workspace/ under any prefix — see coi-serviceworker.js). A root-absolute
-	// /workspace/… URL would escape the SW scope on a subpath deploy.
 	const deployBase = location.pathname.slice(0, location.pathname.indexOf("/__vscode__/") + 1) || "/";
 
 	const { listeners, onDidChangeFile } = createChangeEvent();
@@ -106,29 +74,16 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 
 	const toRel = relUnder(prefix);
 
-	// Only packages with a pinned version are served. The CDN 302-redirects every *unversioned* request
-	// (e.g. `unpkg.com/preact` → `…/preact@10.x`); the resolver's CDN fallback follows that redirect
-	// internally (its fetch isn't bound by the document's COEP), but we still can't pin a version
-	// synchronously, so we simply don't fetch unpinned packages (type-checking uses the synchronous
-	// snapshot, not this provider).
 	const served = (rel: string): boolean => versions[splitPackage(rel).pkg] !== undefined;
 
-	// Promise-memoized by URL (meta and file requests differ by the `?meta` suffix). Cache 404s (real
-	// misses) and successes; let transient failures (network/5xx/429) retry.
 	const cache = new Map<string, Promise<unknown>>();
 	const memoFetch = <T>(rel: string, query: string, parse: (res: Response) => Promise<T>): Promise<T | undefined> => {
 		if (!served(rel)) {
 			return Promise.resolve(undefined);
 		}
 
-		// Fetch the REAL same-origin node_modules path. A store miss there is answered by the resolver's CDN
-		// fallback — the SW (prod) or build/package-types.ts nodeModulesCdnPlugin (dev) fetches the package from the CDN and
-		// hands it back same-origin (the fold-in that retired `__proxy__`; see coi-serviceworker.js). The
-		// pinned version rides along as `?v=` so the served source matches the type-checker snapshot's version;
-		// `?meta` asks for the directory listing. `served()` above guarantees the version is defined here.
 		const { pkg } = splitPackage(rel);
 		const version = versions[pkg];
-		// (an npm alias is fetched as the package it is: `p`, which the fallback asks the CDN for instead of the folder's name)
 		const real = aliases[pkg] === undefined ? "" : `&p=${encodeURIComponent(aliases[pkg])}`;
 		const search = (query === "?meta" ? `?meta&v=${version}` : `?v=${version}`) + real;
 		const url = new URL(`${deployBase}${prefix.replace(/^\//u, "")}/${rel}${search}`, location.href).href;
@@ -161,28 +116,15 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 	const fetchMeta = (rel: string): Promise<UnpkgMeta | undefined> => memoFetch(rel, "?meta", (res) => res.json() as Promise<UnpkgMeta>);
 	const fetchFile = (rel: string): Promise<Uint8Array | undefined> => memoFetch(rel, "", async (res) => new Uint8Array(await res.arrayBuffer()));
 
-	// SYNCHRONOUS result caches. stat/readFile/readdir must answer the TS type-checker WITHOUT awaiting the
-	// network: that checker reads through the @vscode/sync-api SAB bridge, which blocks a worker thread on the
-	// reply, so an `await fetch(...)` here DEADLOCKS first-load analysis — workspace-fs throws notFound for a
-	// not-yet-acquired type, the checker falls through to this overlay, and hangs forever ("Analyzing…"). Instead
-	// serve resolved results synchronously and, on a miss, FAIL FAST (notFound) while fetching in the background;
-	// the fetch caches the result and fires a change event (announce), so the checker re-reads and resolves. The
-	// overlay was always "eventually-consistent" — this just stops it blocking the synchronous reader. (Async
-	// go-to-definition uses the same methods; a first read may notFound and resolve on the follow-up change.)
 	const metaResults = new Map<string, UnpkgMeta | undefined>();
 	const fileResults = new Map<string, Uint8Array | undefined>();
 	const metaInflight = new Set<string>();
 	const fileInflight = new Set<string>();
-	// Packages read whole, ahead of what asks (prefetch): their files in fileResults, and each folder's children here, so
-	// what reads them as Node reads a disk (ESLint's worker loading a config) has them at its first read, a folder's
-	// listing too, which the CDN only gives by a fetch of its own. A path in one that isn't in it is nowhere: no fetch.
 	const whole = new Set<string>();
 	const folders = new Map<string, Map<string, FileType>>();
 	const prefetching = new Map<string, Promise<void>>();
-	/** Whether `rel` is in a package read whole, and isn't there. */
 	const absent = (rel: string): boolean => whole.has(splitPackage(rel).pkg) && !fileResults.has(rel) && !folders.has(rel);
 
-	/** `name`, read whole: its tarball, at the version pinned, each file and folder kept. */
 	const prefetch = (name: string): Promise<void> => {
 		const version = versions[name];
 
@@ -223,7 +165,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		return prefetching.get(name)!;
 	};
 
-	/** What `files` name (and the files they import by a relative path, a few deep), read whole: the packages, once in. */
 	const prefetchFor = (files: string[], read: (path: string) => Promise<string | undefined>): Promise<string[]> => log.span("editor.workbench.node-modules-provider.prefetch", { "count": files.length }, async (span) => {
 		const seen = new Set<string>();
 		const named = new Set<string>();
@@ -307,16 +248,11 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			| FileSystemProviderCapabilities.PathCaseSensitive
 			| FileSystemProviderCapabilities.Readonly,
 		"onDidChangeCapabilities": (() => ({ "dispose": function() {
-			// capabilities never change — nothing to dispose
 		} })) as never,
 		"onDidChangeFile": onDidChangeFile,
 		"watch": () => ({ "dispose": function() {
-			// nothing is watched — nothing to dispose
 		} }),
 
-		// All three reads are SYNCHRONOUS-SAFE: they answer from the resolved cache or fail fast (never awaiting a
-		// fetch), so the sync-api checker can't deadlock on them. A miss kicks off the background fetch, which
-		// caches + announces; the checker re-reads on that change and resolves.
 		"stat": function(resource): Promise<IStat> {
 			const rel = toRel(resource.path);
 
@@ -340,10 +276,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				return Promise.reject(notFound());
 			}
 
-			// Existence via the ACTUAL FILE (404-aware), NOT `?meta`. unpkg's `?meta` lies: it returns
-			// `200 {files:[]}` for ANY path — existent or not — so a `?meta`-based stat reported every probe as a
-			// real 0-byte file, and readFile then 404'd, so tsserver resolved the import to a dead file ("is not a
-			// module") and shadowed @types. The actual file 404s correctly, so mirror readFile here.
 			if (!fileResults.has(rel)) {
 				ensureFile(rel, resource);
 
@@ -415,7 +347,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			const meta = metaResults.get(rel);
 			const children = meta === undefined ? [] : childEntries(meta);
 
-			// unpkg answers `?meta` for ANY path (see stat), so an empty listing is a file or nothing — not a directory.
 			if (children.length === 0) {
 				return Promise.reject(notFound());
 			}
@@ -429,8 +360,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		"rename": () => Promise.reject(readOnly())
 	};
 
-	// (each read counted at the boundary: VS Code's file service into node_modules, by operation, with its path —
-	// fs-boundaries.ts, the metrics plane's `fs` — by who in VS Code asked, fs-caller.ts's vscodeCaller)
 	for (const method of ["stat", "readFile", "readdir"] as const) {
 		const original = provider[method].bind(provider) as (resource: { "path": string }) => unknown;
 

@@ -1,15 +1,6 @@
-/**
- * What the workspace's file provider last found at each path (workspace-fs.ts's `stat`): its stat, or null for nothing
- * there. TypeScript's module resolution asks the same paths over and over as a project loads (16.7k stats in a cold load
- * of this repository, 2026-11-02), each a walk from the store's root. A path is forgotten as anything changes it, a folder
- * above it (its listing's mtime), or a folder it's in that goes or comes (renamed into place, its files asked for before).
- * Each folder's kept paths are indexed, a folder on the way among them, so forgetting what's under a path walks only what's
- * kept there: the store's watcher tells each write as it's made, a clone's thousands.
- */
 import type { WorkspaceChange } from "../shared/workspace-changes";
 
 export interface StatCache<Stat> {
-	/** What's kept for `path`: its stat, null (nothing there), or undefined (not asked since it last changed). */
 	"get": (path: string) => Stat | null | undefined;
 	"remember": (path: string, stat: Stat | null) => void;
 	"forget": (changes: readonly WorkspaceChange[]) => void;

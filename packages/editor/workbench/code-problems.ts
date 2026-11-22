@@ -1,19 +1,3 @@
-/**
- * A change's problems, against HEAD: `code.problems` { paths?, depth?, limit? } answers which diagnostics the working
- * tree's changes added and which they cleared, so a person or an agent can tell what a change broke from the problems
- * that were there before it (a whole program's TypeScript errors hide the new ones). Its readers: the review panel
- * (shell/change-problems.tsx, each changed file's) and agents' `code_problems`.
- *
- * - TypeScript's, from the change-problems extension's tsserver plugin (`_changeProblems.compare`,
- *   extensions/change-problems/ts-plugin.js): the changed files and the files importing them, each checked as the program
- *   is now and as it was at HEAD. The projects are told of the files made since first (`_changeProblems.files`), and each
- *   changed file's symbols are asked, so the server holds its project.
- * - ESLint's, per changed file (`_eslint.problems`, the eslint extension): its HEAD text and its text now, each linted at
- *   its path, customized as the Problems view's are.
- *
- * A problem is the same one at HEAD and now when its file, source, code and message are: lines move with an edit, so
- * where it is doesn't say. Now is what the editor has (an open file's unsaved edits included); HEAD is git's.
- */
 import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Logger } from "@brianjenkins94/util/logger";
@@ -23,22 +7,17 @@ import { serve } from "@brianjenkins94/hub";
 
 const ROOT = "/workspace";
 
-/** A server path as the workspace names it. */
 function relative(path: string): string {
 	return path.startsWith(ROOT + "/") ? path.slice(ROOT.length + 1) : path;
 }
 
-/** The files TypeScript and ESLint read. */
 const CODE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/u;
 
-/** The problems listed at most, each way (the counts are all of them). */
 const LISTED = 200;
 
-/** How often, and how far apart, the TypeScript server is asked while it isn't ready (see typescriptProblems). */
 const TRIES = 5;
 const TRY_MS = 1500;
 
-/** A diagnostic, where it is in its side's text (1-based). */
 export interface Problem {
 	"file": string;
 	"line": number;
@@ -49,7 +28,6 @@ export interface Problem {
 	"message": string;
 }
 
-/** What the plugin answers (`_changeProblems.compare`). */
 interface Compared {
 	"projects": {
 		"project": string;
@@ -58,12 +36,9 @@ interface Compared {
 		"beyond": number;
 	}[];
 	"outside": string[];
-	/** What failed, when the plugin couldn't compare. */
 	"error"?: string;
 }
 
-/** The problems `now` has that `head` hasn't (added), and those `head` has that `now` hasn't (cleared), as multisets: a
- *  problem is the same one when its file, source, code and message are. */
 export function problemsDelta(head: Problem[], now: Problem[]): { "added": Problem[]; "cleared": Problem[]; "unchanged": number } {
 	const key = (problem: Problem): string => JSON.stringify([problem.file, problem.source, problem.code, problem.message]);
 	const before = new Map<string, Problem[]>();
@@ -89,7 +64,6 @@ export function problemsDelta(head: Problem[], now: Problem[]): { "added": Probl
 	return { "added": added, "cleared": [...before.values()].flat(), "unchanged": unchanged };
 }
 
-/** TypeScript's side: what the plugin says of the changed files and their importers, now and at HEAD. */
 async function typescriptProblems(vscode: typeof vscodeApi, heads: Map<GitFileChange, string | null>, depth: number, limit: number): Promise<{ "head": Problem[]; "now": Problem[]; "compared"?: Compared }> {
 	const ask = async (): Promise<Compared | undefined> => (await Promise.resolve(vscode.commands.executeCommand<{ "body"?: Compared } | undefined>("typescript.tsserverRequest", "_changeProblems.compare", {
 		"files": Object.fromEntries([...heads].map(([change, text]) => [`${ROOT}/${change.path}`, text])),
@@ -98,8 +72,6 @@ async function typescriptProblems(vscode: typeof vscodeApi, heads: Map<GitFileCh
 	})).catch(() => undefined))?.body;
 	let compared = heads.size === 0 ? undefined : await ask();
 
-	// A server just started doesn't know the request until it makes a project (the plugin registers it then), and holds
-	// no project for a file it's still opening: it's asked again, a little later.
 	for (let tried = 1; heads.size > 0 && tried < TRIES && (compared === undefined || (compared.error === undefined && compared.projects.length === 0)); tried += 1) {
 		await new Promise((resolve) => {
 			setTimeout(resolve, TRY_MS);
@@ -119,7 +91,6 @@ async function typescriptProblems(vscode: typeof vscodeApi, heads: Map<GitFileCh
 	return { "head": head, "now": now, "compared": compared };
 }
 
-/** ESLint's side: each changed file linted at its path, as it is now and as HEAD had it. */
 async function eslintProblems(vscode: typeof vscodeApi, heads: Map<GitFileChange, string | null>): Promise<{ "head": Problem[]; "now": Problem[]; "linted": string[] }> {
 	const head: Problem[] = [];
 	const now: Problem[] = [];
@@ -128,7 +99,6 @@ async function eslintProblems(vscode: typeof vscodeApi, heads: Map<GitFileChange
 	for (const [change, text] of heads) {
 		const uri = vscode.Uri.file(`${ROOT}/${change.path}`);
 		const ask = async (of?: string): Promise<Omit<Problem, "file" | "source">[] | undefined> => Promise.resolve(vscode.commands.executeCommand<Omit<Problem, "file" | "source">[] | undefined>("_eslint.problems", uri, of)).catch(() => undefined);
-		// (a deleted file: none now, and HEAD's can't be linted without its document)
 		const after = change.status === "D" ? undefined : await ask();
 
 		if (after !== undefined) {
@@ -145,8 +115,6 @@ export function installCodeProblems(vscode: typeof vscodeApi, hub: Hub, git: Git
 	serve(hub, "code.problems", async (args) => {
 		const { paths, depth, limit, whole } = (args ?? {}) as { "paths"?: unknown; "depth"?: unknown; "limit"?: unknown; "whole"?: unknown };
 		const only = Array.isArray(paths) ? paths.filter((path): path is string => typeof path === "string").map((path) => path.replace(/^\/workspace\//u, "").replace(/\/$/u, "")) : undefined;
-		// (a walk of the whole tree, unless asked for only what changed since the last — the review panel's, asking as the
-		// changes settle: a whole walk of this repository is ~1.5 s of the page's thread)
 		const changes = (await git.status({ "whole": whole !== false })).files.filter((change) => CODE.test(change.path) && (only === undefined || only.some((path) => change.path === path || change.path.startsWith(path + "/"))));
 		const heads = new Map<GitFileChange, string | null>();
 
@@ -154,11 +122,8 @@ export function installCodeProblems(vscode: typeof vscodeApi, hub: Hub, git: Git
 			heads.set(change, change.status === "A" ? null : (await git.file(change.path)).head);
 		}
 
-		// (the projects told first, so they hold the files made since: the browser server's watchers watch nothing)
 		await Promise.resolve(vscode.commands.executeCommand("typescript.tsserverRequest", "_changeProblems.files", {})).catch(() => undefined);
 
-		// (each one's symbols asked, so the TypeScript server holds its project: opening a document doesn't hand it to the
-		// server, a language feature's request does)
 		await Promise.all(changes.filter((change) => change.status !== "D").map(async (change) => Promise.resolve(vscode.commands.executeCommand("vscode.executeDocumentSymbolProvider", vscode.Uri.file(`${ROOT}/${change.path}`))).then(() => undefined, () => undefined)));
 
 		const typescript = await log.span("editor.workbench.code-problems.typescript", { "count": heads.size }, async (span) => {
@@ -187,7 +152,6 @@ export function installCodeProblems(vscode: typeof vscodeApi, hub: Hub, git: Git
 				"typescript": [...new Set(compared.flatMap(({ checked }) => checked.map(({ file }) => relative(file))))].sort((left, right) => left.localeCompare(right)),
 				"eslint": eslint.linted
 			},
-			// What it didn't look at, so an empty `added` isn't read as more than it is.
 			"unchecked": {
 				...typescript.compared === undefined && changes.length > 0 ? { "typescript": "the TypeScript server didn't answer (still starting, or no project holds these files)" } : {},
 				...typescript.compared?.error === undefined ? {} : { "typescript": `the comparison failed: ${typescript.compared.error}` },

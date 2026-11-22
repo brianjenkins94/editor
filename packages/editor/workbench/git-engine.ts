@@ -1,16 +1,3 @@
-/**
- * Browser git ENGINE — isomorphic-git over the zen-fs workspace, with NO vscode dependency.
- *
- * This is the durable, reusable core: through git-service.ts it backs VS Code's Source Control view and the shell's review
- * panel today, and
- * a custom shell UI / the RHS revision history later, with the view swapped and the engine untouched. It's also the
- * COARSE (git) tier of the eventual two-tier history (Automerge = fine local edits, git = published commits).
- *
- * Local, but for two things: init / status / stage / commit / branches + HEAD blobs for diff, and a push and a
- * fast-forward. Their HTTP is the caller's (`push`'s and `pull`'s `http`): the workbench's goes through the shell,
- * which holds the sign-in (shell/git-push.ts).
- * Who a commit is by is the caller's too (`setAuthor`): the signed-in GitHub user, else a placeholder.
- */
 import type { HttpClient } from "isomorphic-git";
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
 import { Buffer } from "node:buffer";
@@ -20,34 +7,21 @@ import { fs as zenfs } from "@zenfs/core";
 import { add, branch, checkout, commit, currentBranch, deleteRef, Errors, expandOid, getConfig, fetch as gitFetch, push as gitPush, hashBlob, init, isDescendent, listBranches, log, merge, readBlob, readCommit, readTree, remove, resetIndex, resolveRef, setConfig, STAGE, statusMatrix, TREE, updateIndex, walk, writeBlob, writeRef } from "isomorphic-git";
 import { callerFs } from "../shared/fs-caller";
 
-/** The workspace's store as git reaches it: each of isomorphic-git's calls git's, in the store's counts (fs-caller.ts). */
 const fs = callerFs(zenfs, "git");
 
-// isomorphic-git reads the `Buffer` global (a Node-ism), which the browser lacks. The build injects unenv's where it's
-// read (polyfillNode, build.ts pass 1, which also resolves `node:buffer` here to unenv's); the dev optimizer's copy of
-// isomorphic-git gets no such injection, so set the global too. Set before any git op runs (module load precedes the
-// git service's first op).
 // eslint-disable-next-line ts/naming-convention -- the Buffer global isomorphic-git expects, node's name
 (globalThis as unknown as { "Buffer"?: unknown }).Buffer ??= Buffer;
 
-/** The workspace is the repo root (zen-fs mounts the SingleBuffer here; see workspace-fs.ts). */
 const DIR = "/workspace";
-/** Where a merge waiting on its conflicts keeps the commit it's merging, as git does: the commit that settles them has
- *  it as its second parent (`committed`). isomorphic-git keeps no such state of its own. */
 const MERGE_HEAD = `${DIR}/.git/MERGE_HEAD`;
-/** Who a commit is by when nothing says (signed out). */
 const AUTHOR = { "name": "editor", "email": "editor@localhost" };
 
-/** Who a commit is by: asked as each is made (setAuthor). */
 let authorOf: () => Promise<{ "name": string; "email": string } | undefined> = () => Promise.resolve(undefined);
 
-/** Where who a commit is by comes from (git-service.ts: the shell's signed-in GitHub user). */
 export function setAuthor(source: typeof authorOf): void {
 	authorOf = source;
 }
 
-/** Who this workspace's git says you are (`user.name`, `user.email` in its config, as `git config user.*` sets them):
- *  what silo's records name their author by (notes, runs: userSlug), the same who as the commits'. */
 export async function recordIdentity(who: { "name": string; "email": string }): Promise<void> {
 	if (!fs.existsSync(DIR + "/.git")) {
 		return;
@@ -63,21 +37,10 @@ export async function recordIdentity(who: { "name": string; "email": string }): 
 export interface GitChange { "path": string; "status": "A" | "M" | "D" }
 export interface GitStatus { "staged": GitChange[]; "unstaged": GitChange[] }
 
-/** The default `.gitignore` for a workspace that ships none — keeps the seeded dependency types under node_modules/
- *  out of git status (statusMatrix honors .gitignore). Materialized into zen-fs on a repo load too (see
- *  workbench-entry.tsx), since isomorphic-git reads it straight off the filesystem. */
 export const DEFAULT_GITIGNORE = "node_modules/\n";
 
-/** The line in `.git/info/exclude` — git's own ignore for one machine, never committed — that keeps `.silo/local/` out of
- *  git in a repository that has no `.silo/.gitignore` (2026-10-30: the editor adds that only with something else under
- *  `.silo/`). */
 const LOCAL_EXCLUDE = `/${LOCAL_DIR}/`;
 
-/** `.silo/` is in git (RUNTIME-EVIDENCE.md): silo's policy, the runs and their evidence travel with the repo, and
- *  `.silo/.gitignore` keeps out only what stays on the machine. The editor used to list `.silo/` in `.git/info/exclude`;
- *  take that line back out of a repo that still has it, and list `.silo/local/` there instead (`LOCAL_EXCLUDE`) —
- *  idempotent, run on every repo the workspace becomes (ensureRepo; a clone load in workbench-entry.tsx). And the files
- *  the editor makes that the repository hasn't taken (`keepLocal`) go to their local copies. */
 export async function includeSilo(): Promise<void> {
 	const file = DIR + "/.git/info/exclude";
 
@@ -95,12 +58,6 @@ export async function includeSilo(): Promise<void> {
 	await keepLocal();
 }
 
-/**
- * The files the editor makes for a project (editor-api's git.ts `KEPT`: versions, baseline) are the
- * repository's at `.silo/` once it has committed them, and local until then (`keptAt`). One at `.silo/` that git has
- * neither in HEAD nor staged — an editor before 2026-10-30 wrote them there, and every commit took them — is moved to
- * its local copy, where git doesn't see it.
- */
 async function keepLocal(): Promise<void> {
 	for (const name of KEPT) {
 		const shared = `${SILO_DIR}/${name}`;
@@ -121,8 +78,6 @@ async function keepLocal(): Promise<void> {
 	}
 }
 
-/** Ensure /workspace is a git repo — `git init` on first run (idempotent), with a default `.gitignore` so the seeded
- *  dependency types under node_modules/ don't flood the status (statusMatrix honors .gitignore). */
 export async function ensureRepo(): Promise<void> {
 	if (!fs.existsSync(DIR + "/.git")) {
 		await init({ "fs": fs, "dir": DIR, "defaultBranch": "main" });
@@ -135,7 +90,6 @@ export async function ensureRepo(): Promise<void> {
 	await includeSilo();
 }
 
-/** A→added/untracked, D→deleted, M→modified, from a statusMatrix row's head+workdir columns. */
 function letterFor(head: number, workdir: number): "A" | "M" | "D" {
 	if (head === 0) {
 		return "A";
@@ -144,7 +98,6 @@ function letterFor(head: number, workdir: number): "A" | "M" | "D" {
 	return workdir === 0 ? "D" : "M";
 }
 
-/** D→deleted, A→added, M→modified, from a statusMatrix row's head+stage columns (what's staged). */
 function stagedLetterFor(head: number, stage: number): "A" | "M" | "D" {
 	if (stage === 0) {
 		return "D";
@@ -153,15 +106,6 @@ function stagedLetterFor(head: number, stage: number): "A" | "M" | "D" {
 	return head === 0 ? "A" : "M";
 }
 
-/**
- * Working-tree status split into staged (index differs from HEAD) and unstaged (working tree differs from index).
- * A file can be in BOTH (staged, then edited again). statusMatrix rows are [path, head, workdir, stage] with 0/1/2/3
- * codes; `[1,1,1]` is unmodified and skipped.
- */
-/** `fs` for one walk of the tree: each ignore file (`.gitignore`, `.git/info/exclude`) read once. isomorphic-git reads
- *  every one from the root down for each path it checks — for this repository's packages/editor alone, 2,762 reads of
- *  .gitignore files and 694 of exclude in one status, each a path walk in zen-fs on the page's thread; 9 this way. They
- *  can't change during one walk, and the next walk reads them afresh. */
 function readingIgnoresOnce(): typeof fs {
 	const seen = new Map<string, Promise<unknown>>();
 	const promises = new Proxy(fs.promises, {
@@ -193,13 +137,8 @@ function readingIgnoresOnce(): typeof fs {
 
 type StatusRow = Awaited<ReturnType<typeof statusMatrix>>[number];
 
-/** The last walk's rows, by path, and the index and HEAD as they were after it (stampOf): a status told what changed
- *  since walks only those paths, while neither has moved. A walk of the whole tree is a lookup of every file in zen-fs
- *  on the page's thread — ~1.6 s for this repository — and every change brought one (a debug run's evidence, twice). */
 let known: { "stamp": string; "rows": Map<string, StatusRow> } | undefined;
 
-/** The index and HEAD as they are: when either moves (a commit, a stage, a checkout — anyone's, the terminal's git too),
- *  what changed in the working tree no longer says all that changed. */
 async function stampOf(): Promise<string> {
 	const index = await fs.promises.stat(`${DIR}/.git/index`).then((stat) => `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`, () => "none");
 	const head = await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" }).catch(() => "none");
@@ -207,8 +146,6 @@ async function stampOf(): Promise<string> {
 	return `${index} ${head}`;
 }
 
-/** The working tree's status. With `changed` (paths, relative to the repository, written since the last status), only
- *  those are walked again, while the index and HEAD are as the last status left them; otherwise, the whole tree. */
 export async function status(changed?: readonly string[]): Promise<GitStatus> {
 	const stamp = await stampOf();
 	let rows: Map<string, StatusRow>;
@@ -217,7 +154,6 @@ export async function status(changed?: readonly string[]): Promise<GitStatus> {
 		rows = new Map(known.rows);
 
 		if (changed.length > 0) {
-			// (a changed path's rows go — its own, or a folder's — and come back as the walk finds them)
 			for (const path of rows.keys()) {
 				if (changed.some((each) => path === each || path.startsWith(`${each}/`))) {
 					rows.delete(path);
@@ -232,14 +168,12 @@ export async function status(changed?: readonly string[]): Promise<GitStatus> {
 		rows = new Map((await statusMatrix({ "fs": readingIgnoresOnce(), "dir": DIR })).map((row) => [row[0], row]));
 	}
 
-	// (stamped after: a walk may rewrite the index itself, refreshing its stat cache)
 	known = { "stamp": await stampOf(), "rows": rows };
 
 	const staged: GitChange[] = [];
 	const unstaged: GitChange[] = [];
 
 	for (const [path, head, workdir, stage] of rows.values()) {
-		// [1,1,1] is unmodified
 		if (head !== 1 || workdir !== 1 || stage !== 1) {
 			if (workdir !== stage) {
 				unstaged.push({ "path": path, "status": letterFor(head, workdir) });
@@ -254,7 +188,6 @@ export async function status(changed?: readonly string[]): Promise<GitStatus> {
 	return { "staged": staged, "unstaged": unstaged };
 }
 
-/** Stage every working-tree change (adds + removals) — the commit-all path for phase 1. */
 export async function stageAll(): Promise<void> {
 	const { unstaged } = await status();
 	const withSilo = unstaged.some(({ path }) => path.startsWith(`${SILO_DIR}/`) && !SEEDS.includes(path));
@@ -268,12 +201,10 @@ export async function stageAll(): Promise<void> {
 	}
 }
 
-/** Unstage one path (reset its index entry to HEAD). */
 export async function unstage(path: string): Promise<void> {
 	await resetIndex({ "fs": fs, "dir": DIR, "filepath": path });
 }
 
-/** Stage these paths (repo-relative): a file that's gone is staged as removed, as `git add` does. */
 export async function stagePaths(paths: string[]): Promise<void> {
 	for (const path of paths) {
 		if (fs.existsSync(DIR + "/" + path)) {
@@ -292,15 +223,8 @@ async function readText(path: string): Promise<string | undefined> {
 	}
 }
 
-/** `.silo/`'s own two files: what keeps `/local/` out of git, and its JSONL merged by line. */
 const SEEDS = [`${SILO_DIR}/.gitignore`, `${SILO_DIR}/.gitattributes`];
 
-/**
- * The editor's pre-commit step (it makes every commit: the Source Control view's, Commit All, the terminal's `git
- * commit`): when it commits something under `.silo/`, `.silo/`'s own `.gitignore` and `.gitattributes` go with it, so
- * `/local/` — a run's traces and values, this machine's alone (RUNTIME-EVIDENCE.md, *Kept across reloads*) — stays out
- * of git wherever `.silo/` is committed. A commit with nothing else there doesn't add them (2026-10-30).
- */
 async function stageSiloSeeds(): Promise<void> {
 	if (!(await status()).staged.some(({ path }) => path.startsWith(`${SILO_DIR}/`) && !SEEDS.includes(path))) {
 		return;
@@ -313,14 +237,8 @@ async function stageSiloSeeds(): Promise<void> {
 	}
 }
 
-/** A commit made: its oid. */
 export interface Committed { "oid": string }
 
-/**
- * The workspace's filesystem keeps no executable bit — whatever writes a file there, it's 0644 — so a file can reach the
- * index as 100644 that HEAD has as 100755 (editor 2be5c8a pushed four scripts that way). Before a commit, a file HEAD has
- * as executable is given its bit back: a script stays one, edited or not. (A new file can't say it's one.)
- */
 async function keepExecutables(): Promise<void> {
 	if (await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" }).catch(() => undefined) === undefined) {
 		return;
@@ -346,19 +264,16 @@ async function keepExecutables(): Promise<void> {
 	}
 }
 
-/** The commit, `.silo/`'s seeds staged with it, and HEAD's executables kept so. */
 async function committed(message: string): Promise<Committed> {
 	await stageSiloSeeds();
 	await keepExecutables();
 
 	const author = await authorOf().catch(() => undefined);
 
-	// (a clone since the sign-in brought a config that doesn't name you: it does from this commit on)
 	if (author !== undefined) {
 		await recordIdentity(author).catch(() => { /* the commit's author is what matters here */ });
 	}
 
-	// (a merge's conflicts settled: this commit is the merge, theirs its second parent)
 	const merging = await mergingIn();
 	const oid = await commit({ "fs": fs, "dir": DIR, "message": message, "author": author ?? AUTHOR, ...merging === undefined ? {} : { "parent": [await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" }), merging] } });
 
@@ -369,16 +284,12 @@ async function committed(message: string): Promise<Committed> {
 	return { "oid": oid };
 }
 
-/** Commit what's staged, and only that (`git commit`): the new commit (`Committed`). */
 export async function commitIndex(message: string): Promise<Committed> {
 	return committed(message);
 }
 
-/** One commit, as `git log` shows it. */
 export interface LogEntry { "oid": string; "message": string; "author": { "name": string; "email": string; "timestamp": number; "timezoneOffset": number } }
 
-/** The commits from HEAD back, newest first; at most `depth`; only those that changed `path`, when it's given (its
- *  renames followed). None before the first commit. */
 export async function history(depth?: number, path?: string): Promise<LogEntry[]> {
 	try {
 		return (await log({ "fs": fs, "dir": DIR, ...depth === undefined ? {} : { "depth": depth }, ...path === undefined ? {} : { "filepath": path, "follow": true } })).map(({ oid, "commit": entry }) => ({ "oid": oid, "message": entry.message, "author": entry.author }));
@@ -387,13 +298,10 @@ export async function history(depth?: number, path?: string): Promise<LogEntry[]
 	}
 }
 
-/** The branches, and which one HEAD is on. */
 export async function branches(): Promise<{ "current": string | undefined; "all": string[] }> {
 	return { "current": await currentBranch({ "fs": fs, "dir": DIR }) || undefined, "all": await listBranches({ "fs": fs, "dir": DIR }) };
 }
 
-/** The commits on this workspace's branches that no remote has, by branch: what only this workspace holds (a branch
- *  never pushed, or one ahead of its push). Counted against every remote ref the workspace knows — not fetched. */
 export async function unpushed(most = 500): Promise<{ "branch": string; "commits": number }[]> {
 	const remotes = await listBranches({ "fs": fs, "dir": DIR, "remote": "origin" }).catch(() => [] as string[]);
 	const known = new Set<string>();
@@ -408,7 +316,6 @@ export async function unpushed(most = 500): Promise<{ "branch": string; "commits
 
 	for (const branch of await listBranches({ "fs": fs, "dir": DIR })) {
 		const commits = (await log({ "fs": fs, "dir": DIR, "ref": branch, "depth": most }).catch(() => [])).findIndex((entry) => known.has(entry.oid));
-		// (none of its commits on a remote: all of the history the workspace has of it — a shallow clone's ends early)
 		const count = commits === -1 ? (await log({ "fs": fs, "dir": DIR, "ref": branch, "depth": most }).catch(() => [])).length : commits;
 
 		if (count > 0) {
@@ -419,15 +326,10 @@ export async function unpushed(most = 500): Promise<{ "branch": string; "commits
 	return counts;
 }
 
-/** Make a branch at HEAD (without switching to it, as `git branch <name>` does). */
 export async function createBranch(name: string): Promise<void> {
 	await branch({ "fs": fs, "dir": DIR, "ref": name });
 }
 
-/**
- * Switch to the branch `name` — made at HEAD first when `create` (`git switch -c`), which leaves the working tree as it
- * is. An existing one's files are checked out: isomorphic-git refuses when that would overwrite a change.
- */
 export async function switchBranch(name: string, create = false): Promise<void> {
 	if (create) {
 		await branch({ "fs": fs, "dir": DIR, "ref": name, "checkout": true });
@@ -436,9 +338,6 @@ export async function switchBranch(name: string, create = false): Promise<void> 
 	}
 }
 
-/** The repository a remote names on github.com — `https://github.com/<owner>/<repo>.git` — whichever way it was cloned
- *  (straight, through a CORS proxy, or through the API's proxy: `…/github/git/<owner>/<repo>.git`); undefined for a
- *  remote anywhere else, or none. */
 export async function githubRemote(remote = "origin"): Promise<string | undefined> {
 	const url = await getConfig({ "fs": fs, "dir": DIR, "path": `remote.${remote}.url` }) as string | undefined;
 	const repository = /(?:github\.com|\/github\/git)\/([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/u.exec(url ?? "")?.[1];
@@ -446,11 +345,8 @@ export async function githubRemote(remote = "origin"): Promise<string | undefine
 	return repository === undefined ? undefined : `https://github.com/${repository}.git`;
 }
 
-/** What a push did: the branch, and the remote's answer for it (`ok`, or its error). */
 export interface Pushed { "ref": string; "ok": boolean; "error"?: string }
 
-/** Push `ref` (the current branch, by default) to `url` as the same branch, over `http`. A rejected update (not a fast
- *  forward, a protected branch) is said, not thrown. */
 export async function push(http: HttpClient, url: string, ref?: string, force = false): Promise<Pushed> {
 	const branchName = ref ?? (await currentBranch({ "fs": fs, "dir": DIR }) || undefined);
 
@@ -458,24 +354,12 @@ export async function push(http: HttpClient, url: string, ref?: string, force = 
 		throw new Error("HEAD is on no branch: name one to push");
 	}
 
-	// (no CORS proxy: a clone signed out names one in the repository's config, which a push would otherwise go through —
-	// the caller's `http` is how it goes)
 	const result = await gitPush({ "fs": fs, "http": http, "dir": DIR, "url": url, "corsProxy": "", "ref": branchName, "remoteRef": branchName, "force": force });
 	const answer = result.refs[`refs/heads/${branchName}`];
 
-	// (isomorphic-git's answer for a ref that went through has an empty `error`)
 	return { "ref": branchName, "ok": result.ok && answer?.ok !== false, ...answer?.error === undefined || answer.error === "" ? {} : { "error": answer.error } };
 }
 
-/**
- * What bringing a branch up to the remote's did (`git pull`): `up to date`, nothing new there; `ahead`, only this
- * workspace has commits the other hasn't (a push is a fast-forward); `fast-forwarded`, the branch moved `from` → `to` and
- * the `files` the remote changed written; `merged`, each had commits the other hadn't, and a merge commit `to` of both
- * made, the `files` it changed written; `merge conflicts`, the same, but both changed the same lines of the `conflicts`,
- * written with both sides marked in them — settled and committed, the commit is the merge (`committed`). Or nothing done:
- * `diverged`, each has moved on and this workspace has changes to tracked files (commit them, then it merges), or
- * `conflicts`, the remote changed files this workspace has changes to.
- */
 export interface Pulled {
 	"ref": string;
 	"outcome": "up to date" | "ahead" | "fast-forwarded" | "merged" | "merge conflicts" | "diverged" | "conflicts";
@@ -485,19 +369,12 @@ export interface Pulled {
 	"conflicts"?: string[];
 }
 
-/** What a fetch of `branch` tells the remote it has: the tip it last fetched of it (`origin/<branch>`), else the branch.
- *  isomorphic-git's single-branch fetch names one ref's tip as what it has, and the branch's own stays where it was until a
- *  fast-forward moves it: each fetch that didn't (a `git fetch`, a pull that diverged or conflicts) was sent again every
- *  commit since — measured 2026-11-19 on this repository, 110 KB a fetch growing to 400 KB by the twentieth, against
- *  ~70 KB a pull that fast-forwards. The remote's name is origin either way, and `remoteRef` is what's fetched. */
 async function haveRef(branch: string): Promise<string> {
 	const tracking = `refs/remotes/origin/${branch}`;
 
 	return await resolveRef({ "fs": fs, "dir": DIR, "ref": tracking }).then(() => tracking, () => branch);
 }
 
-/** Fetch `ref` (the current branch, by default) from `url` over `http`, and fast-forward to it if it can
- *  (`fastForward`). A shallow clone fetches what it lacks down to what it has. */
 export async function pull(http: HttpClient, url: string, ref?: string): Promise<Pulled> {
 	const branchName = ref ?? (await currentBranch({ "fs": fs, "dir": DIR }) || undefined);
 
@@ -516,8 +393,6 @@ export async function pull(http: HttpClient, url: string, ref?: string): Promise
 	return forward.outcome === "diverged" ? mergeWith(branchName, fetched.fetchHead) : forward;
 }
 
-/** What `git fetch` brought: the branch's tip there, how many commits HEAD's history has here now, and whether it still
- *  ends where a shallow clone's does. */
 export interface Fetched {
 	"ref": string;
 	"tip": string;
@@ -525,12 +400,8 @@ export interface Fetched {
 	"shallow": boolean;
 }
 
-/** All of a history, as git asks for it (`--unshallow`). */
 const ALL = 2_147_483_647;
 
-/** Fetch `ref` (the current branch, by default) from `url` over `http` (`git fetch`): what the remote has that this
- *  hasn't, into `origin/<ref>`, the branch itself left where it is. `deepen` reaches that many commits further back
- *  than a shallow clone's history ends (`--deepen`); Infinity, all of it (`--unshallow`). */
 export async function fetchBranch(http: HttpClient, url: string, ref?: string, deepen?: number): Promise<Fetched> {
 	const branchName = ref ?? (await currentBranch({ "fs": fs, "dir": DIR }) || undefined);
 
@@ -547,8 +418,6 @@ export async function fetchBranch(http: HttpClient, url: string, ref?: string, d
 	return { "ref": branchName, "tip": fetched.fetchHead, "commits": (await history()).length, "shallow": (await shallowEnds()).length > 0 };
 }
 
-/** Each file that differs between commits `from` and `to`: what `to` has of it, or nothing (removed). A subtree they
- *  share is skipped. */
 async function changedBetween(from: string, to: string): Promise<{ "path": string; "oid"?: string; "mode"?: number }[]> {
 	const changed: { "path": string; "oid"?: string; "mode"?: number }[] = [];
 
@@ -580,7 +449,6 @@ async function changedBetween(from: string, to: string): Promise<{ "path": strin
 	return changed;
 }
 
-/** Which of `changed` this workspace has a change to (staged, unstaged or untracked): what writing them would lose. */
 async function changedHere(changed: { "path": string }[]): Promise<string[]> {
 	const { staged, unstaged } = await status();
 	const here = new Set([...staged, ...unstaged].map((change) => change.path));
@@ -588,7 +456,6 @@ async function changedHere(changed: { "path": string }[]): Promise<string[]> {
 	return changed.filter(({ path }) => here.has(path)).map(({ path }) => path);
 }
 
-/** `changed` written to the working tree and staged as it has them (`changedBetween`), each removed one deleted. */
 async function writeChanged(changed: { "path": string; "oid"?: string; "mode"?: number }[]): Promise<void> {
 	for (const { path, oid, mode } of changed) {
 		const full = `${DIR}/${path}`;
@@ -606,11 +473,6 @@ async function writeChanged(changed: { "path": string; "oid"?: string; "mode"?: 
 	}
 }
 
-/**
- * Move `branchName` (HEAD's) to `to` when that's a fast-forward, keeping the working tree's changes: the files that
- * changed between the two are written and staged as `to` has them, then the branch moved. Refused — nothing touched —
- * when a file it would write has a change here (staged, unstaged or untracked), as `git merge --ff-only` refuses.
- */
 export async function fastForward(branchName: string, to: string): Promise<Pulled> {
 	const from = await resolveRef({ "fs": fs, "dir": DIR, "ref": `refs/heads/${branchName}` });
 	const descends = async (oid: string, ancestor: string): Promise<boolean> => isDescendent({ "fs": fs, "dir": DIR, "oid": oid, "ancestor": ancestor, "depth": -1 }).catch(() => false);
@@ -640,18 +502,10 @@ export async function fastForward(branchName: string, to: string): Promise<Pulle
 	return { "ref": branchName, "outcome": "fast-forwarded", "from": from, "to": to, "files": changed.map(({ path }) => path) };
 }
 
-/** The commit a merge waiting on its conflicts is merging in, if one is. */
 export async function mergingIn(): Promise<string | undefined> {
 	return fs.promises.readFile(MERGE_HEAD, "utf8").then((text) => text.trim() || undefined, () => undefined);
 }
 
-/**
- * `theirs` merged into `branchName` (HEAD's) when each has commits the other hasn't, as `git merge` does: a merge commit
- * of both and the files it changed written (`merged`); or, where both changed the same lines, every file written as the
- * merge has it, those with both sides marked, to be settled and committed (`merge conflicts`). Refused — nothing touched —
- * while tracked files have changes here (`diverged`: a conflict's merge writes every file), or when a file the remote
- * changed has one (`conflicts`), an untracked file among them.
- */
 export async function mergeWith(branchName: string, theirs: string): Promise<Pulled> {
 	const from = await resolveRef({ "fs": fs, "dir": DIR, "ref": `refs/heads/${branchName}` });
 	const { staged, unstaged } = await status();
@@ -666,8 +520,6 @@ export async function mergeWith(branchName: string, theirs: string): Promise<Pul
 		return { "ref": branchName, "outcome": "conflicts", "from": from, "to": theirs, "conflicts": conflicts };
 	}
 
-	// (merged by a ref of its own: isomorphic-git merges refs, and the fetched tip may be in none — a fetch moves
-	// origin's only when it names one)
 	const merging = "refs/merging";
 
 	await writeRef({ "fs": fs, "dir": DIR, "ref": merging, "value": theirs, "force": true });
@@ -692,8 +544,6 @@ export async function mergeWith(branchName: string, theirs: string): Promise<Pul
 	}
 }
 
-/** A merge waiting on its conflicts given up (`git merge --abort`): every file back as HEAD has it, the merge forgotten.
- *  What was settled so far goes too. */
 export async function abortMerge(): Promise<void> {
 	const theirs = await mergingIn();
 
@@ -704,7 +554,6 @@ export async function abortMerge(): Promise<void> {
 	const head = await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" });
 	const branchName = await currentBranch({ "fs": fs, "dir": DIR });
 
-	// (what only theirs has goes, which a checkout of HEAD leaves: the merge wrote it)
 	for (const { path } of (await changedBetween(theirs, head)).filter(({ oid }) => oid === undefined)) {
 		await fs.promises.unlink(`${DIR}/${path}`).catch(() => undefined);
 		await remove({ "fs": fs, "dir": DIR, "filepath": path });
@@ -714,7 +563,6 @@ export async function abortMerge(): Promise<void> {
 	await fs.promises.unlink(MERGE_HEAD).catch(() => undefined);
 }
 
-/** Stage all changes, then commit: the new commit (`Committed`). */
 export async function commitAll(message: string): Promise<Committed> {
 	await stageAll();
 
@@ -725,21 +573,12 @@ export async function commitAll(message: string): Promise<Committed> {
 	return committed(message);
 }
 
-/** One file's contribution to a selective commit. */
 export interface CommitFile {
 	"path": string;
-	/** Exact blob text to commit (a PARTIAL selection: HEAD + only the chosen hunks). Omit to stage the working file. */
 	"content"?: string;
-	/** The file was deleted in the working tree and the deletion is selected. */
 	"deleted"?: boolean;
 }
 
-/**
- * Commit exactly the given files (GitHub-Desktop-style selective commit), leaving the working tree untouched. The
- * index is first reset to HEAD for every currently-changed path so nothing outside `files` sneaks in; then each file
- * is staged — a `content` blob for a PARTIAL selection (written via writeBlob + updateIndex so the working tree keeps
- * the unselected changes), a removal for a deletion, or the working file otherwise — and the index is committed.
- */
 export async function commitSelection(message: string, files: CommitFile[]): Promise<Committed> {
 	const { staged, unstaged } = await status();
 
@@ -755,7 +594,6 @@ export async function commitSelection(message: string, files: CommitFile[]): Pro
 		} else if (file.content !== undefined) {
 			const oid = await writeBlob({ "fs": fs, "dir": DIR, "blob": new TextEncoder().encode(file.content) });
 
-			// `add: true` so a new (or index-reset) path gets an entry created; `mode` is required for a fresh entry.
 			await updateIndex({ "fs": fs, "dir": DIR, "filepath": file.path, "oid": oid, "add": true, "mode": 0o100644 });
 		} else {
 			await add({ "fs": fs, "dir": DIR, "filepath": file.path });
@@ -765,7 +603,6 @@ export async function commitSelection(message: string, files: CommitFile[]): Pro
 	return committed(message);
 }
 
-/** The commit HEAD points at, or undefined before the first commit (or with no repository). */
 export async function headCommit(): Promise<string | undefined> {
 	try {
 		return await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" });
@@ -774,7 +611,6 @@ export async function headCommit(): Promise<string | undefined> {
 	}
 }
 
-/** True when `path` exists in HEAD (i.e. it's tracked, not a brand-new file). */
 async function isTracked(path: string): Promise<boolean> {
 	try {
 		const oid = await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" });
@@ -787,7 +623,6 @@ async function isTracked(path: string): Promise<boolean> {
 	}
 }
 
-/** Discard ALL of a file's working-tree changes: restore a tracked file to its HEAD content, or delete an added one. */
 export async function discardFile(path: string): Promise<void> {
 	const full = DIR + "/" + path;
 
@@ -802,25 +637,18 @@ export async function discardFile(path: string): Promise<void> {
 	}
 }
 
-/** Overwrite a file's working-tree content (a PARTIAL discard: working with the chosen hunks reverted to HEAD). */
 export async function setWorking(path: string, content: string): Promise<void> {
 	await fs.promises.writeFile(DIR + "/" + path, content);
 }
 
-/** The git blob oid (content hash) of some working text — a collision-free, content-addressed cache key part. */
 export async function blobOid(content: string): Promise<string> {
 	return (await hashBlob({ "object": new TextEncoder().encode(content) })).oid;
 }
 
-/** A file's text in the working tree; "" when it's gone. */
 export async function workingContent(path: string): Promise<string> {
 	return fs.existsSync(DIR + "/" + path) ? fs.promises.readFile(DIR + "/" + path, "utf8") : "";
 }
 
-/** The HEAD version of a file, for quick-diff gutters + the diff view. "" when the repo is unborn or the file is
- *  new (no HEAD blob), which is exactly what a diff against "nothing" wants. */
-/** The text of the blob `oid` from git's objects — a span annotation's baseline, say — or undefined when this repo
- *  doesn't have it (it was never committed here). */
 export async function blobText(oid: string): Promise<string | undefined> {
 	try {
 		return new TextDecoder().decode((await readBlob({ "fs": fs, "dir": DIR, "oid": oid })).blob);
@@ -833,13 +661,10 @@ export async function headContent(path: string): Promise<string> {
 	return await fileAt(path, "HEAD") ?? "";
 }
 
-/** `ref`'s object — a branch, a tag, HEAD, or a commit's oid, whole or its beginning — or a rejection where it isn't
- *  one here. */
 async function oidOf(ref: string): Promise<string> {
 	return /^[\da-f]{4,40}$/u.test(ref) ? expandOid({ "fs": fs, "dir": DIR, "oid": ref }).catch(async () => resolveRef({ "fs": fs, "dir": DIR, "ref": ref })) : resolveRef({ "fs": fs, "dir": DIR, "ref": ref });
 }
 
-/** `ref`'s commit and when it was made, or undefined where it isn't one here (a tag is read through to its commit). */
 export async function commitOf(ref: string): Promise<{ "oid": string; "time": number } | undefined> {
 	try {
 		const { oid, commit: made } = await readCommit({ "fs": fs, "dir": DIR, "oid": await oidOf(ref) });
@@ -850,8 +675,6 @@ export async function commitOf(ref: string): Promise<{ "oid": string; "time": nu
 	}
 }
 
-/** What's in `path` ("" the root) at `commit`: each entry's name, its kind and its object — or undefined where `commit`
- *  hasn't that folder. */
 export async function treeAt(commit: string, path: string): Promise<{ "name": string; "type": "blob" | "tree" | "commit"; "oid": string }[] | undefined> {
 	try {
 		const { tree } = await readTree({ "fs": fs, "dir": DIR, "oid": commit, ...path === "" ? {} : { "filepath": path } });
@@ -862,13 +685,10 @@ export async function treeAt(commit: string, path: string): Promise<{ "name": st
 	}
 }
 
-/** A file's bytes, by its object. */
 export async function blobBytes(oid: string): Promise<Uint8Array> {
 	return (await readBlob({ "fs": fs, "dir": DIR, "oid": oid })).blob;
 }
 
-/** `path`'s text at `ref` — a branch, HEAD, or a commit's oid, whole or its beginning — or undefined where `ref` isn't a
- *  commit here or hasn't the file. */
 export async function fileAt(path: string, ref: string): Promise<string | undefined> {
 	try {
 		const oid = await oidOf(ref);
@@ -880,15 +700,12 @@ export async function fileAt(path: string, ref: string): Promise<string | undefi
 	}
 }
 
-/** Fetch a branch or a tag the clone hasn't (`full-editor`, say) from `url`, one commit deep: so a file can be read as it
- *  was there (`fileAt`). Its ref is written as the remote has it — a tag as a tag. */
 export async function fetchRef(http: HttpClient, url: string, ref: string): Promise<boolean> {
 	const fetched = await gitFetch({ "fs": fs, "http": http, "dir": DIR, "url": url, "corsProxy": "", "ref": ref, "singleBranch": true, "depth": 1, "tags": true });
 
 	return fetched.fetchHead !== null;
 }
 
-/** Where a shallow clone's history ends: the commits whose parents it hasn't (`.git/shallow`). None in a whole one. */
 export async function shallowEnds(): Promise<string[]> {
 	try {
 		return (await fs.promises.readFile(DIR + "/.git/shallow", "utf8")).split("\n").filter((line) => line.trim() !== "");

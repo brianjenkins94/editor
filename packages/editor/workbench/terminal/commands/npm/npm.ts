@@ -1,33 +1,14 @@
-/**
- * The terminal's `npm` command — enough of npm to run package.json scripts and declare dependencies.
- *
- * `npm run <script>` (and the `npm start`/`test`/`stop`/`restart` shorthands) reads the nearest package.json and
- * re-runs the script string through the SAME just-bash session, so a script that calls `node …` hits the node
- * worker and the whole thing composes.
- *
- * `npm install [pkg…]` (and `ci`) declares dependencies in package.json. A registry package is never fetched whole:
- * each place that loads one fetches what it needs as it's used, from the CDN, at the version `.silo/versions.json` (or its local copy) pins
- * (the node_modules overlay, type acquisition, a debug run's packages). A plain `npm install` brings that file up to
- * the manifests and installs what the CDN can't serve — a `file:` dependency linked, a tarball URL unpacked
- * (workbench/install.ts) — as the editor does by itself when the project opens or a manifest changes.
- *
- * `npm ls` lists what package.json declares; `npm run` with no script lists the scripts; `npm exec` runs a
- * command this shell has and says plainly when a package's own binary can't be (nothing's installed locally to run).
- */
 import type { ResolvedCommandContext } from "just-bash/browser";
 import type { CommandHost, CommandResult, Handler } from "../../catalog";
 
-/** The version `npm version` answers: the npm that comes with the node almostnode's process reports (v20). */
 const VERSION = "10.0.0";
 
-/** Split a spec into name + version: `lodash` → latest, `lodash@4` → 4, `@scope/pkg@1` → 1 (scoped-name safe). */
 function parseSpec(spec: string): { "name": string; "version": string } {
 	const at = spec.lastIndexOf("@");
 
 	return at > 0 ? { "name": spec.slice(0, at), "version": spec.slice(at + 1) } : { "name": spec, "version": "latest" };
 }
 
-/** Run a command line in the shell itself, where this one runs (`npm run`'s script, `npx`'s command). */
 export async function inShell(getSession: CommandHost["session"], line: string, ctx: ResolvedCommandContext, env: Record<string, string> = {}): Promise<CommandResult> {
 	const session = await getSession();
 	const result = await session.exec(line, { "cwd": ctx.cwd, "env": { ...ctx.exportedEnv ?? Object.fromEntries(ctx.env), ...env }, "signal": ctx.signal });
@@ -35,10 +16,8 @@ export async function inShell(getSession: CommandHost["session"], line: string, 
 	return { "stdout": result.stdout, "stderr": result.stderr, "exitCode": result.exitCode };
 }
 
-/** A word for a command line: as it is, or quoted. */
 export const quote = (word: string): string => (/^[\w./:=@%+-]+$/u.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`);
 
-/** `npx <command> [args…]` / `npm exec`: run it if this shell has it; a package's own binary it can't. */
 export async function exec(name: string, getSession: CommandHost["session"], words: string[], ctx: ResolvedCommandContext): Promise<CommandResult> {
 	const [command, ...args] = words[0] === "--" ? words.slice(1) : words;
 
@@ -55,7 +34,6 @@ export async function exec(name: string, getSession: CommandHost["session"], wor
 	return inShell(getSession, [bare, ...args].map(quote).join(" "), ctx);
 }
 
-/** The nearest package.json (the directory, then the workspace's) — or an error to report. */
 async function manifestOf(name: string, ctx: ResolvedCommandContext): Promise<{ "path": string; "text": string } | CommandResult> {
 	for (const path of [`${ctx.cwd.replace(/\/$/u, "")}/package.json`, "/workspace/package.json"]) {
 		try {
@@ -66,7 +44,6 @@ async function manifestOf(name: string, ctx: ResolvedCommandContext): Promise<{ 
 	return { "stdout": "", "stderr": `${name} error: no package.json found\n`, "exitCode": 1 };
 }
 
-/** What npm reads of package.json. */
 interface PackageJson {
 	"name"?: string;
 	"version"?: string;
@@ -75,7 +52,6 @@ interface PackageJson {
 	"devDependencies"?: Record<string, string>;
 }
 
-/** package.json, parsed — or an error to report. */
 function parsed(name: string, text: string): PackageJson | CommandResult {
 	try {
 		return JSON.parse(text) as PackageJson;
@@ -86,7 +62,6 @@ function parsed(name: string, text: string): PackageJson | CommandResult {
 
 const isResult = (value: unknown): value is CommandResult => typeof value === "object" && value !== null && "exitCode" in value;
 
-/** A package.json script, run in the shell itself — or, with none named, the scripts listed (as npm does). */
 async function runScript(name: string, getSession: CommandHost["session"], script: string, args: string[], ctx: ResolvedCommandContext): Promise<CommandResult> {
 	const manifest = await manifestOf(name, ctx);
 
@@ -116,13 +91,11 @@ async function runScript(name: string, getSession: CommandHost["session"], scrip
 		return { "stdout": "", "stderr": `${name} error: Missing script: "${script}"${available.length > 0 ? `\navailable scripts: ${available.join(", ")}` : ""}\n`, "exitCode": 1 };
 	}
 
-	// (npm passes what comes after `--` to the script)
 	const passed = args[0] === "--" ? args.slice(1) : args;
 
 	return inShell(getSession, passed.length > 0 ? `${command} ${passed.map(quote).join(" ")}` : command, ctx, { "npm_lifecycle_event": script });
 }
 
-/** A plain `npm install`: `.silo/versions.json` brought up to the manifests, and what the CDN can't serve installed. */
 async function installed(name: string, api: CommandHost["api"]): Promise<CommandResult> {
 	const { installsLocally, syncVersions } = await import("../../../versions");
 	const versions = await syncVersions(api);
@@ -138,7 +111,6 @@ async function installed(name: string, api: CommandHost["api"]): Promise<Command
 	return { "stdout": `${linked.join("")}${unpacked.join("")}  ${entries.length} packages pinned in versions.json (.silo/, or .silo/local/ until the repository commits it); the rest load from the CDN as they're used.\n`, "stderr": "", "exitCode": 0 };
 }
 
-/** npm's subcommands, as `name` (npm, pnpm, yarn) says them in its messages. */
 export function handlers(name: string, getSession: CommandHost["session"], api?: CommandHost["api"]): Record<string, Handler> {
 	const lifecycle = (script: string): Handler => async (config, ctx) => runScript(name, getSession, script, config.get("args") as string[], ctx);
 
@@ -226,8 +198,6 @@ export function handlers(name: string, getSession: CommandHost["session"], api?:
 	};
 }
 
-/** The `npm` command. A script runs in the shell itself (the host's `session`, created lazily — see ../../index.ts), with
- *  the shell's Ctrl-C forwarded so it reaches a long-running script (`npm run dev` → the blocking `vite` command). */
 export function create({ session, api }: CommandHost): Record<string, Handler> {
 	return handlers("npm", session, api);
 }
