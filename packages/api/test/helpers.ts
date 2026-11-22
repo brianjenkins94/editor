@@ -94,7 +94,10 @@ export function testBrowser(server: Harness, base: () => URL, { outbox = [], git
 	async function byEmail(address: string, signedIn?: App | Client): Promise<App> {
 		const signingIn = typeof signedIn === "object" ? signedIn : await app(signedIn ?? "editor");
 
-		await form("/auth/email", signingIn.cookie, { "address": address });
+		// (its answer checked here: a code refused — throttled, paused — is why, where the missing email only said it wasn't sent)
+		const sent = await form("/auth/email", signingIn.cookie, { "address": address });
+
+		assert.equal(sent.status, 200, `sending a code to ${address}: ${await sent.clone().text()}`);
 
 		const { location } = await (await form("/auth/email/verify", signingIn.cookie, { "code": codeFor(outbox, address) })).json() as { "location": string };
 

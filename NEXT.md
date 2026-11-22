@@ -135,8 +135,10 @@ packages/editor (`--all`, `--runs N`, `--json`).
   written back (the origin alone can't tell: `.git/config` is among the first written).
 
 - **packages/api's "an email account without a password is told to use a code" test failed** in CI once ("a code was
-  sent to someone-…@example.com", bc7a208, a workflow-only change; passed on rerun). If it comes back, find what a
-  second test's sign-in code reaches in the first's mailbox (a shared mail stub, or an address not unique enough).
+  sent to someone-…@example.com", bc7a208, a workflow-only change; passed on rerun). The send's answer wasn't looked at,
+  only the outbox after it: since 2026-11-22 the helper checks it (test/helpers.ts `byEmail`), so if it comes back it
+  says why the code wasn't sent (throttled, paused) rather than that it wasn't. Not the sign-in rate limit, likely: each
+  request comes from one of 254 addresses.
 
 - **isomorphic-git's "racy git"**: a same-size rewrite within the second it was staged goes unseen (the terminal's
   `git` test notes it; real git guards against it). Fix in the git engine if it bites.
