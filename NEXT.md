@@ -79,8 +79,9 @@ How it's kept:
    `util/silo/select` (selection by test from what a change reaches by declaration, vouches that lapse when what they
    reached changes, resting after 20 green runs, the week's window, audits, runtimes that must have agreed) and silo's
    `silo test` (CI's step: selects, runs, its reporter's lines read back from the workflow's logs) and `silo vouch`; ci.yml
-   passes the push's base and runs everything Mondays. Left: packages/editor's tests run through `silo test` (after the
-   notes migration); the editor's commit flow vouching (tsval, decision 19: a vouch counts in Node only for a test whose
+   passes the push's base and runs everything Mondays; packages/editor's unit tests run through `silo test` (2026-11-22).
+   Left: see that a push's CI selects (it runs everything until each test has 3 runs in the logs); the editor's commit
+   flow vouching (tsval, decision 19: a vouch counts in Node only for a test whose
    outcomes have agreed); then per-test reach from runs, finer than a file's static reach. Done when a push's CI runs
    fewer tests because the rest are vouched for or resting.
 
