@@ -7,8 +7,8 @@
 /** A comment: its lines (0-based, both ends in), its text, and the line of the code below it. */
 export interface Comment { "from": number; "to": number; "text": string; "below": number }
 
-/** What a tool reads: kept as a comment. */
-const FOR_TOOLS = /eslint-(?:disable|enable)|@ts-(?:expect-error|ignore|nocheck|check)\b|@license|@preserve|\bcopyright\b|prettier-ignore|istanbul ignore|[cv]8 ignore|#__PURE__|webpackChunkName|^\s*global\s/iu;
+/** What a tool reads, kept as a comment: a directive, which starts the comment (prose may name one), or a license. */
+const FOR_TOOLS = /^\s*(?:eslint-(?:disable|enable)|@ts-(?:expect-error|ignore|nocheck|check)\b|prettier-ignore|istanbul ignore|[cv]8 ignore|#__PURE__|webpackChunkName|global\s)|@license|@preserve|\bcopyright\b/iu;
 
 const lineComment = (line: string): boolean => /^\s*\/\/(?!\/)/u.test(line);
 const blockStart = (line: string): boolean => /^\s*\/\*/u.test(line);

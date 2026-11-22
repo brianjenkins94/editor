@@ -46,6 +46,7 @@ test("what stays a comment: a tool's, one beside code, one with no code below, a
 	assert.equal(commentAt(lines("// @ts-expect-error: untyped\nimport x from \"x\";"), 0), undefined);
 	assert.equal(commentAt(lines("/*! @license MIT */\nexport {};"), 0), undefined);
 	assert.equal(commentAt(lines("/// <reference types=\"node\" />\nexport {};"), 0), undefined);
+	assert.equal(commentAt(lines("/**\n * Kept as comments: an eslint-disable, a @ts-expect-error.\n */\nexport {};"), 1)?.text, "Kept as comments: an eslint-disable, a @ts-expect-error.", "prose naming a directive isn't one");
 	assert.equal(commentAt(lines("call(); /* beside */\nnext();"), 0), undefined);
 	assert.equal(commentAt(lines("call();\n// the end"), 1), undefined);
 	assert.equal(commentAt(lines("const a = 1;\n"), 0), undefined);
