@@ -80,7 +80,7 @@ async function answer(document: vscode.TextDocument, line: number): Promise<vsco
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-	const observed = observeExtension("type-queries");
+	const observed = observeExtension("type-queries", vscode);
 	const changed = new vscode.EventEmitter<void>();
 
 	if (observed !== undefined) {

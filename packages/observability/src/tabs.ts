@@ -5,6 +5,7 @@
  *
  *   relay → `tab.discover` { query }
  *   tab   → `tab.here` { query, tab, url, title, visible, focused }
+ *   tab   → `tab.leaving` { tab }, on pagehide: so a link that drops without it is a page that crashed (protocol 5)
  *
  * Plain pub/sub, not RPC: an RPC takes the FIRST reply, and a discovery wants every tab's. This module is the protocol
  * and the relay side (Node-safe); the tab side is `answerTabDiscovery` in index.ts.
@@ -13,6 +14,11 @@ import type { Hub } from "@brianjenkins94/hub";
 
 export const TAB_DISCOVER = "tab.discover";
 export const TAB_HERE = "tab.here";
+/** A tab's last word, as its page goes (a reload, a close, a navigation): sent from the realm holding the link, so it's out
+ *  before the link closes. A link that closes without it is a page that went without going: a crash, or a close that ran
+ *  no unload (Playwright's page.close(), a discarded tab). The socket's close code can't tell: Chromium's is 1001 for
+ *  all of them. */
+export const TAB_LEAVING = "tab.leaving";
 
 /**
  * What a page expects of the relay it's linked to, as one number, sent with every tab answer. Bump it when pages start
@@ -27,8 +33,9 @@ export const TAB_HERE = "tab.here";
  *   4 — every tool is named `<family>_<verb>` (debug-mcp's own: logs_query, tabs_list, …), `tab` always means the page
  *       serving a tool (a query tool's filter is `from`), and page_eval / page_query take a frame by its name
  *       (`window`), not a substring (`frame`): an older debug-mcp offers the old names beside the page's new ones.
+ *   5 — a tab says it's going (`tab.leaving`, on pagehide): a link that drops without it, the relay calls a crash.
  */
-export const OBSERVABILITY_PROTOCOL = 4;
+export const OBSERVABILITY_PROTOCOL = 5;
 
 export interface TabInfo {
 	"tab": string;

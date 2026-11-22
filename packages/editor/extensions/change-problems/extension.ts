@@ -16,7 +16,7 @@ const LANGUAGES = new Set(["typescript", "typescriptreact", "javascript", "javas
 const SETTLE_MS = 500;
 
 export function activate(context: vscode.ExtensionContext): void {
-	const observed = observeExtension("change-problems");
+	const observed = observeExtension("change-problems", vscode);
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
 	const recheck = async (): Promise<void> => {

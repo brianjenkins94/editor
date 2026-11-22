@@ -11,7 +11,7 @@ import { until } from "@brianjenkins94/util/until";
 import { createHub, portTransport, websocketTransport } from "@brianjenkins94/hub";
 
 import { createArchReporter } from "../../observability/src/arch.ts";
-import { TAB_DISCOVER, TAB_HERE } from "../../observability/src/tabs.ts";
+import { OBSERVABILITY_PROTOCOL, TAB_DISCOVER, TAB_HERE, TAB_LEAVING } from "../../observability/src/tabs.ts";
 import { createDebugMcp } from "../src/server.ts";
 import type { TestClient } from "../src/testing.ts";
 import { connectTestClient } from "../src/testing.ts";
@@ -27,7 +27,7 @@ const roots = new Map<string, Hub>();
 
 /** A stand-in tab `tab`: a `root` hub (the same id in every tab) with a worker hub `worker` under it, both reporting
  *  their architecture, and a log line from `root`. */
-async function openTab(tab: string, worker: string): Promise<void> {
+async function openTab(tab: string, worker: string, protocol?: number): Promise<void> {
 	const root = createHub({ "id": "root" });
 	const child = createHub({ "id": worker });
 	const channel = new MessageChannel();
@@ -41,7 +41,7 @@ async function openTab(tab: string, worker: string): Promise<void> {
 	}
 
 	root.subscribe(TAB_DISCOVER, (data) => {
-		root.publish(TAB_HERE, { "query": (data as { "query": string }).query, "tab": tab, "url": "http://localhost:5180/" + tab, "title": tab, "visible": true, "focused": false });
+		root.publish(TAB_HERE, { "query": (data as { "query": string }).query, "tab": tab, "url": "http://localhost:5180/" + tab, "title": tab, "visible": true, "focused": false, ...protocol === undefined ? {} : { "protocol": protocol } });
 	});
 	await connect(root, tab);
 	roots.set(tab, root);
@@ -208,9 +208,35 @@ test("a linked tab that doesn't answer in time (its page busy) is listed as sile
 	await connect(busy, "busy");
 
 	const { value } = await call("tabs_list");
-	const listed = value as { "tab"?: string; "silent"?: boolean }[];
+	const listed = value as { "tab"?: string; "silent"?: boolean; "gone"?: string }[];
 
-	assert.deepEqual(listed.filter((tab) => tab.silent !== true).map((tab) => tab.tab), ["t2"]);
+	assert.deepEqual(listed.filter((tab) => tab.silent !== true && tab.gone === undefined).map((tab) => tab.tab), ["t2"]);
 	assert.equal(listed.filter((tab) => tab.silent === true).length, 1, JSON.stringify(listed));
 	sockets.get("busy")?.close();
+});
+
+test("a tab that went says how: its page said it was going (a reload, a close), or its link dropped without a word (a crash)", async () => {
+	await openTab("t3", "worker-c", OBSERVABILITY_PROTOCOL);
+	await openTab("t4", "worker-d", OBSERVABILITY_PROTOCOL);
+	await until("both listed", async () => {
+		const listed = (await call("tabs_list")).value as { "tab"?: string }[];
+
+		return ["t3", "t4"].every((tab) => listed.some((entry) => entry.tab === tab)) ? true : undefined;
+	});
+
+	// (t3's page going: its pagehide's last word, then the browser closes its socket; t4's renderer dies, its socket with it)
+	roots.get("t3")!.publish(TAB_LEAVING, { "tab": "t3" });
+	sockets.get("t3")?.close();
+	sockets.get("t4")?.close();
+
+	type Gone = { "tab": string; "gone"?: string };
+	const gone = await until("both gone", async () => {
+		const listed = ((await call("tabs_list")).value as Gone[]).filter((entry) => entry.gone !== undefined);
+
+		return listed.some((entry) => entry.tab === "t4") && listed.some((entry) => entry.tab === "t3") ? listed : undefined;
+	});
+
+	assert.deepEqual(gone.map((entry) => [entry.tab, entry.gone]).sort(([left], [right]) => String(left).localeCompare(String(right))), [["t1", "unknown"], ["t3", "left"], ["t4", "crashed"]], "t1's page, too old to say");
+	assert.match((await queryLogs({ "from": "t4", "source": "debug-mcp" }))[0]?.message ?? "", /tab t4 crashed \(its link dropped without its page saying/u);
+	assert.match((await queryLogs({ "from": "t3", "source": "debug-mcp" }))[0]?.message ?? "", /tab t3 reloaded or was closed/u);
 });

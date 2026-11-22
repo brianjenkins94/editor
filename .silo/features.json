@@ -290,6 +290,7 @@
       "packages/editor/shared/architecture.ts",
       "packages/editor/shared/editor-metrics.ts",
       "packages/editor/shared/fs-boundaries.ts",
+      "packages/editor-api/src/documents.ts",
       "packages/editor/shared/fs-caller.ts",
       "packages/editor/workbench/architecture-store.ts",
       "packages/editor/workbench/fs-trace.ts"
@@ -297,6 +298,7 @@
     "tests": [
       "packages/editor/test/editor-metrics.test.mjs",
       "packages/editor/test/fs-boundaries.test.mjs",
+      "packages/editor-api/test/documents.test.mjs",
       "packages/editor/test/performance.mjs",
       "packages/editor/test/workbench.mjs"
     ]
@@ -525,7 +527,8 @@
       "agent tool|tabs_list",
       "agent tool|tree_state",
       "hub subscription|TAB_DISCOVER",
-      "hub subscription|TAB_HERE"
+      "hub subscription|TAB_HERE",
+      "hub subscription|TAB_LEAVING"
     ],
     "paths": [
       "packages/debug-mcp/src/forward.ts",
@@ -1357,10 +1360,12 @@
     ],
     "paths": [
       "packages/debug-mcp/src/tools/metrics.ts",
+      "packages/debug-mcp/src/cdp-memory.ts",
       "packages/observability/src/metrics.ts"
     ],
     "tests": [
-      "packages/observability/test/metrics.test.ts"
+      "packages/observability/test/metrics.test.ts",
+      "packages/debug-mcp/test/cdp-memory.test.ts"
     ]
   },
   "Mock a value": {

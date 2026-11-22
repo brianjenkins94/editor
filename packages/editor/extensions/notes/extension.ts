@@ -39,7 +39,7 @@ const shortly = (note: Note): string => {
 };
 
 export function activate(context: vscode.ExtensionContext): void {
-	const observed = observeExtension(VIEW);
+	const observed = observeExtension(VIEW, vscode);
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("/workspace");
 	const diagnostics = vscode.languages.createDiagnosticCollection(VIEW);
 	/** What each file's notes were last found as: what its lightbulb offers, and what's shown while it can't be parsed. */

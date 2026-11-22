@@ -22,7 +22,7 @@ const SETTLE_MS = 2000;
 const FIRST_READ_MS = 30_000;
 
 export function activate(context: vscode.ExtensionContext): void {
-	const observed = observeExtension("cosmetic");
+	const observed = observeExtension("cosmetic", vscode);
 
 	if (observed !== undefined) {
 		context.subscriptions.push(observed);

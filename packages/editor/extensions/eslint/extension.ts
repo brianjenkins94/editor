@@ -363,7 +363,7 @@ function wholeDocument(document: vscode.TextDocument): vscode.Range {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-	const observed = observeExtension("eslint");
+	const observed = observeExtension("eslint", vscode);
 
 	if (observed !== undefined) {
 		({ log } = observed);

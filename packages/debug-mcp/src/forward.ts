@@ -6,6 +6,7 @@
 import type { RpcClient } from "@brianjenkins94/hub";
 import type { DebugMcp } from "./server.ts";
 import { rpcCallSubject } from "@brianjenkins94/hub";
+import { sayGone } from "./server.ts";
 
 // A tab that isn't connected fails fast instead of waiting out the whole timeout.
 export const RESPONDER_MS = 3000;
@@ -54,11 +55,13 @@ export async function callTab(debugMcp: DebugMcp, name: string, tab: string | un
 	const target = await resolveTab(debugMcp, tab);
 	const subject = rpcCallSubject(name + "." + target);
 	// A tab that goes away mid-call (reloaded, closed, crashed) never answers: the call fails as it goes, rather than
-	// waiting out a timeout that can be half an hour.
+	// waiting out a timeout that can be half an hour — saying which, when its link has closed (server.ts' GoneTab).
 	const gone = new AbortController();
 	const watch = setInterval(() => {
 		if (!debugMcp.hub.interested(subject)) {
-			gone.abort(new Error(`tab ${target} went away during the call (reloaded, closed or crashed): it may or may not have done it`));
+			const went = debugMcp.goneOf(target) ?? { "tab": target, "url": "", "title": "", "how": "unknown", "at": Date.now() };
+
+			gone.abort(new Error(`${sayGone(went, " during the call")}: it may or may not have done it`));
 		}
 	}, GONE_MS);
 

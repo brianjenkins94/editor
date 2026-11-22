@@ -67,7 +67,7 @@ function questionOf({ session, ask }: Asking): Pick<PaneContent, "items"> & { "m
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-	const observed = observeExtension(VIEW);
+	const observed = observeExtension(VIEW, vscode);
 
 	installCoverage(context);
 

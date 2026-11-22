@@ -23,6 +23,7 @@ import type { MetricsReporter, Observed, ObserveOptions, TrafficKind } from "@br
 import type { Effect } from "./index.ts";
 import { createHub, createRpcClient, portTransport, rpcCallSubject, rpcReplySubject, serve } from "@brianjenkins94/hub";
 import { describeJsonMessage, observe, relayLoggerToHub, reportMetrics } from "@brianjenkins94/observability";
+import { countDocumentOpens } from "./documents.ts";
 import { NETWORK_PROBES } from "./probes.ts";
 
 /** What `workspaceRuntime()` gives a debugger's extension. */
@@ -341,8 +342,11 @@ export interface ObservedExtension {
  * and metrics ride the hub as `ext:<name>`'s, through the workspace runtime's link (the way a debugger's worker joins,
  * packages/editor/ARCHITECTURE.md, *Extension points* 2), which carries them and nothing of the editor's services. Not its console: the extension host is
  * every extension's, so what an extension logs is what it hands `log`. Undefined outside the editor.
+ *
+ * Given its `vscode` (`api`), the documents it opens are counted by the function that opened them, as its `documents`
+ * gauge (documents.ts): what opening one costs is everyone's who listens.
  */
-export function observeExtension(name: string): ObservedExtension | undefined {
+export function observeExtension(name: string, api?: Parameters<typeof countDocumentOpens>[0]): ObservedExtension | undefined {
 	const runtime = workspaceRuntime();
 
 	if (runtime === undefined) {
@@ -373,6 +377,13 @@ export function observeExtension(name: string): ObservedExtension | undefined {
 
 		return opened;
 	};
+
+	// (its gauge kept from its first document: an extension that opens none holds no hub for it)
+	const documents = api === undefined ? undefined : countDocumentOpens(api, () => {
+		if (documents !== undefined) {
+			open().metrics.gauge("documents", documents);
+		}
+	});
 
 	return {
 		get "log"() {

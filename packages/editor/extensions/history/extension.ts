@@ -56,7 +56,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	const root = folder.uri;
 	const output = vscode.window.createOutputChannel("History");
-	const observed = observeExtension("history");
+	const observed = observeExtension("history", vscode);
 
 	if (observed !== undefined) {
 		context.subscriptions.push(observed);

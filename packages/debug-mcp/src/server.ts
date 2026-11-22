@@ -20,11 +20,12 @@ import { ARCH_SUBJECT, requestArchSync } from "../../observability/src/arch.ts";
 import { ArchitectureStore } from "../../observability/src/arch-store.ts";
 import { METRICS_SUBJECT, MetricsHistory } from "../../observability/src/metrics.ts";
 import type { TabInfo } from "../../observability/src/tabs.ts";
-import { discoverTabs, markOutdated, TAB_HERE } from "../../observability/src/tabs.ts";
+import { discoverTabs, markOutdated, TAB_HERE, TAB_LEAVING } from "../../observability/src/tabs.ts";
 
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { agentCalls } from "./agent.ts";
+import { cdpMemory } from "./cdp-memory.ts";
 import { mcpSessions } from "./sessions.ts";
 import { RecordStore } from "./store.ts";
 
@@ -80,6 +81,12 @@ export interface DebugMcp {
 	"linkCount": () => number;
 	/** The editor tabs linked in right now, each answering with its id — the page tools are served under it. */
 	"tabs": (timeoutMs?: number) => Promise<TabInfo[]>;
+	/** The DevTools endpoint memory by realm is read through now (cdp-memory.ts), or undefined while there's none. */
+	"memoryVia": () => string | undefined;
+	/** How a tab that was listed went, once its link closed: newest last. */
+	"gone": () => GoneTab[];
+	/** How tab `tab` went, if its link has closed. */
+	"goneOf": (tab: string) => GoneTab | undefined;
 	/** Resolves with the port once the WS server is bound and accepting connections (`port: 0` binds any free one);
 	 *  rejects if it fails to bind (typically EADDRINUSE — another debug-mcp already owns the port). Await before
 	 *  announcing "listening". */
@@ -90,6 +97,31 @@ export interface DebugMcp {
 	"sessions": () => number;
 	"close": () => Promise<void>;
 }
+
+/** A tab whose link closed: `left` — its page said it was going (a reload, a close, a navigation); `crashed` — it
+ *  didn't, and it speaks the protocol that would have (its renderer crashed, or it was closed without running its unload:
+ *  Playwright's page.close(), a discarded tab); `unknown` — an
+ *  older page, which never says. */
+export interface GoneTab {
+	"tab": string;
+	"url": string;
+	"title": string;
+	"how": "left" | "crashed" | "unknown";
+	/** `Date.now()` as its link closed. */
+	"at": number;
+}
+
+/** What a gone tab's going says, in a sentence — `when` after what it did (" during the call"). */
+export function sayGone(gone: GoneTab, when = ""): string {
+	return gone.how === "left"
+		? `tab ${gone.tab} reloaded or was closed${when} (its page said it was going)`
+		: gone.how === "crashed"
+			? `tab ${gone.tab} crashed${when} (its link dropped without its page saying it was going: its renderer died — out of memory is "Aw, Snap!", error code 5 — or it was closed without running its unload, as Playwright's page.close() and a discarded tab are)`
+			: `tab ${gone.tab} went away${when} (reloaded, closed or crashed)`;
+}
+
+/** How many gone tabs are kept. */
+const GONE_KEPT = 50;
 
 /** A tool call the agent's client reports (`POST /agent/tool`): from a program on this machine — a hook — never a page,
  *  which would send an Origin. */
@@ -121,7 +153,9 @@ function agentReport(agent: AgentCalls, request: IncomingMessage, response: Serv
 }
 
 /** Start the debug-mcp WS server on `port` and return its hub, store, rpc client, and a close handle. */
-export function createDebugMcp(options: { "port": number; "max"?: number; "origins"?: string[] } = { "port": 7378 }): DebugMcp {
+/** `cdp`: the browser's DevTools endpoint to read each realm's memory through (cdp-memory.ts) — default DEBUG_MCP_CDP, else
+ *  Chromium's usual port, looked for while a tab is linked; `false`, none. */
+export function createDebugMcp(options: { "port": number; "max"?: number; "origins"?: string[]; "cdp"?: string | false } = { "port": 7378 }): DebugMcp {
 	const hub = createHub({ "id": "debug-mcp" });
 	const store = new RecordStore({ "max": options.max });
 	const links = new Set<WebSocket>();
@@ -176,6 +210,24 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 	/** A preview app's tab → the scope the editor files its records under (its window: TabInfo.scope). */
 	const previewScopes = new Map<string, string>();
 
+	// Who a link's tab is, as it last answered (for how it went: GoneTab), and which tabs said they're going (TAB_LEAVING
+	// — by tab, not link: an app in a preview says so too, over its editor tab's link).
+	const infoByLink = new Map<string, TabInfo>();
+	const leavingTabs = new Set<string>();
+	const gone: GoneTab[] = [];
+	const openLinks = new Set<string>();
+	/** A link's metrics plane, made as its first sample arrives. */
+	const metricsFor = (link: string): MetricsHistory => {
+		let metrics = metricsByLink.get(link);
+
+		if (metrics === undefined) {
+			metrics = new MetricsHistory();
+			metricsByLink.set(link, metrics);
+		}
+
+		return metrics;
+	};
+
 	/** A tab's latest link (a tab that reconnects — debug-mcp restarted — arrives on a new one). */
 	const linkOf = (tab: string): string | undefined => [...tabByLink].reverse().find(([, candidate]) => candidate === tab)?.[0] ?? previewTabs.get(tab);
 
@@ -191,7 +243,17 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 				}
 			} else {
 				tabByLink.set(origin.link.id, tab);
+				infoByLink.set(origin.link.id, data as TabInfo);
+				// (here, on this link: whatever it said as an earlier page went is that page's)
+				leavingTabs.delete(tab);
 			}
+		}
+	});
+	hub.subscribe(TAB_LEAVING, (data) => {
+		const { tab } = (data ?? {}) as { "tab"?: unknown };
+
+		if (typeof tab === "string") {
+			leavingTabs.add(tab);
 		}
 	});
 
@@ -232,14 +294,26 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 			return;
 		}
 
-		let metrics = metricsByLink.get(origin.link.id);
+		metricsFor(origin.link.id).add(data);
+	});
 
-		if (metrics === undefined) {
-			metrics = new MetricsHistory();
-			metricsByLink.set(origin.link.id, metrics);
-		}
+	// And each linked tab's realms' memory, read from outside where the browser has a DevTools endpoint: filed on its
+	// metrics plane as the `cdp` source, beside what its gauges read (or don't: metrics_query says so).
+	const memory = options.cdp === false ? undefined : cdpMemory({
+		...options.cdp === undefined ? {} : { "endpoint": options.cdp },
+		"linked": () => [...openLinks].flatMap((link) => {
+			const info = infoByLink.get(link);
 
-		metrics.add(data);
+			return info === undefined ? [] : [{ "tab": info.tab, "url": info.url }];
+		}),
+		"file": (tab, sample) => {
+			const link = linkOf(tab);
+
+			if (link !== undefined) {
+				metricsFor(link).add(sample);
+			}
+		},
+		"say": (message) => { store.add({ "kind": "log", "level": "info", "message": message, "context": { "source": "debug-mcp" }, "time": Date.now(), "depth": 0 }); }
 	});
 
 	// Request client, created eagerly so its reply channel ($rpc.reply.debug-mcp) is advertised to every page as it
@@ -259,6 +333,22 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		// onClose), and whoever watches that topology change must already see the new link count.
 		socket.addEventListener("close", () => {
 			links.delete(socket);
+			openLinks.delete(unlink.id);
+
+			// How its tab went, before the unlink withdraws its interest (a call waiting on it asks: forward.ts).
+			const info = infoByLink.get(unlink.id);
+
+			if (info !== undefined) {
+				const went: GoneTab = { "tab": info.tab, "url": info.url, "title": info.title, "how": leavingTabs.has(info.tab) ? "left" : (info.protocol ?? 0) >= 5 ? "crashed" : "unknown", "at": Date.now() };
+
+				leavingTabs.delete(info.tab);
+
+				gone.push(went);
+				gone.splice(0, gone.length - GONE_KEPT);
+				// (filed under its link, as its own records are: logs_query from its tab finds it)
+				store.add({ "kind": "log", "level": went.how === "crashed" ? "error" : "info", "message": sayGone(went), "attrs": { "tab": went.tab, "how": went.how }, "context": { "source": "debug-mcp" }, "time": went.at, "depth": 0 }, unlink.id);
+			}
+
 			unlink();
 
 			// Its architecture goes with it (its records stay, still filed under the link, and its tab id); its metrics stay
@@ -271,6 +361,8 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 		// Non-transit: every connected page is its OWN tree. Joined, a request in one tab (a preview's
 		// virtual.request, a capability.decide) could be answered by another tab's node worker or pod.
 		const unlink = hub.link(websocketTransport(socket), { "transit": false });
+
+		openLinks.add(unlink.id);
 
 		// Once the page's hello is in, so is its tree's interest in the sync: ask its hubs for their full state. (Their
 		// answers wait for our $sys.arch interest to reach them — a reporter holds its reports until someone listens.)
@@ -317,6 +409,9 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 
 			return marked;
 		}),
+		"memoryVia": () => memory?.via(),
+		"gone": () => [...gone],
+		"goneOf": (tab) => [...gone].reverse().find((went) => went.tab === tab),
 		"whenListening": whenListening,
 		"agent": agent,
 		"sessions": sessions.count,
@@ -328,6 +423,7 @@ export function createDebugMcp(options: { "port": number; "max"?: number; "origi
 			void sessions.close();
 
 			agent.dispose();
+			memory?.close();
 			server.close(() => {
 				http.close(() => { resolve(); });
 				http.closeAllConnections();

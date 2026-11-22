@@ -13,6 +13,9 @@
  *    by its tap as they happen (the architecture store's rates aren't usable here: a reporter's first report brings its
  *    traffic since it started as one delta, which reads as a burst).
  *  - `storage` (MB): what the origin keeps (IndexedDB, the service worker's caches), every 15 s.
+ *  - `documents`: the documents the workbench's code opens, by the function that opened them (`<caller>.opened`, `.ms`,
+ *    `.paths`): each has every linter and checker start on it (editor-api's documents.ts). An extension's are its own
+ *    (`ext:<name>:documents.…`), counted as it hands `observeExtension` its `vscode`.
  *
  * The shell reports its own `longFrames` (it hosts the preview windows): `reportShellMetrics`. The host page reports
  * `spans` — every context's timed spans as rates, errors and latencies (`reportSpanMetrics`), from the records its
@@ -148,7 +151,7 @@ function refreshed(read: () => Promise<number | undefined>, everyMs: number): Ga
 
 /** The workbench's gauges, published on `$sys.metrics.workbench`; `store` (its architecture store) names the workers.
  *  Returns their removal. (The store is handed in so this module stays free of the workbench's: the shell imports it.) */
-export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuffer | undefined, store?: ArchitectureStore): () => void {
+export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuffer | undefined, store?: ArchitectureStore, documents?: Gauge): () => void {
 	const metrics = reportMetrics(hub);
 	// Messages this hub handles: those it originates and those that arrive on its links (not the links' control frames).
 	let handled = 0;
@@ -179,6 +182,10 @@ export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuf
 	// The filesystems' boundaries, counted: calls, time, distinct paths and bytes, by boundary, operation and caller
 	// (fs-boundaries.ts).
 	metrics.gauge("fs", fsGauge);
+	// And the documents its code opens, by who opened them (editor-api's documents.ts).
+	if (documents !== undefined) {
+		metrics.gauge("documents", documents);
+	}
 
 	return () => {
 		untap();

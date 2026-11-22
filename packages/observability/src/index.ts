@@ -31,7 +31,7 @@ import { installNetworkProbes, installWindowMessageProbe, installWorkerProbe } f
 import { ArchitectureStore } from "./arch-store.ts";
 import { tagBySubject } from "./log-subject.ts";
 import { PAGE_TOOLS_CHANGED, servePageToolSet } from "./page-tools.ts";
-import { OBSERVABILITY_PROTOCOL, TAB_DISCOVER, TAB_HERE } from "./tabs.ts";
+import { OBSERVABILITY_PROTOCOL, TAB_DISCOVER, TAB_HERE, TAB_LEAVING } from "./tabs.ts";
 
 /** Reserved observability namespace — records are published on `$sys.log.<source>`; app code must not use it.
  *  A separate-process sink (a Node collector) must use this same value; see @brianjenkins94/debug-mcp. */
@@ -492,9 +492,19 @@ function jsonSafe(value: unknown): unknown {
 
 /** Answer tab discovery (tabs.ts) on `hub` as tab `tab`. Returns an unsubscribe. */
 export function answerTabDiscovery(hub: Hub, tab: string): () => void {
-	return hub.subscribe(TAB_DISCOVER, (data) => {
+	const unsubscribe = hub.subscribe(TAB_DISCOVER, (data) => {
 		hub.publish(TAB_HERE, { "query": (data as { "query"?: string } | undefined)?.query, ...describeTab(tab, hub) });
 	});
+	// And its last word as it goes (TAB_LEAVING): sent as it goes, from this realm (the one linking debug-mcp, with the
+	// page tools), so the link carries it before it closes. A relay that sees a link drop without it calls it a crash.
+	const leaving = (): void => { hub.publish(TAB_LEAVING, { "tab": tab }); };
+
+	globalThis.addEventListener?.("pagehide", leaving);
+
+	return () => {
+		unsubscribe();
+		globalThis.removeEventListener?.("pagehide", leaving);
+	};
 }
 
 function describeTab(tab: string, hub: Hub): TabInfo {

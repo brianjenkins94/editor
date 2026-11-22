@@ -9,7 +9,7 @@
  * said where it is (growth.ts).
  */
 import { observeExtension } from "@brianjenkins94/editor-api/runtime";
-import type * as vscode from "vscode";
+import * as vscode from "vscode";
 import { keepBaseline } from "./baseline";
 import { installDecisions } from "./decisions";
 import { readExceptions } from "./exceptions";
@@ -18,7 +18,7 @@ import { publishFindings } from "./findings";
 import { installRulePicker } from "./rule-picker";
 
 export function activate(context: vscode.ExtensionContext): void {
-	const observed = observeExtension("capabilities");
+	const observed = observeExtension("capabilities", vscode);
 
 	if (observed !== undefined) {
 		context.subscriptions.push(observed);

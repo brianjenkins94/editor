@@ -21,9 +21,11 @@ import "../shared/hidden-timers";
 import { classifyUrl, identifyWorker } from "@brianjenkins94/editor-api/probes";
 // eslint-disable-next-line perfectionist/sort-imports -- theme/documents above, first on purpose: it has to run before Lit does
 import { failureText } from "@brianjenkins94/editor-api/failures";
+import { countDocumentOpens } from "@brianjenkins94/editor-api/documents";
 import { linkRuntime } from "@brianjenkins94/editor-api/runtime";
 import { createHub, createRpcClient } from "@brianjenkins94/hub";
 import { boot, ExtensionHostKind, installMonacoProbes, onWorkbenchActivity, registerExtension, registerFileSystemOverlay, setTerminalProcessFactory } from "@brianjenkins94/monaco-vscode-api/main";
+import type { Gauge } from "@brianjenkins94/observability";
 import { isCancellation, observe } from "@brianjenkins94/observability";
 import bridgeExtension from "bridge:extension";
 import capabilitiesExtension from "capabilities:extension";
@@ -240,6 +242,8 @@ let publishColors: (() => void) | undefined;
 // through it and reads the latest api, so a command issued early still runs once it's captured.
 // eslint-disable-next-line ts/no-explicit-any
 let vscodeApi: any = null;
+/** The workbench's own document opens, by caller: the metrics plane's `documents` (editor-api's documents.ts). */
+let documentOpens: Gauge | undefined;
 
 // Resolves once `vscodeApi` is captured — an `openProject` message (from the shell's picker, over the pane bus)
 // may arrive right after "online" but before getApi()'s promise settles, so its handler awaits this.
@@ -443,6 +447,9 @@ function maybeBoot(): void {
 			});
 			bridgeExt.getApi().then((api: unknown) => {
 				vscodeApi = api;
+				// The documents the workbench's own code opens, counted by the function that opened each (editor-api's
+				// documents.ts): opening one has every linter and checker start on it. Reported with the metrics, below.
+				documentOpens = countDocumentOpens(api as typeof import("vscode"));
 				// Unblock the debug bridge (window.__editor.ready / .api). See debug-bridge.ts.
 				markApiReady(); // let a queued openProject (picker) proceed
 				markBridgeReady();
@@ -499,7 +506,7 @@ function maybeBoot(): void {
 				// window. bridge/worker spans then federate to the page's $sys.log.> collector. See wireWorkbenchHub.
 				wireWorkbenchHub(api as typeof import("vscode"), workbenchHub, paneLog, workspaceFs?.buffer);
 				// The metrics plane: memory by realm, workspace fill, long frames, hub traffic, storage (editor-metrics.ts).
-				reportWorkbenchMetrics(workbenchHub, workspaceFs?.buffer, architectureStore(workbenchHub));
+				reportWorkbenchMetrics(workbenchHub, workspaceFs?.buffer, architectureStore(workbenchHub), documentOpens);
 				// Git: browser-git (isomorphic-git over the zen-fs workspace), served over the hub (git-service) to the
 					// shell's review panel, and VS Code's Source Control view (the source-control extension, by the editor.git.* commands). See
 					// git-service.ts / git-engine.ts.
