@@ -49,14 +49,27 @@ function keyIn(document: vscode.TextDocument, name: string): vscode.Range | unde
 }
 
 /** Each import of `spec` in `document`: the specifier's string, as a range. */
-function importsIn(document: vscode.TextDocument, spec: string): vscode.Range[] {
+function importsIn(text: string, spec: string): vscode.Range[] {
 	const quoted = spec.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&");
 	const pattern = new RegExp(String.raw`(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(["'])${quoted}\1`, "gu");
+	const matches = [...text.matchAll(pattern)];
 
-	return [...document.getText().matchAll(pattern)].map((match) => {
+	if (matches.length === 0) {
+		return [];
+	}
+
+	// (where each line starts, for a position: the text's, not a document's — nothing is opened to read it)
+	const starts = [0, ...[...text.matchAll(/\n/gu)].map((match) => match.index + 1)];
+	const positionAt = (offset: number): vscode.Position => {
+		const line = starts.findLastIndex((start) => start <= offset);
+
+		return new vscode.Position(line, offset - starts[line]);
+	};
+
+	return matches.map((match) => {
 		const start = match.index + match[0].length - spec.length - 2;
 
-		return new vscode.Range(document.positionAt(start), document.positionAt(start + spec.length + 2));
+		return new vscode.Range(positionAt(start), positionAt(start + spec.length + 2));
 	});
 }
 
@@ -136,7 +149,28 @@ export function warnGrowth(context: vscode.ExtensionContext, log?: ObservedExten
 			}
 		}
 
-		// The code's use that reaches more: on each import of it in that workspace's code.
+		// The code's use that reaches more: on each import of it in that workspace's code. Each workspace's files listed and read
+		// once, as texts — an open one's as it's edited — never opened: a document opened is linted, type-checked and spelled
+		// by whoever listens, and one sweep opened every file of every workspace that had grown (2026-11-21: the ESLint
+		// worker past 2 GB, and the tab gone).
+		const texts = new Map<string, Promise<{ "uri": vscode.Uri; "text": string }[]>>();
+		const textsOf = async (workspace: string): Promise<{ "uri": vscode.Uri; "text": string }[]> => {
+			const listed = texts.get(workspace) ?? (async () => {
+				const pattern = workspace === "." ? CODE : `${workspace}/${CODE}`;
+				// (another workspace's file: its own use, in its own entry, or a private one's, not the baseline's)
+				const uris = (await vscode.workspace.findFiles(pattern, "{**/node_modules/**,**/.*/**}", 500)).filter((uri) => ownerOf(uri.path.slice(root.path.length + 1)).dir === workspace);
+
+				return Promise.all(uris.map(async (uri) => ({
+					"uri": uri,
+					"text": vscode.workspace.textDocuments.find((each) => each.uri.toString() === uri.toString())?.getText() ?? await Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => new TextDecoder().decode(bytes), () => "")
+				})));
+			})();
+
+			texts.set(workspace, listed);
+
+			return listed;
+		};
+
 		for (const [workspace, used] of Object.entries(baseline?.consumer ?? {})) {
 			for (const [spec, use] of Object.entries(used)) {
 				const name = packageOf(spec);
@@ -146,17 +180,8 @@ export function warnGrowth(context: vscode.ExtensionContext, log?: ObservedExten
 					continue;
 				}
 
-				const pattern = workspace === "." ? CODE : `${workspace}/${CODE}`;
-
-				for (const uri of await vscode.workspace.findFiles(pattern, "{**/node_modules/**,**/.*/**}", 500)) {
-					// (another workspace's file: its own use, in its own entry, or a private one's, not the baseline's)
-					if (ownerOf(uri.path.slice(root.path.length + 1)).dir !== workspace) {
-						continue;
-					}
-
-					const document = await vscode.workspace.openTextDocument(uri);
-
-					for (const range of importsIn(document, spec)) {
+				for (const { uri, text } of await textsOf(workspace)) {
+					for (const range of importsIn(text, spec)) {
 						for (const [capability, by] of grew) {
 							warn(uri, range, `Your use of ${spec} reaches more than it did: ${capability}${by === "*" ? "" : `, from ${by}`}. Its calls of it ask at the call until your policy decides them.`, { "name": name, "capability": capability, "by": by });
 						}

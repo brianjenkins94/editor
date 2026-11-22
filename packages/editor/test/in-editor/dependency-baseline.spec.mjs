@@ -8,10 +8,11 @@ import { expect, test } from "@playwright/test";
 
 import { codeOf, openEditor, openFile, problems, quickFix, runCommand } from "./editor.mjs";
 
-/** A baseline in which react's version grew `net` since it was added, as a repository that shares its baseline commits
- *  it (the editor reads `.silo/baseline.json` first, else its own `.silo/local/` copy). */
+/** A baseline in which react's version grew `net` since it was added, and the code's use of it too (`useState`), as a
+ *  repository that shares its baseline commits it (the editor reads `.silo/baseline.json` first, else its own `.silo/local/`
+ *  copy). */
 const BASELINE = JSON.stringify({
-	"consumer": {},
+	"consumer": { ".": { "react": { "kind": "package", "version": "19.3.1", "members": ["useState"], "dynamic": false, "caps": ["env", "net"], "grew": { "net": "useState" } } } },
 	"packages": { "react": { "version": "19.3.1", "caps": ["env", "net"], "grew": { "net": "19.3.1" } } },
 	"join": 1
 }, undefined, 2);
@@ -37,13 +38,16 @@ test("a dependency that grew is warned on its line, the lightbulb decides it, an
 		"package.json": "{\n  \"dependencies\": {\n    \"react\": \"19.3.1\"\n  }\n}\n",
 		".silo/baseline.json": `${BASELINE}\n`,
 		".silo/runs/local.jsonl": `${RUN}\n`,
-		"src/call.mjs": "await fetch(\"https://example.com/\");\n"
+		"src/call.mjs": "await fetch(\"https://example.com/\");\n",
+		"src/app.mjs": "import { useState } from \"react\";\n\nexport const state = useState;\n"
 	});
 
 	const rows = await problems(workbench);
 	const grew = rows.filter({ "hasText": "react 19.3.1 can do more than when it was added: net" });
 
 	await expect(grew).toHaveCount(1, { "timeout": 60_000 });
+	// (and the code's use of it, on its import: found in the file's text, which isn't opened to look)
+	await expect(rows.filter({ "hasText": "Your use of react reaches more than it did: net, from useState" })).toHaveCount(1);
 
 	// Its lightbulb, on react's line: allowed always, as a rule about react's net calls, and the warning goes.
 	await openFile(workbench, "package.json");

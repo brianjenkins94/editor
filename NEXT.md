@@ -40,10 +40,15 @@ How it's kept:
    parity with `full-editor` (the user's objective of 2026-11-05: that list ended 2026-11-19 with *Formatting-only
    changes marked*). In order:
    - **The boundaries** (ARCHITECTURE.md has the reasons, checked 2026-11-03: nothing split). Left: whether tsval can
-     give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one file). Tried
-     2026-11-21 with packages/editor/test's 46 unit files (`runs_tests`, this repository cloned into `?instance=`), in
-     Brave: the renderer crashed ("Aw, Snap!", error code 5) as the run started, with the tab in front; earlier, 11 files
-     in, the workbench near 1.8 GB. Its own item first: a suite run here takes the editor down.
+     give up the workspace buffer, by a whole suite's timing through its link (3.4 s against 3.9 s on one file). The suite
+     (packages/editor/test's unit files, this repository cloned into `?instance=`) runs through since 2026-11-21: it
+     crashed the tab before (V8 out of memory, "Aw, Snap!" 5), the growth warnings having opened every file of each
+     workspace whose dependency grew, each opened document linted (ESLint past 2 GB). Time it next.
+   - **A baseline made in a clone says 118 uses of its dependencies grew** (2026-11-21, `.silo/local/baseline.json` of a
+     fresh `env/` load of this repository): each "since" its own version (typescript's `env`, `fs:read`, `fs:write` since
+     6.0.3). Lib's syncConsumer counts a use that wasn't in the consumer before, of a package already in the baseline, or
+     one whose version moved (from none?), as grown; the editor reads the code's use in instalments as TypeScript loads
+     each project (baseline.ts `consumerFor`, its `seen`). Find which, from a clone's first readings.
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; silo README's *What doesn't
      fit* answered. One owner a file is where that starts: reassess sharing from what runs show — Features and tests
      says which of a feature's files other features' tests run (2026-11-21), traces not yet; packages/admin/src/views.tsx,
