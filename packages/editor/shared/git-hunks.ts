@@ -1,42 +1,24 @@
-/**
- * A change as hunks: the line diff of a file's HEAD text against its working text, aligned for the side-by-side review
- * (`rows`), grouped into hunks with ids (`hunksOf`), and a selection of them turned back into the text to commit or to
- * keep (`committedContent`). One implementation for every face that picks part of a change — the shell's review panel
- * by rows, an agent's `git_commit` / `git_discard` by hunk ids — run in the workbench (git-review.ts
- * `git.review`, `git.discard`, and its part of git-service.ts' `git.commit`).
- */
 import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { ArrayChange } from "diff";
 import { diffArrays } from "diff";
 
-/** A row of the aligned diff: `ctx` unchanged, `add` / `del` one side only, `mod` a deleted line paired with an added one. */
 export interface DiffRowInfo {
 	"type": "ctx" | "add" | "del" | "mod";
-	/** 1-based HEAD line number, when this row has a left side. */
 	"leftNo"?: number;
-	/** 1-based working-tree line number, when this row has a right side. */
 	"rightNo"?: number;
 }
 
-/** A run of changed rows, with nothing unchanged between them. */
 export interface Hunk {
-	/** From its path and what it removes and adds (and which of the same it is), so it's the same hunk after another of
-	 *  the file's is committed or discarded. */
 	"id": string;
-	/** Indexes into the file's rows. */
 	"rows": number[];
-	/** The HEAD lines it replaces (the first's 1-based number; for none, the line they'd follow) and the working
-	 *  lines it puts there. */
 	"head": { "start": number; "lines": number };
 	"working": { "start": number; "lines": number };
 	"removed": string[];
 	"added": string[];
 }
 
-/** One changed file as `git.review` answers it. */
 export interface ReviewFile extends GitFileChange {
 	"hunks": Hunk[];
-	/** The texts and the aligned rows the hunks index (`texts`). */
 	"head"?: string;
 	"working"?: string;
 	"rows"?: DiffRowInfo[];
@@ -46,10 +28,8 @@ export interface Review { "files": ReviewFile[]; "head"?: string }
 
 const linesOf = (text: string): string[] => (text === "" ? [] : text.split("\n"));
 
-/** Past this many changed lines a file's change is one replacement, not a diff (a rewrite, a generated file). */
 const MOST_EDITS = 5000;
 
-/** The line diff (jsdiff's Myers diff), as ctx / del / add steps. */
 function lineDiff(before: string[], after: string[]): ("ctx" | "del" | "add")[] {
 	const changes = diffArrays(before, after, { "maxEditLength": MOST_EDITS }) as ArrayChange<string>[] | undefined;
 
@@ -64,10 +44,6 @@ function lineDiff(before: string[], after: string[]): ("ctx" | "del" | "add")[] 
 	});
 }
 
-/**
- * The diff of `head` → `working` in the side-by-side form: each run of deletions paired with the additions after it
- * (del[k] ↔ add[k]) into `mod` rows, the leftovers single-sided.
- */
 export function alignedRows(head: string, working: string): DiffRowInfo[] {
 	const steps = lineDiff(linesOf(head), linesOf(working));
 	const rows: DiffRowInfo[] = [];
@@ -112,7 +88,6 @@ export function alignedRows(head: string, working: string): DiffRowInfo[] {
 	return rows;
 }
 
-/** FNV-1a, 32 bits, as hex: short ids, no crypto needed (a hunk's id only has to tell a file's hunks apart). */
 function fnv(text: string): string {
 	let hash = 0x81_1C_9D_C5;
 
@@ -123,13 +98,11 @@ function fnv(text: string): string {
 	return hash.toString(16).padStart(8, "0");
 }
 
-/** The changed rows of `rows` as hunks, each with its id. */
 export function hunksOf(path: string, head: string, working: string, rows: DiffRowInfo[]): Hunk[] {
 	const [headLines, workingLines] = [linesOf(head), linesOf(working)];
 	const hunks: Hunk[] = [];
 	const seen = new Map<string, number>();
 	let run: number[] = [];
-	// Where the next hunk would start on each side: the line after the last one passed.
 	let [leftAt, rightAt] = [1, 1];
 
 	const flush = (): void => {
@@ -171,11 +144,6 @@ export function hunksOf(path: string, head: string, working: string, rows: DiffR
 	return hunks;
 }
 
-/**
- * The text that HEAD becomes with only some changed rows applied: `left` are the row indexes left as HEAD has them —
- * an added line dropped, a deleted one kept, a modified one as it was. Committing a selection leaves out what wasn't
- * picked; discarding some rows leaves out those.
- */
 export function committedContent(head: string, working: string, rows: DiffRowInfo[], left: ReadonlySet<number>): string {
 	const [headLines, workingLines] = [linesOf(head), linesOf(working)];
 
@@ -198,7 +166,6 @@ export function committedContent(head: string, working: string, rows: DiffRowInf
 	}).join("\n");
 }
 
-/** The rows of the hunks named — every id must be one of `hunks`' (else the file changed since it was reviewed). */
 export function rowsOfHunks(path: string, hunks: Hunk[], ids: readonly string[]): Set<number> {
 	const byId = new Map(hunks.map((hunk) => [hunk.id, hunk]));
 	const missing = ids.filter((id) => !byId.has(id));
@@ -210,15 +177,8 @@ export function rowsOfHunks(path: string, hunks: Hunk[], ids: readonly string[])
 	return new Set(ids.flatMap((id) => byId.get(id)?.rows ?? []));
 }
 
-/** A version of a file, for blame: the commit it's at (or "working", for the working tree's) and its text. */
 export interface Version { "oid": string; "text": string }
 
-/**
- * Which version each line of the newest one came from (`versions` newest first: the working tree's or HEAD's, then
- * each commit that changed the file, back): a line is the newest version's that it's in when the version after it
- * (older) hasn't it, as a line diff says. A line every version has came from the oldest, or before it (`boundary`:
- * where the versions given end, a shallow clone's first commit, say). Each line's 1-based number in the newest version.
- */
 export function blameOf(versions: Version[]): { "line": number; "oid": string; "boundary": boolean }[] {
 	if (versions.length === 0) {
 		return [];
@@ -226,14 +186,12 @@ export function blameOf(versions: Version[]): { "line": number; "oid": string; "
 
 	const lines = (text: string): string[] => (text === "" ? [] : text.replace(/\n$/u, "").split("\n"));
 	const count = lines(versions[0].text).length;
-	// (each newest line's index in the version being looked at; undefined once it's placed)
 	let at: (number | undefined)[] = Array.from({ "length": count }, (_, index) => index);
 	const placed: (string | undefined)[] = Array.from({ "length": count }, () => undefined);
 
 	for (let index = 0; index + 1 < versions.length; index += 1) {
 		const newer = lines(versions[index].text);
 		const older = lines(versions[index + 1].text);
-		// (a newer line's index in the older version, where it's there unchanged)
 		const back = new Map<number, number>();
 		let [n, o] = [0, 0];
 

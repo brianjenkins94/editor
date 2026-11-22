@@ -1,17 +1,9 @@
-/**
- * The workspace filesystem in the architecture reports. zen-fs is shared MEMORY, not a channel: every realm that
- * mounts the workspace SharedArrayBuffer reads and writes the same bytes, with no message to observe. So each realm
- * wraps its own `/workspace` store and reports the store operations it performs, as traffic from itself to the
- * `zenfs` node — which is how the reports show who touches the workspace, how much, and (in the workbench) through
- * which door: the vscode provider or a direct caller (isomorphic-git, the terminal's path walk).
- */
 import type { ArchSink } from "@brianjenkins94/observability";
 import type { FileSystem } from "@zenfs/core";
 import { countCall } from "./fs-boundaries";
 
 export const ZENFS_NODE = "zenfs";
 
-/** StoreFS methods, by the operation they report (sync and async twins alike). */
 const OPERATIONS: Record<string, string> = {
 	"stat": "stat",
 	"statSync": "stat",
@@ -39,28 +31,18 @@ const OPERATIONS: Record<string, string> = {
 
 const OBSERVED = Symbol.for("architecture.zenfs.observed");
 
-/** One in this many calls nobody named is sampled for who made it. */
 const UNNAMED_SAMPLE = 200;
 
 let unnamed = 0;
 
-/** Who a stack's call is from: the function names of its first frames past this observer (`a<b<c`), as a bundle has
- *  them — one file for zen-fs and its callers alike, so the names tell them apart. */
 function callerFrame(stack: string | undefined): string {
 	const names = (stack ?? "").split("\n").slice(1).map((line) => /at (?:async )?([\w$.<>]+) /u.exec(line)?.[1] ?? "anonymous").filter((name) => name !== "observed" && name !== "Object.observed");
 
 	return names.slice(0, 8).join("<").replaceAll(".", "_");
 }
 
-/** The operations on a file's content: what a store is made of (a directory's listing or a stat isn't). */
 const CONTENT = new Set(["read", "write", "create", "unlink", "rename"]);
 
-/**
- * The store a workspace path belongs to, by its shape — or undefined for the project's own files. A store is what a tool
- * keeps in a dot-directory at the workspace's root (`.silo/`, `.vscode/`, `.git/`); its shape is the directory and the
- * first one in it, anything deeper folded, and the file's kind: `.silo/evidence/<user>/<env>/world.ts.jsonl` →
- * `.silo/evidence/…/<file>.jsonl`. Discovered from what's written and read (ARCHITECTURE.md, *Discovered, not declared*), not listed.
- */
 export function storeShape(path: string): string | undefined {
 	const segments = path.split("/").filter((segment) => segment !== "");
 
@@ -82,24 +64,17 @@ export function storeShape(path: string): string | undefined {
 	return [...directories.slice(0, 2), ...directories.length > 2 ? ["…"] : [], kind].join("/");
 }
 
-/** A store's node on the view. */
 export function storeNode(shape: string): string {
 	return "store:" + shape;
 }
 
 export interface ZenfsObserverOptions {
-	/** Who is calling right now (a label prefix, e.g. "vscode"), or undefined for an unattributed caller. */
 	"caller"?: () => string | undefined;
-	/** The label prefix for an unattributed caller when `caller` is given (default "direct"). */
 	"unattributed"?: string;
-	/** Where `store` is mounted in the workspace, for its paths' store shapes (`.silo/local` for silo's local/; default:
-	 *  the workspace's root). */
 	"mountedAt"?: string;
-	/** Whether its operations are the shared workspace's (the `zenfs` node): false for a mount of a store of its own. */
 	"shared"?: boolean;
 }
 
-/** The byte size an operation moved: the data written, or the span read. */
 function bytesOf(operation: string, args: unknown[]): number {
 	if (operation === "write" && args[1] instanceof Uint8Array) {
 		return args[1].byteLength;
@@ -112,11 +87,6 @@ function bytesOf(operation: string, args: unknown[]): number {
 	return 0;
 }
 
-/**
- * Report every operation `store` (a zen-fs FileSystem — the `/workspace` mount) performs as `self → zenfs`.
- * Only the outermost call is counted: a store operation that calls another of its own (a write stats first) is one
- * operation, not three. Idempotent per store.
- */
 export function observeZenfs(sink: ArchSink, store: object, options: ZenfsObserverOptions = {}): void {
 	const target = store as Record<string | symbol, unknown>;
 
@@ -140,7 +110,6 @@ export function observeZenfs(sink: ArchSink, store: object, options: ZenfsObserv
 				sink.record(sink.self, ZENFS_NODE, "request", label, bytesOf(operation, args));
 			}
 
-			// What it touched, if it's a tool's store.
 			if (shape !== undefined) {
 				sink.record(sink.self, storeNode(shape), "request", label);
 			}
@@ -153,13 +122,9 @@ export function observeZenfs(sink: ArchSink, store: object, options: ZenfsObserv
 		} finally {
 			depth -= 1;
 
-			// (timed too, by who asked: the metrics plane's `fs`, fs-boundaries.ts — an async twin's to its return, where
-			// its synchronous part ends: what it holds the thread for)
 			if (outermost) {
 				countCall(options.mountedAt === undefined ? "zenfs" : "zenfs-local", operation, who, performance.now() - started, typeof args[0] === "string" ? args[0] : undefined, bytesOf(operation, args));
 
-				// (a call nobody named, sampled for who made it: the first frame of its stack outside zen-fs and this
-				// counting — `zenfs-unnamed.<op>.<frame>`, one in UNNAMED_SAMPLE)
 				if (who === "direct" && (unnamed += 1) % UNNAMED_SAMPLE === 0) {
 					countCall("zenfs-unnamed", operation, callerFrame(new Error("sample").stack), 0);
 				}
@@ -176,7 +141,6 @@ export function observeZenfs(sink: ArchSink, store: object, options: ZenfsObserv
 	}
 }
 
-/** Keep the `zenfs` node's usage gauge current (the owner's view: the buffer is fixed-size). */
 export function reportZenfsUsage(sink: ArchSink, store: { "usage": () => { "totalSpace": number; "freeSpace": number } }, intervalMs = 5000): () => void {
 	const megabytes = (bytes: number): string => (bytes / 1048576).toFixed(1) + " MB";
 	const update = (): void => {
@@ -193,10 +157,6 @@ export function reportZenfsUsage(sink: ArchSink, store: { "usage": () => { "tota
 	};
 }
 
-/** Put the workspace's stores on the architecture reports: the workspace's (`shared`: the SharedArrayBuffer-backed one), with
- *  its usage, and silo's local/, a store of its own — what's kept there, by shape, among the reports' stores (not the
- *  shared workspace's), mounted at `localAt`. `caller` says who is calling the store right now. (The mount point is
- *  handed in: silo's layout imports util's env, which reads `process` as it loads, and workers bundle this module.) */
 export function observeStores(sink: ArchSink | undefined, store: FileSystem | undefined, local: { "store": object | undefined; "at": string }, shared: boolean, caller: () => string | undefined): void {
 	if (sink !== undefined && store !== undefined) {
 		sink.declare({ "id": ZENFS_NODE, "meta": { "backend": shared ? "SingleBuffer (SharedArrayBuffer)" : "InMemory (this realm only)" } });

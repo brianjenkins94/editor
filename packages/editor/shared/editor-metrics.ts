@@ -1,43 +1,12 @@
-/**
- * The editor's gauges on the metrics plane (observability's metrics.ts): what a monitor shows about the editor itself.
- *
- *  - `memory` (MB): the whole tab, by realm (measureUserAgentSpecificMemory: a reading about every 30 s — the measurement
- *    itself waits for a garbage collection, ~20 s). A realm is named from its URL:
- *    the editor's own by path, and the `blob:` workers — the web worker extension host, TypeScript's servers, the
- *    language servers, monaco's workers — by the architecture probes, which put each worker's URL on its node. Any
- *    that's still unknown counts toward `unnamed workers`.
- *  - `workspace` (MB, %): how full the shared workspace (zen-fs, one fixed-size SharedArrayBuffer) is — read from its
- *    superblock, the numbers zen-fs's own usage() reports.
- *  - `longFrames` (%): the share of the time the workbench spent in long animation frames.
- *  - `hub` (messages/s): the messages the workbench hub handles — the tree's middle, so most traffic passes it — counted
- *    by its tap as they happen (the architecture store's rates aren't usable here: a reporter's first report brings its
- *    traffic since it started as one delta, which reads as a burst).
- *  - `storage` (MB): what the origin keeps (IndexedDB, the service worker's caches), every 15 s.
- *  - `documents`: the documents the workbench's code opens, by the function that opened them (`<caller>.opened`, `.ms`,
- *    `.paths`): each has every linter and checker start on it (editor-api's documents.ts). An extension's are its own
- *    (`ext:<name>:documents.…`), counted as it hands `observeExtension` its `vscode`.
- *
- * The shell reports its own `longFrames` (it hosts the preview windows): `reportShellMetrics`. The host page reports
- * `spans` — every context's timed spans as rates, errors and latencies (`reportSpanMetrics`), from the records its
- * collector already receives.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import type { ArchitectureStore, Gauge } from "@brianjenkins94/observability";
 import { longFrameGauge, memoryGauge, reportMetrics, spanMetrics } from "@brianjenkins94/observability";
 import { fsGauge } from "./fs-boundaries";
 
-/** zen-fs SingleBuffer's (version 2's) superblock, little-endian: magic (u32 at 4), version (u16 at 8), block_size (u32 at
- *  20), total_bytes (u64 at 24), state_offset (u32 at 48). Its state: generation (u64 at 8), then two commits of 60 bytes
- *  from 24 — the current one `generation & 1` — each with free_bytes, spare_total and pending_bytes (u32s at 32, 44
- *  and 56). What's free is what SingleBufferStore.usage() says: free_bytes + spare_total × block_size + pending_bytes. */
 const SUPERBLOCK_MAGIC = 0x62732E7A;
 
-/** A URL without its fragment: a worker loaded through core's bootstrap (workerBootstrap.worker.ts) carries its target there, and a memory
- *  attribution may not. */
 const withoutFragment = (url: string): string => url.split("#")[0];
 
-/** A worker's short, reload-stable name from its architecture node: `ext:typescript-language-features/TS semantic server #1` → `TS semantic
- *  server`, `worker:TextMateWorker` → its label, the web worker extension host → `extension host`. */
 function workerName(id: string, label: string | undefined): string {
 	if (id.startsWith("exthost:LocalWebWorker")) {
 		return "extension host";
@@ -46,7 +15,6 @@ function workerName(id: string, label: string | undefined): string {
 	return (label ?? id.replace(/^(?:nested:|worker:|ext:[^/]+\/)/u, "")).replace(/\s+#\d+$/u, "").replace(/\.js$/u, "");
 }
 
-/** Each worker's URL → its name, from the architecture store (the probes put a worker's URL on its node). */
 export function workerNames(store: ArchitectureStore): Map<string, string> {
 	const names = new Map<string, string>();
 
@@ -61,8 +29,6 @@ export function workerNames(store: ArchitectureStore): Map<string, string> {
 	return names;
 }
 
-/** A realm's name for the memory breakdown, from its URL (as measureUserAgentSpecificMemory attributes it) — a worker the
- *  probes named first (`workers`: URL → name). */
 export function realmName(url: string, scope: string, workers = new Map<string, string>()): string {
 	const known = workers.get(withoutFragment(url));
 	let path: string;
@@ -100,11 +66,9 @@ export function realmName(url: string, scope: string, workers = new Map<string, 
 		return "preview:" + preview[1];
 	}
 
-	// The shell and the app frame both load the page itself; they share its name.
 	return scope === "Window" ? "page" : path.split("/").pop() || "unnamed workers";
 }
 
-/** How full the shared workspace is, from its superblock; undefined if the buffer isn't zen-fs's. */
 export function workspaceFill(buffer: ArrayBufferLike): Record<string, number> | undefined {
 	const view = new DataView(buffer);
 
@@ -116,7 +80,6 @@ export function workspaceFill(buffer: ArrayBufferLike): Record<string, number> |
 	const state = view.getUint32(48, true);
 	let free: number;
 
-	// (read again if a commit landed meanwhile: the other commit is then the current one)
 	for (;;) {
 		const generation = view.getBigUint64(state + 8, true);
 		const commit = state + 24 + Number(generation & 1n) * 60;
@@ -133,7 +96,6 @@ export function workspaceFill(buffer: ArrayBufferLike): Record<string, number> |
 	return { "usedMB": used / 1048576, "totalMB": total / 1048576, "percent": total > 0 ? (used / total) * 100 : 0 };
 }
 
-/** A reading refreshed in the background every `everyMs` (for the slow ones). */
 function refreshed(read: () => Promise<number | undefined>, everyMs: number): Gauge {
 	let latest: number | undefined;
 	const refresh = (): void => {
@@ -149,11 +111,8 @@ function refreshed(read: () => Promise<number | undefined>, everyMs: number): Ga
 	return () => latest;
 }
 
-/** The workbench's gauges, published on `$sys.metrics.workbench`; `store` (its architecture store) names the workers.
- *  Returns their removal. (The store is handed in so this module stays free of the workbench's: the shell imports it.) */
 export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuffer | undefined, store?: ArchitectureStore, documents?: Gauge): () => void {
 	const metrics = reportMetrics(hub);
-	// Messages this hub handles: those it originates and those that arrive on its links (not the links' control frames).
 	let handled = 0;
 	let since = performance.now();
 	const untap = hub.tap((event) => {
@@ -179,10 +138,7 @@ export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuf
 		metrics.gauge("workspace", () => workspaceFill(workspaceBuffer));
 	}
 
-	// The filesystems' boundaries, counted: calls, time, distinct paths and bytes, by boundary, operation and caller
-	// (fs-boundaries.ts).
 	metrics.gauge("fs", fsGauge);
-	// And the documents its code opens, by who opened them (editor-api's documents.ts).
 	if (documents !== undefined) {
 		metrics.gauge("documents", documents);
 	}
@@ -193,9 +149,6 @@ export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuf
 	};
 }
 
-/** The host page's gauge, `spans`: per `source/name` — `sw/cdn`, `workbench/ata`, … — how many of every context's spans
- *  ended per second over the last 10 s, how many of those had an error logged inside them, their p50/p95 (ms), and how
- *  many are open now. Fed by the root's collector (`record` each record it receives), so it costs no extra traffic. */
 export function reportSpanMetrics(hub: Hub): { "record": (record: unknown) => void; "dispose": () => void } {
 	const metrics = reportMetrics(hub);
 	const spans = spanMetrics();
@@ -210,7 +163,6 @@ export function reportSpanMetrics(hub: Hub): { "record": (record: unknown) => vo
 	};
 }
 
-/** The shell's own gauge: the share of time it spent in long animation frames (it hosts the preview windows). */
 export function reportShellMetrics(hub: Hub): () => void {
 	const metrics = reportMetrics(hub);
 

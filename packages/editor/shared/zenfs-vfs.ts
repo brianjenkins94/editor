@@ -1,18 +1,3 @@
-/**
- * A `VirtualFS`-shaped adapter backed by zen-fs, so almostnode runs on zen-fs instead of its own in-memory
- * tree. almostnode drives its VFS through public methods only (readFileSync/existsSync/statSync/readdirSync/
- * writeFileSync/watch/on/…), so we delegate those to zen-fs's `fs`. This is the seam that lets one filesystem
- * back the runtime's module loads, the tool's I/O, and — later — the editor: swap the zen-fs BACKEND from
- * InMemory to a SharedArrayBuffer store shared with the main thread, and bind a vscode FileSystemProvider to
- * the same zen-fs, without touching this adapter or the tools.
- *
- * Today it configures an InMemory backend. Events/watch/snapshot are no-ops: cspell is read-mostly, and the
- * in-realm runtime never calls toSnapshot (that's WorkerRuntime's transfer path). Live coherence (wiring
- * zen-fs change events into `on('change')`) comes with the shared backend.
- *
- * It's a plain object, not a class: there's no per-instance state — every method delegates to zen-fs's single
- * module-global `fs`.
- */
 import type { VirtualFS } from "@brianjenkins94/almostnode";
 import type { ArchSink } from "@brianjenkins94/observability";
 import type { WorkspaceChange } from "./workspace-changes";
@@ -48,31 +33,18 @@ const adapter = {
 	"toSnapshot": (): never => { throw new Error("[zenfs-vfs] toSnapshot is unsupported (in-realm runtime only)"); }
 };
 
-// ── Shared workspace mount (unification M3b) ────────────────────────────────────────────────────────────────
-// The workbench owns a SharedArrayBuffer-backed zen-fs mounted at /workspace; the ext host forwards that buffer
-// here over a control MessagePort. We mount the SAME buffer at /workspace, ADDITIVELY — the InMemory root
-// (tooling: the dict, the server bundle) is untouched; the worker just GAINS the real workspace files from the
-// one filesystem the editor + type-checker use. Non-breaking: if no buffer ever arrives (no COI / standalone),
-// the worker runs exactly as before.
 const WORKSPACE_MOUNT = "/workspace";
 let configured = false;
 let mounted = false;
 let pendingBuffer: SharedArrayBuffer | undefined;
-// The workspace SAB, retained once received so a worker can HAND IT ON to a freshly-spawned child worker (the
-// preview.provoke hardReset path spawns a cold child per round; it mounts this same buffer). undefined without COI.
 let sharedWorkspaceBuffer: SharedArrayBuffer | undefined;
-// What this realm does with its workspace mount beyond using it (see connectWorkspace).
 let connection: WorkspaceConnection = {};
 
 export interface WorkspaceConnection {
-	/** Put the mount and every store operation on the live architecture diagram. */
 	"architecture"?: ArchSink;
-	/** Report every change this realm makes to the workspace (see workspace-changes.ts) — the node worker publishes
-	 *  them on its hub, so the workbench persists and announces them. */
 	"onChanges"?: (changes: WorkspaceChange[]) => void;
 }
 
-/** Wire this realm's workspace mount into the editor (now, or when the buffer arrives). */
 export function connectWorkspace(options: WorkspaceConnection): void {
 	connection = options;
 	const store = mounted ? defaultContext.mounts.get(WORKSPACE_MOUNT) : undefined;
@@ -92,8 +64,6 @@ function connectStore(store: object): void {
 	}
 }
 
-/** Hand this realm the workspace SharedArrayBuffer (from the hub, or its launch): mounted at /workspace once
- *  zen-fs is configured. A non-shared value (no cross-origin isolation) is ignored — the realm keeps its own root. */
 export function attachSharedWorkspace(buffer: unknown): void {
 	if (typeof SharedArrayBuffer === "undefined" || !(buffer instanceof SharedArrayBuffer)) {
 		return;
@@ -108,15 +78,10 @@ export function attachSharedWorkspace(buffer: unknown): void {
 	}
 }
 
-/** The received workspace SharedArrayBuffer, or undefined if none arrived (no cross-origin isolation / standalone). */
 export function getSharedWorkspaceBuffer(): SharedArrayBuffer | undefined {
 	return sharedWorkspaceBuffer;
 }
 
-/**
- * Mount the workspace SAB into THIS realm's zen-fs and return a VirtualFS adapter over it. For a fresh child
- * worker that received the buffer directly — e.g. the provoke child worker.
- */
 export async function mountWorkspaceVfs(buffer: SharedArrayBuffer): Promise<VirtualFS> {
 	await configure({ "mounts": { "/": InMemory } });
 	configured = true;
@@ -134,8 +99,6 @@ async function mountSharedWorkspace(buffer: SharedArrayBuffer): Promise<void> {
 	mounted = true;
 	const store = await resolveMountConfig({ "backend": SingleBuffer, "buffer": buffer });
 
-	// No atime, as the workbench mounts it (workspace-fs.ts): a read here mustn't change a file's ctime, or git takes
-	// every file this realm reads for a changed one.
 	store.attributes.set("no_atime", undefined);
 
 	connectStore(store);
@@ -145,10 +108,6 @@ async function mountSharedWorkspace(buffer: SharedArrayBuffer): Promise<void> {
 	console.log("[zenfs-vfs] shared workspace mounted at " + WORKSPACE_MOUNT + " — this worker now reads the editor's files");
 }
 
-/**
- * Configure zen-fs (InMemory root) and return a VirtualFS-shaped adapter over it, ready to hand to almostnode's
- * `createRuntime`. If the shared workspace buffer already arrived, mount it now. Safe to call once per worker.
- */
 export async function createZenfsVFS(): Promise<VirtualFS> {
 	await configure({ "mounts": { "/": InMemory } });
 	configured = true;
@@ -156,11 +115,9 @@ export async function createZenfsVFS(): Promise<VirtualFS> {
 	const buffer = pendingBuffer;
 
 	if (buffer !== undefined) {
-		// Taken before the mount: once configured, attachSharedWorkspace mounts a buffer itself and never sets it again.
 		pendingBuffer = undefined;
 		await mountSharedWorkspace(buffer);
 	}
 
-	// Duck-typed: almostnode only calls the public VirtualFS methods, which this delegates to zen-fs.
 	return adapter;
 }

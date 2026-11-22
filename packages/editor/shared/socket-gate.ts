@@ -1,18 +1,9 @@
-/**
- * What a preview's page can't be stopped from by its service worker: a WebSocket or a peer connection never comes to it as a
- * fetch. So each page of a server is given this (the service worker puts it first in the page), which asks the service worker,
- * as a fetch of `endpoint`, before one's opened (RUNNING.md, *Rules*). A socket to the page's own machine isn't asked about:
- * it's its own server, or its own run's.
- *
- * It runs in the page, from its text: it closes over nothing.
- */
 export function installSocketGate(endpoint: string): void {
 	const decided = async (capability: string, resource: string): Promise<boolean> => fetch(endpoint, { "method": "POST", "body": JSON.stringify({ "capability": capability, "resource": resource }) }).then(async (response) => response.json()).then((answer: { "allow"?: boolean }) => answer.allow === true, () => false);
 	const local = (url: URL): boolean => ["localhost", "127.0.0.1", "[::1]", location.hostname].includes(url.hostname);
 	const Real = globalThis.WebSocket;
 	const EVENTS = ["open", "message", "error", "close"] as const;
 
-	/** A WebSocket that opens once it's been allowed: what's sent meanwhile is kept, and refused, it errors and closes. */
 	class GatedSocket extends EventTarget {
 		public static readonly CONNECTING = 0;
 		public static readonly OPEN = 1;
@@ -127,7 +118,6 @@ export function installSocketGate(endpoint: string): void {
 		}
 	});
 
-	// A peer connection: asked about when it would first reach out. Refused, what it was asked for fails.
 	if (globalThis.RTCPeerConnection !== undefined) {
 		const proto = globalThis.RTCPeerConnection.prototype as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
 

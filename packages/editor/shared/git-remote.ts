@@ -1,17 +1,9 @@
-/**
- * A git remote reached through another realm: isomorphic-git's HTTP as messages. The workbench has the repository and
- * makes the requests (workbench/git-push.ts); the shell has the sign-in and sends them (shell/git-push.ts). A request
- * and its answer cross whole — bodies as bytes, never a credential.
- */
 import type { HttpClient } from "isomorphic-git";
 
-/** A request isomorphic-git makes, its body whole. */
 export interface RemoteRequest { "url": string; "method": string; "headers": Record<string, string>; "body"?: Uint8Array }
 
-/** Its answer, its body whole. */
 export interface RemoteResponse { "status": number; "statusText": string; "headers": Record<string, string>; "body": Uint8Array }
 
-/** isomorphic-git's HTTP client over `send`: each request's body gathered, sent, and its answer handed back. */
 export function remoteHttp(send: (request: RemoteRequest) => Promise<RemoteResponse>): HttpClient {
 	return {
 		"request": async ({ url, method = "GET", headers = {}, body }) => {

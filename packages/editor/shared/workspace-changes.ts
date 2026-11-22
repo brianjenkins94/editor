@@ -1,31 +1,14 @@
-/**
- * The workspace's ONE change stream. The workspace is a zen-fs store in shared memory that several realms write
- * (the editor through its FileSystemProvider, isomorphic-git and the terminal directly, node scripts and the preview
- * dev server in the node worker) — and shared memory tells nobody anything. So each realm watches the mutating
- * operations its own /workspace store performs and reports them, batched, as `workspace.changed` on the hub:
- *
- *   • the workbench (workspace-fs.ts) persists every change to IndexedDB and announces it to VS Code — whoever wrote;
- *   • the node worker's dev servers hot-reload from it.
- *
- * Watched at the StoreFS level (below `fs`, which is a frozen module namespace), so no writer can go around it.
- * A `touch` is a change only when it changes the size or the modification time — emptying a file is ONLY a touch
- * (size 0) in zen-fs — while a read's access-time touch stays quiet.
- */
-
 import { countCall, timeCall } from "./fs-boundaries";
 
-/** Hub subject carrying `WorkspaceChange[]` batches. */
 export const WORKSPACE_CHANGED = "workspace.changed";
 
 export type WorkspaceChangeType = "added" | "changed" | "deleted";
 
 export interface WorkspaceChange {
-	/** Absolute path (under the mount point, e.g. "/workspace/src/App.tsx"). */
 	"path": string;
 	"type": WorkspaceChangeType;
 }
 
-/** StoreFS methods that change the tree, and what each means for the path(s) it's given. */
 const MUTATIONS: Record<string, (args: unknown[]) => WorkspaceChange[]> = {};
 const one = (type: WorkspaceChangeType) => (args: unknown[]): WorkspaceChange[] => [{ "path": args[0] as string, "type": type }];
 
@@ -46,7 +29,6 @@ const WATCHED = Symbol.for("workspace.changes.watched");
 
 interface Inode { "size"?: number; "mtimeMs"?: number }
 
-/** Did `touch(path, metadata)` change the content-relevant metadata of what `statSync` saw before it? */
 function touchChanges(before: Inode | undefined, metadata: unknown): boolean {
 	const next = (metadata ?? {}) as Inode;
 
@@ -55,20 +37,12 @@ function touchChanges(before: Inode | undefined, metadata: unknown): boolean {
 		|| (next.mtimeMs !== undefined && next.mtimeMs !== before.mtimeMs);
 }
 
-/** Fold `next` into a batch: an add followed by writes is still an add; otherwise the latest word wins. */
 function coalesce(batch: Map<string, WorkspaceChangeType>, change: WorkspaceChange): void {
 	const previous = batch.get(change.path);
 
 	batch.set(change.path, previous === "added" && change.type === "changed" ? "added" : change.type);
 }
 
-/**
- * Watch every tree-changing operation `store` (a zen-fs FileSystem mounted at `mountPoint`, whose methods take
- * mount-relative paths) performs, and hand `onChanges` coalesced batches of absolute paths, `delayMs` after the
- * first change of a burst. A change is reported once its operation has completed. Idempotent per store. `onNow` hears
- * each change as it's made, unbatched: what must know before anything after it in this realm asks (workspace-fs.ts's
- * stats).
- */
 export function watchWorkspaceStore(store: object, mountPoint: string, onChanges: (changes: WorkspaceChange[]) => void, delayMs = 5, onNow?: (changes: WorkspaceChange[]) => void): void {
 	const target = store as Record<string | symbol, unknown>;
 
@@ -98,7 +72,6 @@ export function watchWorkspaceStore(store: object, mountPoint: string, onChanges
 			const flushed = [...batch].map(([path, type]) => ({ "path": path, "type": type }));
 
 			batch = new Map();
-			// (each batch counted, with its paths: the metrics plane's `fs`, fs-boundaries.ts — the time what hears it takes)
 			timeCall("changes", "batch", "watcher", undefined, () => {
 				onChanges(flushed);
 			});
@@ -133,7 +106,6 @@ export function watchWorkspaceStore(store: object, mountPoint: string, onChanges
 		}
 	}
 
-	// The class's own statSync, not an instrumented copy on the instance (the architecture view counts operations).
 	const statSync = ((Object.getPrototypeOf(store) as Record<string, unknown>)["statSync"] ?? target["statSync"]) as ((path: string) => Inode) | undefined;
 	const statBefore = (path: unknown): Inode | undefined => {
 		try {
@@ -143,7 +115,6 @@ export function watchWorkspaceStore(store: object, mountPoint: string, onChanges
 		}
 	};
 
-	/** What this burst already has for `path` (mount-relative), if anything. */
 	const pendingOf = (path: unknown): WorkspaceChangeType | undefined => batch.get(prefix + (path === "/" ? "" : String(path)));
 
 	for (const method of ["touch", "touchSync"]) {
@@ -151,9 +122,6 @@ export function watchWorkspaceStore(store: object, mountPoint: string, onChanges
 
 		if (typeof original === "function") {
 			target[method] = function watchedTouch(this: unknown, ...args: unknown[]): unknown {
-				// (a path this burst already has as added or changed — a write's own touch, as every write makes — reports
-				// nothing new: no stat to decide it, which is a whole path lookup in zen-fs; a repository's load made one
-				// for every file it wrote)
 				const pending = pendingOf(args[0]);
 
 				if (pending === "added" || pending === "changed") {
