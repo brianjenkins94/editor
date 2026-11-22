@@ -1,8 +1,4 @@
 /** @jsxImportSource preact */
-/**
- * The top bar's Reset: what goes, what it would lose here — the workspace's uncommitted changes and the commits no
- * remote has, counted as it opens — and the reset itself (reset.ts, from the address), signing out too if asked.
- */
 import type { ShellContext, ShellFeature } from "./feature";
 import { RotateCcw } from "lucide";
 import { useState } from "preact/hooks";
@@ -12,7 +8,6 @@ import { resetAddress } from "./reset";
 
 interface Losing { "changes": number; "unpushed": { "branch": string; "commits": number }[] }
 
-/** What a reset would lose, in words: "3 uncommitted changes and 2 commits not pushed (on rehearsal/cosmetic) would be lost." */
 function lossOf({ changes, unpushed }: Losing): string {
 	const commits = unpushed.reduce((total, { "commits": count }) => total + count, 0);
 	const parts = [
@@ -25,7 +20,6 @@ function lossOf({ changes, unpushed }: Losing): string {
 
 function ResetControl({ shell }: { "shell": ShellContext }) {
 	const [open, setOpen] = useState(false);
-	// (null: they couldn't be counted)
 	const [losing, setLosing] = useState<Losing | null | undefined>(undefined);
 	const [signOut, setSignOut] = useState(false);
 

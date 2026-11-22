@@ -1,27 +1,11 @@
-/**
- * The GitHub data plane — the whole browser↔GitHub surface, built on `fido` and an {@link AuthProvider}.
- *
- * Runs SHELL-side (the only context that holds the token). GitHub's REST API is CORS-clean, so a static site on
- * localhost calls `api.github.com` directly — no proxy, no server. Writes go through the Git Data API (blobs →
- * tree → commit → move ref), NOT git-over-HTTP (which GitHub blocks from browsers).
- *
- * `fido` is already GitHub-shaped: its `backoff` honors `Rate-Limit-Reset`/`-After` (GitHub throttling) and its
- * `poll` follows RFC 5988 `Link: rel=next` (GitHub pagination) — so this module only layers auth + typed calls on
- * top. The client is constructed with `debug: false` so fido never touches its node-only debug path (`util.inspect`
- * / `process.env.NODE_ENV`), which keeps it bundling cleanly in the browser.
- *
- * The App swap changes exactly one thing here: the `provider` passed in. Everything below is auth-agnostic.
- */
 import type { AuthProvider } from "./github-auth";
 import { withDefaults } from "@brianjenkins94/util/fido";
 import { API as SESSION_API, dpopFetch, viaProxy } from "./session";
 
 const API = "https://api.github.com";
 
-/** GitHub through the API's proxy (packages/api/src/proxy.ts): the sign-in's token stays on the server. */
 const PROXY = `${SESSION_API}/github/api`;
 
-/** A GitHub API error carrying the status + parsed body, whether fido threw it (retried GET) or we did (4xx). */
 export class GitHubError extends Error {
 	public readonly status: number;
 	public readonly body: unknown;
@@ -52,44 +36,31 @@ export interface Repo {
 export interface TreeEntry {
 	"path": string;
 	"mode": string;
-	/** "blob" (file) or "tree" (directory). */
 	"type": string;
 	"sha": string;
 	"size"?: number;
 }
 
-/** `Content-Type` + JSON body, in the shape fido's post/patch/put expect as their options argument. */
 function jsonBody(payload: unknown): { "headers": Record<string, string>; "body": string } {
 	return { "headers": { "Content-Type": "application/json" }, "body": JSON.stringify(payload) };
 }
 
-/** Decode a base64 blob (GitHub wraps it at 60 cols) to raw bytes. */
 export function base64ToBytes(base64: string): Uint8Array {
 	const binary = atob(base64.replace(/\n/gu, ""));
 
 	return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
-/** Decode a base64 blob to UTF-8 text. */
 export function decodeBase64ToText(base64: string): string {
 	return new TextDecoder().decode(base64ToBytes(base64));
 }
 
-/** One file read from a repo — raw bytes so text and binary (sprites, etc.) both round-trip. */
 export interface RepoFile {
 	"path": string;
 	"bytes": Uint8Array;
 }
 
-/** Build a GitHub client: by default straight to GitHub with no credential. `provider` and `base` are the seam: the
- *  proxy's (connectGitHub), and tests'. */
 export function createGitHub(provider: AuthProvider = fetch, base: string = API) {
-	// fido injects its own `Cache: no-store` directive into the request HEADERS. A non-safelisted header forces a CORS
-	// preflight that GitHub rejects ("Failed to fetch"). fido reads that directive from the options before calling
-	// fetch, so stripping it here (at the fetch boundary) leaves fido's caching intact while keeping the wire request
-	// CORS-simple. Wrapping the passed-in provider covers both the PAT path and the future App (badgateway) provider.
-	// And fido resolves a path like "/user" against its base's ORIGIN, so it keeps GitHub's as its base, and the request is
-	// moved onto `base` here: the proxy serves GitHub's paths under its own (pagination links already point at it).
 	const sanitized: AuthProvider = (input, init = {}) => {
 		const headers = new Headers(init.headers);
 
@@ -108,15 +79,12 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 		}
 	});
 
-	/** Await a fido call and normalize both outcomes (thrown retried-GET error, or a resolved !ok response); the body as
-	 *  JSON, or as `read` reads it. */
 	async function run<T>(pending: Promise<Response>, read: (response: Response) => Promise<unknown> = async (response) => response.json()): Promise<T> {
 		let response: Response;
 
 		try {
 			response = await pending;
 		} catch (error) {
-			// fido throws on a retried GET failure, with the parsed body on error.response.
 			const failure = (error as { "response"?: { "status": number; "statusText": string; "body": unknown } }).response;
 
 			if (failure !== undefined) {
@@ -135,7 +103,6 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 		return (response.status === 204 ? undefined : await read(response)) as T;
 	}
 
-	/** Like `run`, but a 404 resolves to undefined (for existence checks) instead of throwing. */
 	async function optional<T>(pending: Promise<Response>): Promise<T | undefined> {
 		try {
 			return await run<T>(pending);
@@ -149,20 +116,16 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 	}
 
 	return {
-		/** The client, exposed for one-off calls not wrapped below (already authed + GitHub-shaped). */
 		"raw": gh,
 
-		/** The authenticated user — also the cheapest token-validity check (401 ⇒ bad token). */
 		"viewer": function(): Promise<{ "login": string }> {
 			return run(gh.get("/user"));
 		},
 
-		/** A repo, or undefined if it doesn't exist / isn't visible to this token. */
 		"getRepo": function(owner: string, repo: string): Promise<Repo | undefined> {
 			return optional(gh.get("/repos/" + owner + "/" + repo));
 		},
 
-		/** Create a repo for the authenticated user. `autoInit` gives it an initial commit so it has a branch to write to. */
 		"createRepo": function(name: string, options: { "private"?: boolean; "description"?: string; "autoInit"?: boolean } = {}): Promise<Repo> {
 			return run(gh.post("/user/repos", jsonBody({
 				"name": name,
@@ -172,25 +135,14 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 			})));
 		},
 
-		/**
-		 * The whole repo at a ref, as a flat path list (recursive). Entries carry blob shas; contents are fetched
-		 * lazily via {@link readBlob}. `truncated` is true for very large repos (>100k entries / 7MB) — handle by
-		 * walking sub-trees if it ever matters.
-		 */
 		"readTree": function(owner: string, repo: string, ref = "HEAD"): Promise<{ "sha": string; "tree": TreeEntry[]; "truncated": boolean }> {
 			return run(gh.get("/repos/" + owner + "/" + repo + "/git/trees/" + ref, { "recursive": 1 }));
 		},
 
-		/** A blob's content (base64 + encoding). Use {@link decodeBase64ToText} for text; keep the base64 for binary. */
 		"readBlob": function(owner: string, repo: string, sha: string): Promise<{ "content": string; "encoding": string; "size": number }> {
 			return run(gh.get("/repos/" + owner + "/" + repo + "/git/blobs/" + sha));
 		},
 
-		/**
-		 * Read the WHOLE repo at a ref into a flat list of files (raw bytes, so binary round-trips). The recursive tree
-		 * gives every blob; each is fetched by sha (fido's limiter throttles the fan-out). Fine for game-sized repos;
-		 * a big repo would want the tarball endpoint instead (one request) — a later optimization.
-		 */
 		"readRepo": async function(owner: string, repo: string, ref = "HEAD"): Promise<RepoFile[]> {
 			const base = "/repos/" + owner + "/" + repo;
 			const tree = await run<{ "tree": TreeEntry[]; "truncated": boolean }>(gh.get(base + "/git/trees/" + ref, { "recursive": 1 }));
@@ -204,7 +156,6 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 			}));
 		},
 
-		/** A repository's Actions runs, the newest first: a commit's (`commit`), or a branch's. */
 		// eslint-disable-next-line ts/naming-convention -- GitHub's wire fields
 		"runs": function(owner: string, repo: string, options: { "commit"?: string; "branch"?: string; "limit"?: number } = {}): Promise<{ "total_count": number; "workflow_runs": Record<string, unknown>[] }> {
 			return run(gh.get("/repos/" + owner + "/" + repo + "/actions/runs", {
@@ -214,22 +165,15 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 			}));
 		},
 
-		/** A run's jobs (its latest attempt's, or with `attempts` every attempt's, each saying its `run_attempt`), each with
-		 *  its steps. */
 		// eslint-disable-next-line ts/naming-convention -- GitHub's wire fields
 		"runJobs": function(owner: string, repo: string, runId: number, attempts = false): Promise<{ "total_count": number; "jobs": Record<string, unknown>[] }> {
 			return run(gh.get("/repos/" + owner + "/" + repo + "/actions/runs/" + String(runId) + "/jobs", { "per_page": 100, ...attempts ? { "filter": "all" } : {} }));
 		},
 
-		/** A job's log, as text (GitHub answers with its storage's signed URL, which the proxy follows). */
 		"jobLog": function(owner: string, repo: string, jobId: number): Promise<string> {
 			return run(gh.get("/repos/" + owner + "/" + repo + "/actions/jobs/" + String(jobId) + "/logs"), async (response) => response.text());
 		},
 
-		/**
-		 * Enable GitHub Pages, built by Actions (the model here: the repo's own pages.yml deploys `docs/`). A 409
-		 * means Pages is already on — treated as success.
-		 */
 		"enablePages": async function(owner: string, repo: string): Promise<void> {
 			try {
 				await run(gh.post("/repos/" + owner + "/" + repo + "/pages", jsonBody({ "build_type": "workflow" })));
@@ -244,20 +188,10 @@ export function createGitHub(provider: AuthProvider = fetch, base: string = API)
 
 export type GitHub = ReturnType<typeof createGitHub>;
 
-/**
- * The GitHub client for this sign-in: through the API's proxy with `dpopFetch` when it's GitHub's; otherwise (signed out,
- * or signed in by email or a password) straight to GitHub with no credential, public repos only.
- */
 export async function connectGitHub(): Promise<GitHub> {
 	return await viaProxy() ? createGitHub(dpopFetch, PROXY) : createGitHub();
 }
 
-/**
- * `github.actions` (the workbench's `ci.status`, ci-status.ts, and `ci.outcomes`, ci-outcomes.ts): a repository's Actions
- * runs (a commit's, or a branch's), a run's jobs (`attempts`: every attempt's), or a job's log, as this sign-in sees them:
- * through the API's proxy signed in with GitHub, else straight to GitHub with no credential (a public repository's, and
- * no logs). GitHub's refusal is answered, not thrown, with whether this is signed in, so the reader can say why.
- */
 export async function actions(request: unknown): Promise<unknown> {
 	const { repository, commit, branch, run, attempts, job, limit } = (request ?? {}) as { "repository"?: unknown; "commit"?: unknown; "branch"?: unknown; "run"?: unknown; "attempts"?: unknown; "job"?: unknown; "limit"?: unknown };
 	const [owner, repo, ...more] = typeof repository === "string" ? repository.split("/") : [];

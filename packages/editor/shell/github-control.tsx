@@ -1,7 +1,4 @@
 /** @jsxImportSource preact */
-/**
- * The top bar's GitHub button and its popover: signing in (sign-in.tsx), then a repository to load (repo-load.tsx).
- */
 import type { ShellFeature } from "./feature";
 import { GitBranch } from "lucide";
 import { popoverBody } from "theme/styles/shell";

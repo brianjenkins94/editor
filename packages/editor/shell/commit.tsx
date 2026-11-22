@@ -1,14 +1,4 @@
 /** @jsxImportSource preact */
-/**
- * The top bar's Commit: the workspace's changes committed and pushed — the workbench's git (git-push.ts `git.pull`,
- * git-service.ts `git.commit` with every change, then `git.push` of the current branch, through this shell's sign-in: git-push.ts), as
- * agents' git_pull, git_commit and git_push do and the review panel commits a part of. First the branch is brought up
- * to GitHub's (CI commits to main too), so the push is a fast-forward: GitHub's commits written in when only it moved on;
- * when each has, the changes here committed and then GitHub's merged in. A merge whose conflicts are marked in the files
- * isn't pushed: settled, the button again commits them, and that commit is the merge. When GitHub changed a file changed
- * here, nothing is committed, and it says which. With nothing changed, it pushes what's committed and not yet pushed. A
- * push refused after the commit says so: the commit is made, and pushing again is the button again.
- */
 import type { ComponentChildren } from "preact";
 import type { ShellContext, ShellFeature } from "./feature";
 import { GitCommit } from "lucide";
@@ -17,15 +7,10 @@ import { ghError, ghOk, popoverBody } from "theme/styles/shell";
 import { errText, githubLog, shared, statusOf, useStore } from "./feature";
 import { Icon } from "./icon";
 
-/** What a commit and push came to: what to say, whether it failed, and the commit made (its short id), if one was. */
 export interface CommitOutcome { "said": string; "failed": boolean; "made"?: string }
 
-/** What `git.pull` did (workbench/git-engine.ts `Pulled`). */
 interface Pulled { "ref": string; "outcome": string; "files"?: string[]; "conflicts"?: string[] }
 
-/** The workspace's changes committed with `message` and pushed, over `rpc`, for `repo` (owner/repo, for the log): the
- *  branch first brought up to GitHub's; nothing committed when it can't be; with nothing changed, what's committed
- *  pushed. */
 export async function commitAndPush(rpc: Pick<ShellContext["rpc"], "request">, message: string, repo: string): Promise<CommitOutcome> {
 	const span = githubLog.span("editor.shell.commit.githubCommit", { "repo": repo });
 	let made: string | undefined;
@@ -38,8 +23,6 @@ export async function commitAndPush(rpc: Pick<ShellContext["rpc"], "request">, m
 			throw new Error(`GitHub changed files you've changed here, so it can't catch up: ${(pulled.conflicts ?? []).join(", ")}`);
 		}
 
-		// (each moved on, with changes here: they're committed first, then GitHub's merged in — or, a merge's conflicts
-		// settled, this commit is the merge, and the pull after it finds the branch ahead)
 		if (pulled.outcome === "diverged") {
 			made = (await rpc.request("git.commit", { "message": message }, { "timeoutMs": 600_000 }) as { "oid": string }).oid.slice(0, 7);
 			pulled = await pull();
@@ -50,11 +33,7 @@ export async function commitAndPush(rpc: Pick<ShellContext["rpc"], "request">, m
 		}
 
 		const caught = pulled.outcome === "fast-forwarded" || pulled.outcome === "merged" ? `${pulled.outcome === "merged" ? "Merged" : "Caught up with"} GitHub (${String(pulled.files?.length ?? 0)} files). ` : "";
-		// (a commit of every change reads every file's status: on this repository, 2,212 files with the page busy after its
-		// load, more than a minute — as git_review's and git_commit's tools allow)
 		const { files } = await rpc.request("git.status", undefined, { "timeoutMs": 120_000 }) as { "files": { "path": string }[] };
-		// (`.silo/`'s own .gitignore and .gitattributes alone are nothing to commit: they go only with something else
-		// under `.silo/`, git-engine.ts `stageSiloSeeds`)
 		const changed = files.filter(({ path }) => path !== ".silo/.gitignore" && path !== ".silo/.gitattributes");
 
 		if (changed.length > 0 && made === undefined) {
@@ -88,7 +67,6 @@ function CommitControl({ shell }: { "shell": ShellContext }) {
 	const [committing, setCommitting] = useState(false);
 	const [error, setError] = useState<string | undefined>(undefined);
 	const [result, setResult] = useState<string | undefined>(undefined);
-	// (the branch a push goes to: the workspace's own, asked as the popover opens — a checkout since the load moves it)
 	const [branch, setBranch] = useState<string | undefined>(undefined);
 
 	const commit = async (): Promise<void> => {
@@ -125,7 +103,6 @@ function CommitControl({ shell }: { "shell": ShellContext }) {
 		setCommitting(false);
 	};
 
-	// The popover's body: what it needs first, until it has it — then the repo it pushes to, and the message.
 	const body = (): ComponentChildren => {
 		if (githubUser === undefined) {
 			return <span class="wa-caption-2xs">Sign in with GitHub first.</span>;

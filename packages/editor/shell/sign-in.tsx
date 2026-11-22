@@ -1,11 +1,4 @@
 /** @jsxImportSource preact */
-/**
- * Signing in (session.ts), optional: a full-page round trip through the API's sign-in page, finished as this page loads
- * again; who's signed in (GitHub's login, fetched live through the API's proxy — the API keeps no login — or the
- * account's email); where you're signed in, each session's way out and the account's; and your account, in a dialog
- * (account-dialog.tsx). The session (oauth4webapi), the client (fido) and the dialog are imported only when needed, so
- * they code-split out of the cold-start bundle. Its section is the GitHub popover's first (github-control.tsx).
- */
 import type { FunctionComponent } from "preact";
 import type { ShellFeature } from "./feature";
 import type { Session } from "./session";
@@ -20,21 +13,15 @@ const state = createStore<{
 	"busy": boolean;
 	"error"?: string;
 	"notice"?: string;
-	/** Whether this copy of the editor can sign in at all. */
 	"here": boolean;
-	/** The API down for maintenance (its kill switch): no sign-in offered; signed in, the editor carries on as signed out. */
 	"apiDown": boolean;
-	/** Where you're signed in (listed when the popover opens, signed in). */
 	"sessions"?: Session[];
-	/** The account deletion's confirmation step. */
 	"confirmingDelete": boolean;
 	"AccountDialog"?: FunctionComponent<{ "onClose": () => void }>;
 }>({ "busy": false, "here": false, "apiDown": false, "confirmingDelete": false });
 
 let settle: () => void;
 
-/** Settles once this page has finished a sign-in it's the end of (or found none): what a load from the address waits on,
- *  so a private repository is read signed in. */
 export const signInSettled = new Promise<void>((resolve) => {
 	settle = resolve;
 });
@@ -43,15 +30,12 @@ function signedOut(): void {
 	shared.set({ "signedInAs": undefined, "githubUser": undefined });
 }
 
-/** Your account, in a dialog (account-dialog.tsx, loaded when first opened). */
 async function openAccount(): Promise<void> {
 	const { "AccountDialog": dialog } = await import("./account-dialog");
 
 	state.set({ "AccountDialog": dialog });
 }
 
-/** On load: finish a sign-in this page is the end of, and if signed in, say who as. The retired PAT is deleted wherever
- *  one was kept. */
 async function start(): Promise<void> {
 	forgetRetired();
 	window.addEventListener("shell:signedOut", signedOut);
@@ -71,8 +55,6 @@ async function start(): Promise<void> {
 
 	state.set({ "here": session.canSignIn() });
 
-	// Back from GitHub, connecting it to the account, or from our passkey page, adding one (packages/account finishes
-	// either): its dialog, open again.
 	if (session.isSignedIn() && /[?&](?:link|link_error|passkey)=/u.test(location.search)) {
 		await openAccount();
 	}
@@ -88,8 +70,6 @@ async function start(): Promise<void> {
 			if (me.githubId === null) {
 				shared.set({ "signedInAs": me.email?.address ?? "your account" });
 			} else {
-				// Signed in either way; GitHub's login only when it can be read (not while the API's GitHub proxy is paused:
-				// packages/api/README.md O8, when GitHub is reached directly, public repos only).
 				shared.set({ "signedInAs": "your GitHub account" });
 
 				const { connectGitHub } = await import("./github");
@@ -105,7 +85,6 @@ async function start(): Promise<void> {
 	}
 }
 
-/** Sign in: a full-page round trip through the API's sign-in page (session.ts); this page loads again at the end of it. */
 async function signInGithub(): Promise<void> {
 	state.set({ "busy": true, "error": undefined });
 
@@ -117,7 +96,6 @@ async function signInGithub(): Promise<void> {
 	}
 }
 
-/** A session's way out, an account's way out: each ends here signed out, with what happened said. */
 async function accountAction(run: (session: typeof import("./session")) => Promise<string | undefined>, failure: string): Promise<void> {
 	state.set({ "busy": true, "error": undefined, "notice": undefined });
 
@@ -166,7 +144,6 @@ async function deleteAccount(): Promise<void> {
 	}, "Couldn't delete the account.");
 }
 
-/** Sign out: the session ends at the API (and GitHub's token with it), and this browser forgets its key. */
 async function signOutGithub(): Promise<void> {
 	state.set({ "busy": true });
 
@@ -179,12 +156,10 @@ async function signOutGithub(): Promise<void> {
 	}
 }
 
-/** The GitHub popover's first section: who's signed in (and signing out), or signing in, which is optional. */
 export function SignInSection() {
 	const { signedInAs, githubUser, githubOpen } = useStore(shared);
 	const { busy, error, notice, here, apiDown, sessions, confirmingDelete } = useStore(state);
 
-	// Before offering a sign-in: whether the API is down for maintenance, asked when the popover opens signed out.
 	useEffect(() => {
 		if (!githubOpen || signedInAs !== undefined || !here) {
 			return;
@@ -195,7 +170,6 @@ export function SignInSection() {
 		});
 	}, [githubOpen, signedInAs, here]);
 
-	// Where you're signed in: listed each time the popover opens, signed in.
 	useEffect(() => {
 		if (!githubOpen || signedInAs === undefined) {
 			return;

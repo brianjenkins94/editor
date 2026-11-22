@@ -1,25 +1,3 @@
-/**
- * Chrome DevTools for the app previews, over the hub.
- *
- * Two halves:
- *  - the CDP endpoint (`installPreviewCdp`): the shell serves `preview.cdp` — `{ window, message }`, one raw Chrome
- *    DevTools Protocol command for that preview window's page (`window` is its key, `5173~2` for the port's second
- *    window; `{ port }` means the port's window you used last, and neither the window you used last), answered with the
- *    raw reply — and publishes the page's events on `preview.cdp.event.<key>`. It reaches the page through chobitsu
- *    (a JavaScript implementation of CDP, the engine under eruda, chii and CodeSandbox's DevTools), which it adds to
- *    the page on first use: the preview is same origin and unsandboxed (see ARCHITECTURE.md), so nothing is injected
- *    until something asks. Each caller's ids are swapped for the endpoint's own, so several clients can share a page.
- *  - the panel (`openDevtoolsPanel`): Chrome's own DevTools frontend, docked under the preview — one client of that
- *    endpoint. It's chii's CDN mode: a tiny host page, made here as a blob: URL, loads the frontend's modules from
- *    jsDelivr (CORS + CORP, so it loads under COEP without a proxy). Its "embedded" mode speaks CDP to its parent by
- *    postMessage. The frame is sandboxed (`allow-scripts` only), so the frontend — 12 MB of someone else's code —
- *    runs in an opaque origin: it can't reach this page, the editor's storage or the hub, only post CDP to us (its web
- *    storage, which throws there, is kept in memory). That bounds what it can touch directly, not what CDP lets it
- *    ask for: Runtime.evaluate runs in the preview's page, which is no boundary (see ARCHITECTURE.md).
- *
- * What chobitsu can't do: pause. Its Debugger domain lists scripts and their source, but a page can't stop itself at a
- * breakpoint — Console, Elements, Network, Application and evaluation work; stepping is the tsval debugger's.
- */
 import type { Hub } from "@brianjenkins94/hub";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
@@ -30,9 +8,7 @@ const log = logger({ "source": "shell" });
 const CHOBITSU_URL = "https://cdn.jsdelivr.net/npm/chobitsu@1.8.6/dist/chobitsu.js";
 const FRONTEND_URL = "https://cdn.jsdelivr.net/npm/chii@1.15.5/public/front_end";
 
-/** RPC: `{ window, message }` (or `{ port, message }`) → the raw reply. */
 export const PREVIEW_CDP = "preview.cdp";
-/** Event subject prefix: `preview.cdp.event.<key>` carries each raw event of that preview window's page. */
 export const PREVIEW_CDP_EVENT = "preview.cdp.event.";
 
 interface Chobitsu {
@@ -42,12 +18,9 @@ interface Chobitsu {
 
 interface PageSession {
 	"chobitsu": Chobitsu;
-	/** Replies awaited, by the endpoint's own id. */
 	"pending": Map<string, (reply: string) => void>;
 }
 
-/** chobitsu in `page`'s realm, added on first use: the page's own script, so it sees that page's DOM, console and
- *  network. */
 async function chobitsuIn(page: Window): Promise<Chobitsu> {
 	const existing = (page as Window & { "chobitsu"?: Chobitsu }).chobitsu;
 
@@ -77,8 +50,6 @@ async function chobitsuIn(page: Window): Promise<Chobitsu> {
 	return loaded;
 }
 
-/** Serve `preview.cdp` for each preview window — `frameOf` finds its iframe by its key, or a port's (or any) you
- *  used last. A page is a session: a reload is a new page, which gets its own chobitsu on the next command. */
 export function installPreviewCdp(hub: Hub, frameOf: (window: { "key"?: string; "port"?: number }) => { "key": string; "frame": HTMLIFrameElement } | undefined): void {
 	const sessions = new WeakMap<Window, Promise<PageSession>>();
 	let nextId = 0;
@@ -122,7 +93,6 @@ export function installPreviewCdp(hub: Hub, frameOf: (window: { "key"?: string; 
 			throw new Error("preview.cdp takes { message, and window or port }");
 		}
 
-		// A window by its key (`5173~2`), or a port's you used last, or the one you used last.
 		const asked = {
 			...typeof named === "string" ? { "key": named } : {},
 			...typeof port === "number" ? { "port": port } : {}
@@ -149,7 +119,6 @@ export function installPreviewCdp(hub: Hub, frameOf: (window: { "key"?: string; 
 	});
 }
 
-/** chii's CDN-mode host page, as a blob: URL (so it has this page's origin, and so its COEP). */
 function frontendUrl(): string {
 	const html = `<!DOCTYPE html>
 <html lang="en">
@@ -158,7 +127,6 @@ function frontendUrl(): string {
 <style>@media (prefers-color-scheme: dark) { body { background-color: rgb(41 42 45); } }</style>
 <meta name="referrer" content="no-referrer">
 <script>
-// Sandboxed (an opaque origin), web storage throws on access: DevTools keeps its settings there, so give it memory.
 for (const name of ["localStorage", "sessionStorage"]) {
 	const items = new Map();
 	const storage = {
@@ -179,25 +147,19 @@ for (const name of ["localStorage", "sessionStorage"]) {
 }
 
 export interface DevtoolsPanel {
-	/** The panel to dock under the preview. */
 	"element": HTMLElement;
 	"dispose": () => void;
 }
 
-/** Chrome's DevTools frontend for the preview window `key` (its key: `5173`, `5173~2`), talking to it through
- *  `preview.cdp`. A new page in the preview (a reload) starts the frontend over: it holds the old page's state. */
 export function openDevtoolsPanel(hub: Hub, key: string, preview: HTMLIFrameElement): DevtoolsPanel {
 	const rpc = createRpcClient(hub);
 	const element = document.createElement("div");
 	const frame = document.createElement("iframe");
 	let blobUrl: string | undefined;
-	// Which frontend a reply belongs to: one sent before a restart is for a frontend that's gone, whose ids the new one
-	// reuses.
 	let generation = 0;
 
 	element.className = previewDevtools();
 	frame.title = "DevTools";
-	// An opaque origin: whatever the frontend runs can't reach this page, its storage or the hub — only post CDP to us.
 	frame.setAttribute("sandbox", "allow-scripts");
 	element.append(frame);
 

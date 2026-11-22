@@ -1,10 +1,4 @@
 /** @jsxImportSource preact */
-/**
- * TypeScript Playground links (shared/playground-link.ts), both ways. Swap the host of a playground link for the editor's
- * and it opens here as a real workspace: an editor of its own (an instance, shared/instance.ts, named by the link), so
- * following a link never replaces the workspace you're in, and reloading it keeps what you've changed since. And the top
- * bar's Share writes your workspace as a Playground v2 link, which opens here or in the TypeScript Playground.
- */
 import type { SharedWorkspace } from "../shared/playground-link";
 import type { ShellContext, ShellFeature } from "./feature";
 import { logger } from "@brianjenkins94/util/logger";
@@ -19,7 +13,6 @@ import { Icon } from "./icon";
 
 const log = logger({ "source": "shell" });
 
-/** The instance a link opens in: named by what it holds, so the same link opens the same editor. */
 async function instanceOf(hash: string): Promise<string> {
 	const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(hash)));
 
@@ -28,7 +21,6 @@ async function instanceOf(hash: string): Promise<string> {
 	].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** A link's query string as the playground wrote it: the instance's name isn't one of its compiler options. */
 function linkQuery(): string {
 	const query = new URLSearchParams(location.search);
 
@@ -37,7 +29,6 @@ function linkQuery(): string {
 	return query.toString();
 }
 
-/** A playground link in the address: opened in its own instance, its files the workspace there once the app listens. */
 async function fromAddress(shell: ShellContext): Promise<void> {
 	const project = parsePlaygroundLink(location.hash, linkQuery());
 
@@ -54,17 +45,14 @@ async function fromAddress(shell: ShellContext): Promise<void> {
 		return;
 	}
 
-	// (opened once: a reload keeps what was changed since instead of opening the link again)
 	history.replaceState(history.state, "", location.pathname + location.search);
 
 	await log.span("editor.shell.playground.open", { "count": project.files.length }, async () => {
-		// (asked as the workbench answers: by then the app, which takes a project's files, listens too)
 		await shell.rpc.request("git.origin", undefined, { "timeoutMs": 10_000, "waitForResponderMs": 120_000 });
 		shell.hub.publish("project.openFiles", project);
 	});
 }
 
-/** What Share made: the link, what it left out, and whether it's on the clipboard. */
 interface Shared { "url": string; "skipped": string[]; "copied": boolean }
 
 function ShareControl({ shell }: { "shell": ShellContext }) {

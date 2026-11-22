@@ -1,10 +1,4 @@
 /** @jsxImportSource preact */
-/**
- * Loading a GitHub repository into the workspace: the SHELL fetches the files (the token stays here) and publishes them
- * to the app over the hub (`project.openFiles`), which writes them into zen-fs, rooted under /workspace. From the GitHub
- * popover's Load section, or from the address (`env/<owner>/<repo>`). github.ts is lazy, so fido loads only when a
- * repository is actually fetched.
- */
 import type { ShellContext, ShellFeature } from "./feature";
 import type { RepoBinding } from "./github-auth";
 import { ghError } from "theme/styles/shell";
@@ -17,15 +11,12 @@ const state = createStore<{ "input": string; "loading": boolean; "error"?: strin
 
 let shell: ShellContext | undefined;
 
-/** Pick a file to focus after loading a repo: a top-level README, else the first source/markup file, else the first
- *  file — so the load is immediately visible. Paths are repo-relative; the caller has rooted them under /workspace. */
 function pickOpenEditors(paths: string[]): string[] {
 	const preferred = paths.find((path) => /^readme\.md$/iu.test(path)) ?? paths.find((path) => /\.(?:tsx?|jsx?|html|md)$/iu.test(path)) ?? paths[0];
 
 	return preferred !== undefined ? ["/workspace/" + preferred] : [];
 }
 
-/** Load `input` (`owner/repo`) into the workspace. */
 async function loadRepo(input = state.get().input): Promise<void> {
 	const match = /^([^\s/]+)\/([^\s/]+)$/u.exec(input.trim());
 
@@ -41,8 +32,6 @@ async function loadRepo(input = state.get().input): Promise<void> {
 
 	try {
 		const [, owner, repo] = match;
-		// Through the proxy by the session itself, not `githubUser` (fetched after it): a load from the address runs before
-		// that. Signed in by email or a password, it's as signed out: GitHub straight, public repos only.
 		const signedIn = await (await import("./session")).viaProxy();
 		const { connectGitHub } = await import("./github");
 		const gh = await connectGitHub();
@@ -55,8 +44,6 @@ async function loadRepo(input = state.get().input): Promise<void> {
 			return;
 		}
 
-		// Clone it — one shallow pack, through the API's proxy when signed in (git-clone.ts) — rather than read it blob by
-		// blob through the API, which fido's limiter holds to 100 requests a minute. The API is the fallback.
 		let files: { "path": string; "bytes": Uint8Array }[];
 
 		try {
@@ -78,16 +65,12 @@ async function loadRepo(input = state.get().input): Promise<void> {
 
 		const projectFiles = files.map((file) => ({ "path": "/workspace/" + file.path, "bytes": file.bytes }));
 
-		// A clone's files include its `.git` (git-clone.ts): the workspace becomes the repo, history and all. Editors open
-		// from the working tree only.
 		shell?.hub.publish("project.openFiles", { "files": projectFiles, "openEditors": pickOpenEditors(files.map((file) => file.path).filter((path) => !path.startsWith(".git/"))) });
 
-		// Remember where this workspace came from so a commit knows where to push.
 		const binding = { "owner": owner, "repo": repo, "branch": meta.default_branch };
 
 		shared.set({ "boundRepo": binding, "githubOpen": false });
 		showRepo(binding);
-		// (the session timeline's, shell/reporting.ts)
 		shell?.hub.publish("session.event", { "name": "repo.loaded", "detail": `${owner}/${repo}` });
 		state.set({ "input": "" });
 		span.info("loaded", { "branch": meta.default_branch, "files": files.length, "bytes": files.reduce((total, file) => total + file.bytes.length, 0) });
@@ -100,17 +83,9 @@ async function loadRepo(input = state.get().input): Promise<void> {
 	}
 }
 
-/** An `env/<owner>/<repo>` address opens that repo, once the app listens — after a sign-in this page finishes, so a
- *  private one is read signed in. The workspace already being that repo's (a reload) keeps it, and the edits made in
- *  it. The GitHub popover opens over the load, to show it going and say what went wrong (it closes on success). Only a
- *  workspace that's no repository's clone is replaced from the address. One the workspace couldn't say (unanswered) is
- *  kept, as is another repository's clone, which asks: either may hold work not pushed anywhere. */
 async function fromAddress(rpc: ShellContext["rpc"]): Promise<void> {
 	await signInSettled;
 
-	// One tab's load at a time, in a workspace (an instance's own): every tab keeps its own copy of the workspace, from its
-	// store as it booted, so two back from a reset each found no repository and each cloned into the one store. A tab
-	// that finds another loading doesn't: it says so, and a reload once that's done opens what it loaded.
 	const locks = typeof navigator === "undefined" ? undefined : (navigator as Navigator & { "locks"?: LockManager }).locks;
 
 	if (locks === undefined) {
@@ -139,7 +114,6 @@ async function fromAddress(rpc: ShellContext["rpc"]): Promise<void> {
 async function fromAddressNow(rpc: ShellContext["rpc"]): Promise<void> {
 	const wanted = envRepo();
 
-	// (asked as the workbench answers: by then the app, which takes a load's files, listens too)
 	const asked = await rpc.request("git.origin", undefined, { "timeoutMs": 10_000, "waitForResponderMs": 120_000 }).then((origin) => ({ "origin": origin as RepoBinding | null }), (error: unknown) => ({ "error": errText(error) }));
 
 	if ("error" in asked) {
@@ -167,7 +141,6 @@ async function fromAddressNow(rpc: ShellContext["rpc"]): Promise<void> {
 	await loadRepo(`${wanted.owner}/${wanted.repo}`);
 }
 
-/** The GitHub popover's Load section: a repository to load, signed in or out (signed out, only a public one). */
 export function LoadSection() {
 	const { githubUser } = useStore(shared);
 	const { input, loading, error } = useStore(state);

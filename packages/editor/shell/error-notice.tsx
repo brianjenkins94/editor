@@ -1,8 +1,4 @@
 /** @jsxImportSource preact */
-/**
- * The session timeline's events and every realm's uncaught errors, to the API (reporting.ts, loaded after the shell
- * links up); an error reported has its id shown, to quote, until dismissed or a minute on.
- */
 import type { ShellFeature } from "./feature";
 import { useEffect } from "preact/hooks";
 import { errorNotice } from "theme/styles/shell";
@@ -14,7 +10,6 @@ const state = createStore<{ "id"?: string }>({});
 function ErrorNotice() {
 	const { id } = useStore(state);
 
-	// The notice goes after a minute (dismissed sooner, or replaced by the next).
 	useEffect(() => {
 		if (id === undefined) {
 			return;

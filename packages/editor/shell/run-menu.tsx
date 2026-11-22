@@ -1,8 +1,4 @@
 /** @jsxImportSource preact */
-/**
- * The Run menu (RUNNING.md, *The model*), in the top bar: the file in the editor, in the debugger, or one of the workspace's scripts
- * (workbench/tasks.ts). A script whose service is up shows its preview, rather than starting it twice.
- */
 import type { ShellContext, ShellFeature } from "./feature";
 import { Play } from "lucide";
 import { useState } from "preact/hooks";

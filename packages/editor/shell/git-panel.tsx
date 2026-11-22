@@ -1,14 +1,4 @@
 /** @jsxImportSource preact */
-/**
- * Git review panel — a GitHub-Desktop-style changed-files + diff + commit surface, rendered in the SHELL's RHS chrome
- * (not the vscode SCM viewlet). Built on Web Awesome components (wa-checkbox / wa-textarea / wa-button / wa-badge) and
- * utility classes in a preact tree; what's left in theme/styles/git-panel is the rows' hover/current states and
- * the side-by-side diff renderer's grid. It's a pure hub consumer: it calls
- * `git.status` / `git.review` / `git.commit` / `git.discard` (served by git-service.ts and git-review.ts in the workbench realm) over the
- * shell hub, and refreshes on `git.changed`. What a pick of lines commits or discards is the service's (shared/git-hunks.ts),
- * as it is for an agent's `git_commit` / `git_discard` by hunk: the panel only says which rows. No monaco, no zen-fs here — the "novel review UI over the engine" the git-engine
- * decoupling was for. The diff opens in a shell-owned overlay the codehike island mounts into (overlay.body).
- */
 import type { GitFileChange } from "@brianjenkins94/editor-api/git";
 import type { Hub } from "@brianjenkins94/hub";
 import type { ComponentChildren } from "preact";
@@ -22,8 +12,6 @@ import "theme/components/checkbox";
 import "theme/components/textarea";
 import "theme/components/button";
 import "theme/components/badge";
-// The theme (Web Awesome's layer order among it) first, so git-panel.css's `@layer app` is declared after it (the shell
-// imports this module before it imports the theme itself).
 import "theme/chrome";
 import { gitPanelStyles } from "theme/styles/git-panel";
 
@@ -31,13 +19,8 @@ gitPanelStyles();
 
 interface DiffRow { "t": "ctx" | "add" | "del"; "text": string }
 
-/**
- * The diff dialog — a shell-owned overlay that covers the editor when a file is opened. The shell hands us its four
- * elements; we drive them imperatively (codehike mounts a React root into `body`, so it stays outside preact).
- */
 export interface DiffOverlay { "el": HTMLElement; "title": HTMLElement; "body": HTMLElement; "close": HTMLElement }
 
-/** The plain diff's lines, from the aligned rows: a modified row as its deletion, then its addition. */
 function plainRows(head: string, working: string, rows: DiffRowInfo[]): DiffRow[] {
 	const [headLines, workingLines] = [head.split("\n"), working.split("\n")];
 
@@ -50,7 +33,6 @@ function plainRows(head: string, working: string, rows: DiffRowInfo[]): DiffRow[
 	});
 }
 
-/** Collapse runs of >8 unchanged lines to a "⋯ N unchanged" divider (keeping 3 lines of context each side). */
 function collapse(rows: DiffRow[]): (DiffRow | { "t": "gap"; "text": string })[] {
 	const out: (DiffRow | { "t": "gap"; "text": string })[] = [];
 	let run: DiffRow[] = [];
@@ -97,10 +79,8 @@ function langFor(path: string): string {
 	return path.endsWith(".json") ? "json" : "tsx";
 }
 
-/** How a row of the plain diff is marked, by its kind. */
 const ROW_MARKS: Record<DiffRow["t"] | "gap", string> = { "add": "+", "del": "-", "gap": "", "ctx": " " };
 
-/** The commit button's label: a failure, everything, or how much of it. */
 function commitLabelOf(commitError: boolean, allChecked: boolean, chosen: number, total: number): string {
 	if (commitError) {
 		return "Commit failed";
@@ -109,22 +89,16 @@ function commitLabelOf(commitError: boolean, allChecked: boolean, chosen: number
 	return allChecked ? "Commit all changes" : "Commit " + chosen + " of " + total;
 }
 
-/** Current OS colour scheme — the diff highlights with the matching shiki theme (the shell drives the same query). */
 const prefersDark = (): boolean => window.matchMedia("(prefers-color-scheme: dark)").matches;
 
-/** A node-grouped chunk of your edits (workbench/edit-history.ts), as `history.chunks` answers it. */
 interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
 
 const isCodeFile = (file: GitFileChange): boolean => /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u.test(file.path) && file.status !== "D";
 
-/** A chunk timeline's note line (a status, or the summary above the chunks). */
 const CHUNK_INFO = "gp-chunk-info wa-font-size-2xs wa-color-text-quiet";
 
-/** What the chunk timeline says until it has chunks to show. */
 const CHUNK_NOTES = { "loading": "Loading your edits…", "error": "Couldn't load your edits.", "empty": "No edits recorded since the last commit." };
 
-/** Your edits to one file since the last commit, the code each touched: hovering one spotlights its lines in the open
- *  diff, and a click opens it. */
 function Chunks({ path, rpc, onOpen }: { "path": string; "rpc": ReturnType<typeof createRpcClient>; "onOpen": (path: string) => void }) {
 	const [state, setState] = useState<{ "status": "loading" | "error" | "empty" | "ready"; "groups"?: EditGroup[]; "bursts"?: number }>({ "status": "loading" });
 	const highlightRef = useRef<(range: { "start": number; "end": number } | null) => void>(() => undefined);
@@ -187,10 +161,8 @@ function Chunks({ path, rpc, onOpen }: { "path": string; "rpc": ReturnType<typeo
 	);
 }
 
-/** A file's status letter, by the Web Awesome variant it's drawn in: added, modified, deleted. */
 const STATUS_VARIANTS: Record<GitFileChange["status"], string> = { "A": "success", "M": "warning", "D": "danger" };
 
-/** One changed-file row: tri-state pick, status, name, and a tail (discard). */
 function FileRow({ file, state, current, expanded, problems, onPick, onOpen, onToggleExpand, onDiscard }: {
 	"file": GitFileChange;
 	"problems"?: FileProblems;
@@ -205,8 +177,6 @@ function FileRow({ file, state, current, expanded, problems, onPick, onOpen, onT
 	const [armed, setArmed] = useState(false);
 	const disarmRef = useRef<ReturnType<typeof setTimeout>>();
 
-	// Discard is destructive + can't be undone, so it arms on the first click ("Discard?") and fires on the second — a
-	// lightweight confirm with no blocking dialog. It disarms after a few seconds.
 	const clickDiscard = (event: MouseEvent): void => {
 		event.stopPropagation();
 
@@ -254,7 +224,6 @@ function FileRow({ file, state, current, expanded, problems, onPick, onOpen, onT
 	);
 }
 
-/** The review panel: files list + commit box, driving the shell's diff overlay. */
 function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": Hub; "headerEnd"?: ComponentChildren }) {
 	const rpcRef = useRef<ReturnType<typeof createRpcClient>>();
 
@@ -262,25 +231,19 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	const rpc = rpcRef.current;
 
 	const [files, setFiles] = useState<GitFileChange[]>([]);
-	// (what the change made and fixed in each file: change-problems.tsx)
 	const problems = useChangeProblems(hub);
 	const [selected, setSelected] = useState<string | undefined>(undefined);
-	// (the files whose edits since the last commit are shown, under their row)
 	const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
 	const [committing, setCommitting] = useState(false);
 	const [commitError, setCommitError] = useState(false);
 	const [, force] = useReducer((x: number) => x + 1, 0);
 
-	// Files fully UN-checked (excluded from the commit). Absence = selected. Per-file PARTIAL line selections + the
-	// changed-row count per file live alongside. Mutable refs (mirroring the original imperative model) + force().
 	const deselected = useRef(new Set<string>()).current;
 	const lineDeselect = useRef(new Map<string, Set<number>>()).current;
 	const changedCount = useRef(new Map<string, number>()).current;
 	const codehikeActive = useRef(false);
 	const msgRef = useRef<HTMLElement>(null); // wa-textarea; exposes a `value` property at runtime
 
-	// A file is fully in ("all"), fully out ("off"), or has a per-line partial selection ("partial"). A partial
-	// selection covering every changed row reads as "off".
 	const fileState = (path: string): FileState["state"] => {
 		if (deselected.has(path)) {
 			return "off";
@@ -303,7 +266,6 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		setSelected(undefined);
 	};
 
-	// Plain unified diff (fallback when the codehike island can't load — e.g. offline: shiki fetches grammars).
 	const renderPlain = (head: string, working: string, rows: DiffRowInfo[]): void => {
 		const diff = document.createElement("div");
 
@@ -320,7 +282,6 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		overlay.body.replaceChildren(diff);
 	};
 
-	/** The working tree as `git.review` has it, for the files given (default, every change). */
 	const review = async (request: { "paths"?: string[]; "texts"?: boolean }): Promise<ReviewFile[]> => (await rpc.request("git.review", request, { "timeoutMs": 600_000 }) as Review).files;
 
 	const showDiff = async (path: string): Promise<void> => {
@@ -341,8 +302,6 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 
 		changedCount.set(path, rows.filter((row) => row.type !== "ctx").length);
 
-		// Lazy-load the codehike island (react + codehike + shiki) on first diff; fall back to the plain diff if it
-		// can't load. Once codehike owns overlay.body (a React root), never touch it with innerHTML again.
 		try {
 			const { mountDiff, setDiffHighlight } = await import("./git-codehike");
 
@@ -401,7 +360,6 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 
 		setFiles(next);
 
-		// keep the open diff current, or drop it (and close the dialog) if its file is gone
 		setSelected((current) => {
 			if (current !== undefined && !stillChanged(current)) {
 				overlay.el.classList.remove("open");
@@ -413,21 +371,15 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		});
 	};
 
-	// A refresh nobody waits on: if the workbench is too busy to answer (a large repository loading), the list stays as
-	// it was until the next `git.changed`, rather than the timeout going up as an uncaught error.
 	const refreshLater = (): void => {
 		refresh().catch(() => { /* the next git.changed refreshes */ });
 	};
 
-	// Mount-once wiring: the overlay close button, git.changed refresh, and the initial load.
 	useEffect(() => {
 		overlay.close.addEventListener("click", hideOverlay);
 
 		const off = hub.subscribe("git.changed", refreshLater);
 
-		// The workbench git service registers late in its boot (and the shell→app→workbench link takes a moment to
-		// form), so the initial load POLLS with a short timeout until the responder answers — instead of one
-		// default 15s "no responder" hang. Once up, `git.changed` drives subsequent refreshes.
 		void (async () => {
 			for (let attempt = 0; attempt < 20; attempt += 1) {
 				try {
@@ -448,15 +400,12 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		};
 	}, []);
 
-	// Re-mount the diff of the still-open file after a refresh (content may have changed).
 	useEffect(() => {
 		if (selected !== undefined && files.some((file) => file.path === selected)) {
 			void showDiff(selected);
 		}
 	}, [files]);
 
-	// Follow the OS light/dark scheme: re-highlight the open diff with the matching shiki theme when it flips. The
-	// docKey (path) is unchanged, so the diff's fold/selection state survives the re-mount.
 	useEffect(() => {
 		const mq = window.matchMedia("(prefers-color-scheme: dark)");
 		const onChange = (): void => {
@@ -522,8 +471,6 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		setCommitError(false);
 
 		try {
-			// A partial file names the changed rows it leaves out (the service commits HEAD with the rest); a full file,
-			// only its path.
 			const payload = included.map((file) => (fileState(file.path) === "partial" ? { "path": file.path, "except": [...lineDeselect.get(file.path) ?? []] } : { "path": file.path }));
 
 			await rpc.request("git.commit", { "message": message, "files": payload });
@@ -602,12 +549,6 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	);
 }
 
-/**
- * Mount the review panel into `container` (files list + commit box), driving the shell's diff `overlay` when a file is
- * opened, and talking to the git service over `hub`.
- */
-/** `headerEnd` lands at the right of the panel's header row — the shell puts its collapse button there, so the pane
- *  has ONE "Changes" header rather than the shell's plus the panel's own. */
 export function renderGitPanel(container: HTMLElement, overlay: DiffOverlay, hub: Hub, headerEnd?: ComponentChildren): void {
 	render(<GitPanel overlay={overlay} hub={hub} headerEnd={headerEnd} />, container);
 }

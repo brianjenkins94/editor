@@ -1,8 +1,4 @@
 /** @jsxImportSource preact */
-/**
- * A preview's question, in its window: the app wants to reach something the policy hasn't decided, and the window says so
- * until it's answered, where someone's looking at the app (RUNNING.md, *Rules*). There's no list of these to go and look at.
- */
 import { render } from "preact";
 import { previewAsks } from "theme/styles/shell";
 import "theme/components/button";
@@ -10,14 +6,12 @@ import "theme/components/callout";
 
 export type PreviewAnswer = "allow" | "allow-always" | "deny" | "deny-always";
 
-/** What's asked: what the call is, and what it reaches. */
 export interface PreviewAsk { "port": number; "capability": string; "resource": string }
 
 const WHAT: Record<string, string> = { "net": "reach", "net.ws": "open a WebSocket to", "net.webrtc": "open a peer connection" };
 
 interface Waiting { "ask": PreviewAsk; "answer": (answer: PreviewAnswer) => void }
 
-/** Each window's questions. */
 const waitingIn = new WeakMap<HTMLElement, Waiting[]>();
 
 function draw(element: HTMLElement, holder: HTMLElement): void {
@@ -57,7 +51,6 @@ function draw(element: HTMLElement, holder: HTMLElement): void {
 	);
 }
 
-/** Ask in `element`, the window, until it's answered. */
 export async function askInWindow(element: HTMLElement, ask: PreviewAsk): Promise<PreviewAnswer> {
 	let holder = element.querySelector<HTMLElement>(":scope > [data-preview-asks]");
 

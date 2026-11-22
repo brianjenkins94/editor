@@ -1,25 +1,4 @@
 /** @jsxImportSource preact */
-/**
- * The preview windows, in the shell (the top frame) so they can be dragged anywhere, beyond the editor's iframe: movable
- * windows onto a dev server (`preview.ready`, workbench/node-runner.ts), each an iframe on its address, as many per server
- * as you open. There's no address bar: a window opens on the server's page.
- *
- * Each server's hot updates (`preview.hmr.<port>`) are posted into every window of it, and every frame its app nests, where
- * the dev server's client in the page applies them. Closing a window closes just it, but closing a server's last one stops
- * the server (`preview.close`), which is how a preview is dismissed; a server stopped elsewhere closes its windows.
- *
- * Each window has Chrome's DevTools for its page, docked under it (preview-devtools.ts), from its title bar; the same
- * DevTools protocol is a hub request (`preview.cdp`), which agents use too. And a CPU profile of its page, asked for from
- * its title bar (or `preview.profile`), kept with its server's run (preview-profile.ts). And the debug toolbar of
- * the session that drives a window's page (its dev server's own, or a recorded call of it being stepped), in the title bar
- * of the window of its port you used last (extensions/bridge/debug-toolbar.ts tells which, `debug.state`).
- *
- * And in-editor Playwright's way onto a page (`playwright.run`, a test file's in the debugger: packages/playwright): each
- * test's page has a window of its own while it runs, so tests can run at once: the one it opens by going somewhere, or else
- * the one you've used last that no other page has. A preview's frame is same-origin with the shell, so its DOM is right here.
- * With the dev server counting (COVERAGE=1), what the editor in a test's window ran — every realm of it — goes back with
- * the page as it's let go, the test's reach.
- */
 import type { PlaywrightCall } from "@brianjenkins94/editor-api/runtime";
 import type { Hub } from "@brianjenkins94/hub";
 import type { ShellFeature } from "./feature";
@@ -40,14 +19,10 @@ import "theme/components/button";
 
 const log = logger({ "source": "shell" });
 
-/** Where the coverage build's realms answer (build/coverage.ts, COVERAGE=1): every instrumented realm on the origin,
- *  frames and workers alike. */
 const COVERAGE_CHANNEL = "editor.coverage";
 
-/** How long a question there waits for answers: a realm busy for longer (a worker blocked) isn't heard. */
 const ASK_MS = 1000;
 
-/** Each instrumented realm's answer to `ask` on COVERAGE_CHANNEL, within ASK_MS: its id, and what it ran when asked. */
 async function askRealms(ask: Record<string, unknown>): Promise<{ "realm": string; "ran"?: Record<string, [number, number][]> }[]> {
 	const channel = new BroadcastChannel(COVERAGE_CHANNEL);
 	const nonce = crypto.randomUUID();
@@ -67,7 +42,6 @@ async function askRealms(ask: Record<string, unknown>): Promise<{ "realm": strin
 	return answers;
 }
 
-/** Lines `[first, last]` as few ranges as they make. */
 function rangesOf(lines: [number, number][]): [number, number][] {
 	const ranges: [number, number][] = [];
 
@@ -84,19 +58,13 @@ function rangesOf(lines: [number, number][]): [number, number][] {
 	return ranges;
 }
 
-/** How far each further window of a server opens from the one before it, so none opens exactly over another. */
 const CASCADE = 32;
 const FIRST_AT = 96;
 const WIDTH = 720;
 const HEIGHT = 480;
 const FEWEST_PLACES = 4;
-/** How much taller a window gets while DevTools is docked in it, as far as the page below it allows, so the app keeps
- *  its room. */
 const DEVTOOLS_HEIGHT = 340;
 
-/** Where the `opened`th window opens: the cascade goes round again before a window would leave the page, as what's off the
- *  page stops being drawn (xterm's rendering pauses, for one) and can't be reached. (`CASCADE` of room kept for the title
- *  bar.) On a page too small for a whole window, still `FEWEST_PLACES`, so none opens exactly over the last. */
 function cascadeAt(opened: number): number {
 	const room = Math.min(window.innerWidth - WIDTH, window.innerHeight - HEIGHT - CASCADE) - FIRST_AT;
 
@@ -105,16 +73,12 @@ function cascadeAt(opened: number): number {
 
 interface Server { "url": string; "windows": Set<HTMLElement>; "opened": number; "offUpdates": () => void }
 
-/** A window with no server (a test's page, before it goes anywhere): its own, as a server's port is. */
 const NO_SERVER = 0;
 
-/** The active debug session, as the bridge tells it (`debug.state`), and the window whose title bar has its toolbar. */
 interface DebugState { "active": boolean; "type": string; "paused": boolean; "port"?: number }
 
 const debugging = createStore<{ "state": DebugState; "window"?: string }>({ "state": { "active": false, "type": "", "paused": false } });
 
-/** The active session's toolbar, in the title bar of the window it drives: continue or pause and the steps for one that
- *  steps (any but a dev server's own), and restart. No stop: closing the window does that, as it always has. */
 function DebugButtons({ window, command }: { "window": string; "command": (name: string) => void }) {
 	const { state, "window": target } = useStore(debugging);
 
@@ -141,8 +105,6 @@ function DebugButtons({ window, command }: { "window": string; "command": (name:
 	);
 }
 
-/** A window's title bar's own controls: the debug toolbar of the session driving its page, another window onto its
- *  server, a CPU profile of its page, and DevTools docked under its page or not. */
 function WindowActions({ window, command, another, profile, devtools }: { "window": string; "command": (name: string) => void; "another": () => void; "profile": () => Promise<unknown>; "devtools": () => boolean }) {
 	const [docked, setDocked] = useState(false);
 	const [profiling, setProfiling] = useState(false);
@@ -160,7 +122,6 @@ function WindowActions({ window, command, another, profile, devtools }: { "windo
 				loading={profiling}
 				onClick={() => {
 					setProfiling(true);
-					// (what it found goes where every profile does: workbench/profile-files.ts; a failure is the profiler's span's)
 					void profile().catch(() => undefined).finally(() => { setProfiling(false); });
 				}}
 			>
@@ -171,32 +132,26 @@ function WindowActions({ window, command, another, profile, devtools }: { "windo
 	);
 }
 
-/** A window's frame and every frame its app nests: each has a client of its own, which acts only on what it loaded. */
 function framesUnder(root: Window): Window[] {
 	return [root, ...Array.from({ "length": root.frames.length }, (_, index) => framesUnder(root.frames[index]!)).flat()];
 }
 
 function install(hub: Hub): void {
 	const servers = new Map<number, Server>();
-	/** The windows, the one last used last. */
 	const used: HTMLElement[] = [];
-	/** What closes each window's DevTools, while it's docked. */
 	const undock = new WeakMap<HTMLElement, () => void>();
 	const profile = createPreviewProfiler(hub);
 
-	/** A window, as profiling it has it. */
 	const profiled = (element: HTMLElement): { "key": string; "port": number; "page": Window } | undefined => {
 		const page = element.querySelector("iframe")?.contentWindow;
 
 		return page === null || page === undefined ? undefined : { "key": element.dataset["previewWindow"]!, "port": Number(element.dataset["previewPort"]), "page": page };
 	};
 
-	/** A window by its key, else the port's you used last, else the one you used last. */
 	const windowAt = ({ key, port }: { "key"?: string; "port"?: number }): HTMLElement | undefined => (key === undefined
 		? used.findLast((each) => port === undefined || servers.get(port)?.windows.has(each) === true)
 		: used.find((each) => each.dataset["previewWindow"] === key));
 
-	/** The window the active session's toolbar goes in: its port's you used last. */
 	const retarget = (): void => {
 		const { state } = debugging.get();
 		const windows = state.port === undefined ? undefined : servers.get(state.port)?.windows;
@@ -230,7 +185,6 @@ function install(hub: Hub): void {
 		frame.title = port === NO_SERVER ? "Preview" : `Preview :${String(port)}`;
 		frame.allow = "cross-origin-isolated";
 		frame.src = server.url;
-		// (the page, and DevTools under it while it's docked)
 		body.className = `wa-stack wa-gap-0 ${previewBody()}`;
 		body.append(frame);
 
@@ -255,7 +209,6 @@ function install(hub: Hub): void {
 		});
 
 		element.dataset["previewPort"] = String(port);
-		// (its key: `5173~2` is the port's second window, as DevTools and `preview.cdp` know it)
 		element.dataset["previewWindow"] = `${String(port)}~${String(server.opened + 1)}`;
 		render(<WindowActions
 			window={element.dataset["previewWindow"]}
@@ -295,14 +248,12 @@ function install(hub: Hub): void {
 		return element;
 	};
 
-	// The active debug session, for its toolbar (extensions/bridge/debug-toolbar.ts): asked now, as the bridge may be first.
 	hub.subscribe("debug.state", (data) => {
 		debugging.set({ "state": data as DebugState });
 		retarget();
 	});
 	hub.publish("debug.state.ask", {});
 
-	// The DevTools protocol onto a window's page.
 	installPreviewCdp(hub, (asked) => {
 		const element = windowAt(asked);
 		const frame = element?.querySelector("iframe");
@@ -310,16 +261,12 @@ function install(hub: Hub): void {
 		return element === undefined || frame === null || frame === undefined ? undefined : { "key": element.dataset["previewWindow"]!, "frame": frame };
 	});
 
-	// A profile of a window's page, asked for.
 	installPreviewProfiler(hub, profile, (asked) => {
 		const element = windowAt(asked);
 
 		return element === undefined ? undefined : profiled(element);
 	});
 
-	// A page's runtime evidence (previews/page-script.ts posts it here, the window its preview is in): on to the core, as
-	// its server's (evidence.ts finds the run by the port). By the port the page says, as its last report comes as its
-	// window closes, when it's no longer among the windows here.
 	addEventListener("message", (event: MessageEvent) => {
 		const { channel, port, page, modules, packages } = (event.data ?? {}) as { "channel"?: unknown; "port"?: unknown; "page"?: unknown; "modules"?: unknown; "packages"?: unknown };
 
@@ -328,8 +275,6 @@ function install(hub: Hub): void {
 		}
 	});
 
-	// A page's recorded stops (a breakpoint in its code: RUNNING.md), each report every hit so far: on to the editor's Margin,
-	// by the preview's session (workbench/preview-session.ts).
 	addEventListener("message", (event: MessageEvent) => {
 		const { channel, port, stops } = (event.data ?? {}) as { "channel"?: unknown; "port"?: unknown; "stops"?: unknown };
 
@@ -338,7 +283,6 @@ function install(hub: Hub): void {
 		}
 	});
 
-	// A server's run ended: its pages report now (its windows may stay open, the page left as it was).
 	hub.subscribe("evidence.flush", (data) => {
 		const { port } = (data ?? {}) as { "port"?: unknown };
 
@@ -371,7 +315,6 @@ function install(hub: Hub): void {
 		open(port);
 	});
 
-	// A service asked for that's up already: a window onto it, open and in front of the rest.
 	hub.subscribe("preview.show", (data) => {
 		const { port } = data as { "port": number };
 		const windows = servers.get(port)?.windows ?? new Set<HTMLElement>();
@@ -386,8 +329,6 @@ function install(hub: Hub): void {
 		}
 	});
 
-	// What the app wants to reach, asked in the window you used last: none open and showing, in a page that's showing, is nobody
-	// watching (extensions/bridge/preview-gate.ts answers for them).
 	serve(hub, "preview.ask", async (args) => {
 		const ask = args as PreviewAsk;
 		const windows = servers.get(ask.port)?.windows;
@@ -414,14 +355,9 @@ function install(hub: Hub): void {
 		}
 	});
 
-	/** The window each test's page has, while its test runs; and which of them it opened. */
 	const claimed = new Map<string, HTMLElement>();
 	const openedForPage = new Set<HTMLElement>();
 
-	// With the dev server counting (COVERAGE=1, build/coverage.ts): what a page's window ran is the test's. The realms there
-	// were as the page first went somewhere — the editor around it, the service worker — aren't its; every realm since is
-	// (its frames and workers), and started counting from nothing. Asked before it goes somewhere again (which replaces
-	// them) and as it's let go.
 	const counting = "__evidence" in globalThis;
 	const realmsBefore = new Map<string, Set<string>>();
 	const ranSoFar = new Map<string, Map<string, [number, number][]>>();
@@ -446,8 +382,6 @@ function install(hub: Hub): void {
 		span.end({ "count": realms.length, "answered": answers.length, "files": ran.size });
 	});
 
-	/** `page`'s window: the one it has; else going somewhere opens it one of its own, and anything else takes the one you've
-	 *  used last that no other page has. */
 	const windowOf = (page: string, opening: boolean): HTMLElement | undefined => {
 		const known = claimed.get(page);
 
@@ -490,7 +424,6 @@ function install(hub: Hub): void {
 
 			claimed.delete(asking);
 
-			// (nor is one closed while its counts are to be read from outside, COVERAGE=1's harness's: it closes it, having read them)
 			if (element !== undefined && openedForPage.delete(element) && given[0] !== true && !("__countedFromOutside" in globalThis)) {
 				undock.get(element)?.();
 				element.remove();
@@ -502,8 +435,6 @@ function install(hub: Hub): void {
 			return reach === undefined ? undefined : { "reach": Object.fromEntries(reach) };
 		}
 
-		// A test's own request: made here, as a client of its origin — no window needed (a stopped server's address is asked
-		// too), and not the program's fetch, which the debugger's capability gate decides.
 		if (call === "fetch") {
 			const { fetched, requestInit } = await import("@brianjenkins94/playwright");
 			const [url, init] = given as [string, Parameters<typeof requestInit>[0]];
@@ -529,7 +460,6 @@ function install(hub: Hub): void {
 			throw new Error("no preview window is open");
 		}
 
-		// (dynamically: only a test file that drives a page needs it)
 		const { windowDriver } = await import("@brianjenkins94/playwright");
 
 		return (windowDriver(page)[call] as (...rest: unknown[]) => Promise<unknown>)(...given);
