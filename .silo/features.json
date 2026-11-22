@@ -3163,5 +3163,23 @@
       "packages/tsval/test/vm/stepping.test.ts",
       "packages/tsval/test/vm/throw-site.test.ts"
     ]
+  },
+  "Tests a change needs: silo test and vouch": {
+    "status": "active",
+    "why": "NEXT.md item 3, built 2026-11-22: CI runs fewer tests, those the rest of are vouched for or resting",
+    "since": "2026-11-22",
+    "what": "Runs only the tests a change needs: what the change reaches, less what a vouch made where the code was written or a long green streak excuses, more what failed lately; and vouches for passing tests, for a commit to carry.",
+    "docs": "packages/silo/README.md, *Tests by feature, in your face*",
+    "ways": [
+      "cli command|test",
+      "cli command|vouch"
+    ],
+    "paths": [
+      "packages/silo/src/reporter.mjs",
+      "packages/silo/src/test.ts"
+    ],
+    "tests": [
+      "packages/silo/test/test-command.test.ts"
+    ]
   }
 }
