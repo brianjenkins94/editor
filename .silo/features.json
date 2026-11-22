@@ -1401,6 +1401,8 @@
       "code actions provider||notes/extension.ts",
       "command|notes.add",
       "command|notes.dismiss",
+      "command|notes.fromComment",
+      "command|editor.git.authorsOf",
       "command|notes.on",
       "command|notes.paneView",
       "command|notes.place",
@@ -1409,11 +1411,13 @@
     ],
     "paths": [
       "packages/editor/app/tools/notes/tools.ts",
+      "packages/editor/extensions/notes/comments.ts",
       "packages/editor/extensions/notes/extension.ts",
       "packages/editor/extensions/notes/package.json"
     ],
     "tests": [
-      "packages/editor/test/in-editor/notes.spec.mjs"
+      "packages/editor/test/in-editor/notes.spec.mjs",
+      "packages/editor/test/note-comments.test.mjs"
     ]
   },
   "Observe an app (opt-in debug link)": {

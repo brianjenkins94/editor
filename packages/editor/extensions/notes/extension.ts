@@ -7,7 +7,12 @@
  * Found on its span, or followed there: a note of yours followed is rewritten where it landed, so the next look finds it by id.
  * Moved to another file: a note of yours goes with it; anyone else's waits here, saying where. Its code changed, or perhaps moved:
  * shown there, asking to be kept. Gone: it waits in Problems, at its last place. Each is decided from the lightbulb, as a rule placed in the code is.
- * Dismissing writes a tombstone, so a branch merge can't bring it back. Only a note's author changes it.
+ * Dismissing writes a tombstone, so a branch merge can't bring it back. Only a note's author changes it — and a note that
+ * was a comment, the repository's (`.silo/notes/repository/`), anyone: it's shared as the comment was (the user,
+ * 2026-11-20), who wrote the comment kept on it.
+ *
+ * A comment becomes a note from its lightbulb (Make This Comment a Note: packages/editor/ARCHITECTURE.md, *Comments become
+ * notes*): its text, off the comment's markers, on the code just below it, and the comment gone from the code.
  */
 import type { Resolved, SpanRef } from "@brianjenkins94/editor-api/annotations";
 import type { PaneContent, PaneItem } from "@brianjenkins94/editor-api/pane";
@@ -19,13 +24,17 @@ import { annotationsText, parseAnnotations } from "@brianjenkins94/util/silo/ann
 import { userSlug } from "@brianjenkins94/util/silo/evidence";
 import { annotationsPath, GITATTRIBUTES, SILO_DIR, withLines } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
+import { commentAt } from "./comments";
 
-type Note = Annotation<{ "text": string }>;
+/** A note: its text, and for one that was a comment, who wrote the comment (its lines' blame). */
+type Note = Annotation<{ "text": string; "wrote"?: string[] }>;
 
 /** A note, who wrote it, and where it was found now: the 0-based line it's on, when that's in this file. */
 interface Landing { "note": Note; "owner": string; "resolved": Resolved; "line"?: number }
 
 const VIEW = "notes";
+/** Whose a note that was a comment is: the repository's, anyone's to change. */
+const REPOSITORY = "repository";
 const CODE = /\.[cm]?[jt]sx?$/u;
 const LANGUAGES = ["typescript", "typescriptreact", "javascript", "javascriptreact"];
 
@@ -67,10 +76,13 @@ export function activate(context: vscode.ExtensionContext): void {
 		return found.flat().filter(({ note }) => note.dismissed !== true);
 	};
 
-	/** Write `note`, yours, into your notes on `file`: added, or replacing the version there. They merge line by line across
-	 *  branches, as the rest of silo's records do. */
-	const save = async (file: string, note: Note): Promise<void> => {
-		const uri = vscode.Uri.joinPath(root, annotationsPath(VIEW, await me(), file));
+	/** A note `you` may change: yours, or the repository's. */
+	const mine = (owner: string, you: string): boolean => owner === you || owner === REPOSITORY;
+
+	/** Write `note` into `owner`'s notes on `file` (yours, by default): added, or replacing the version there. They merge line
+	 *  by line across branches, as the rest of silo's records do. */
+	const save = async (file: string, note: Note, owner?: string): Promise<void> => {
+		const uri = vscode.Uri.joinPath(root, annotationsPath(VIEW, owner ?? await me(), file));
 		const attributes = vscode.Uri.joinPath(root, SILO_DIR, ".gitattributes");
 		const merged = withLines(await read(attributes), GITATTRIBUTES);
 
@@ -109,12 +121,12 @@ export function activate(context: vscode.ExtensionContext): void {
 			const at = resolved.candidate;
 			const here = at?.start !== undefined && at.file === file && resolved.status !== "orphaned";
 
-			if (owner === you && resolved.ref !== undefined && at !== undefined) {
+			if (mine(owner, you) && resolved.ref !== undefined && at !== undefined) {
 				if (resolved.status === "moved" && at.file !== file) {
-					await save(file, { ...note, "dismissed": true, "updatedAt": now });
-					await save(at.file, { ...note, "ref": resolved.ref, "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": now });
+					await save(file, { ...note, "dismissed": true, "updatedAt": now }, owner);
+					await save(at.file, { ...note, "ref": resolved.ref, "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": now }, owner);
 				} else if (resolved.status === "re-placed" && here) {
-					await save(file, { ...note, "ref": resolved.ref, "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": now });
+					await save(file, { ...note, "ref": resolved.ref, "placed": { "strategy": at.strategy, "score": at.score }, "updatedAt": now }, owner);
 				}
 			}
 
@@ -126,7 +138,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	const lostProblem = (document: vscode.TextDocument, { note, owner, resolved }: Landing): vscode.Diagnostic => {
 		const near = document.positionAt(Math.min(note.ref.baseline?.start ?? 0, document.getText().length));
 		const elsewhere = resolved.status === "moved" ? resolved.candidate?.file : undefined;
-		const problem = new vscode.Diagnostic(document.lineAt(near.line).range, elsewhere === undefined ? `A note lost its place: "${textOf(note)}". Put the cursor on the code it's about: the lightbulb puts it back, or dismisses it.` : `A note's code moved to ${elsewhere}: "${textOf(note)}". It moves there when ${owner} next opens this file.`, vscode.DiagnosticSeverity.Information);
+		const problem = new vscode.Diagnostic(document.lineAt(near.line).range, elsewhere === undefined ? `A note lost its place: "${textOf(note)}". Put the cursor on the code it's about: the lightbulb puts it back, or dismisses it.` : `A note's code moved to ${elsewhere}: "${textOf(note)}". It moves there when ${owner === REPOSITORY ? "this file is next opened" : `${owner} next opens this file`}.`, vscode.DiagnosticSeverity.Information);
 
 		problem.source = VIEW;
 
@@ -139,7 +151,7 @@ export function activate(context: vscode.ExtensionContext): void {
 			return [];
 		}
 
-		const by = owner === await me() ? "" : `**${owner}:** `;
+		const by = mine(owner, await me()) ? "" : `**${owner}:** `;
 		const unsure = resolved.status === "uncertain";
 
 		return [{
@@ -170,11 +182,11 @@ export function activate(context: vscode.ExtensionContext): void {
 		return answer.value[0] ?? "A note can't attach here: there's no code there it can stand on. Select a statement or an expression.";
 	};
 
-	/** A note of yours this file's lightbulb can act on, by its id. */
-	const yours = async (id: string, uri: string): Promise<Note | undefined> => {
+	/** A note this file's lightbulb can act on (yours, or the repository's), by its id, with whose it is. */
+	const yours = async (id: string, uri: string): Promise<{ "note": Note; "owner": string } | undefined> => {
 		const you = await me();
 
-		return landed.get(uri)?.find(({ note, owner }) => note.id === id && owner === you)?.note;
+		return landed.get(uri)?.find(({ note, owner }) => note.id === id && mine(owner, you));
 	};
 
 	const watcher = vscode.workspace.createFileSystemWatcher(`**/${SILO_DIR}/${VIEW}/**/*.jsonl`);
@@ -263,20 +275,77 @@ export function activate(context: vscode.ExtensionContext): void {
 				return note.id;
 			});
 		}),
-		vscode.commands.registerCommand("notes.dismiss", async (id: string, uri: string) => {
-			const note = await yours(id, uri);
+		// A comment made a note: its text, on the code below it, the repository's (anyone's to change), who wrote it kept;
+		// and the comment gone from the code. The note's place is read off the text as it is once the comment's gone.
+		vscode.commands.registerCommand("notes.fromComment", async (given?: unknown, at?: unknown) => {
+			const editor = vscode.window.activeTextEditor;
+			const document = typeof given === "string" ? await vscode.workspace.openTextDocument(vscode.Uri.parse(given)) : editor?.document;
 
-			if (note !== undefined) {
-				await span("dismiss", { "path": uri }, async () => save(relative(vscode.Uri.parse(uri)), { ...note, "dismissed": true, "updatedAt": new Date().toISOString() }));
+			if (document === undefined || !CODE.test(document.uri.path)) {
+				void vscode.window.showInformationMessage("Open the code the comment is in first.");
+
+				return undefined;
+			}
+
+			const lines = document.getText().split("\n");
+			const comment = commentAt(lines, typeof at === "number" ? at : editor?.selection.active.line ?? 0);
+
+			if (comment === undefined) {
+				void vscode.window.showInformationMessage("There's no comment here a note can take: put the cursor in a comment on its own lines, above the code it's about (one for a tool, an eslint-disable or a license, stays a comment).");
+
+				return undefined;
+			}
+
+			const file = relative(document.uri);
+
+			return span("fromComment", { "path": file, "count": comment.to - comment.from + 1 }, async () => {
+				const after = [...lines.slice(0, comment.from), ...lines.slice(comment.to + 1)];
+				const on = comment.below - (comment.to - comment.from + 1);
+				const start = after.slice(0, on).reduce((sum, each) => sum + each.length + 1, 0);
+				const code = after[on]!;
+				const answer = await annotations(vscode.commands).refer(after.join("\n"), file, [{ "start": start + (code.length - code.trimStart().length), "end": start + code.trimEnd().length }]);
+				const ref = "value" in answer ? answer.value[0] : undefined;
+
+				if (ref === undefined) {
+					void vscode.window.showInformationMessage(`A note can't attach to the code below this comment${"unparsable" in answer ? `: this file can't be parsed as it is (${answer.unparsable})` : "unavailable" in answer ? `: the editor's BABLR isn't available (${answer.unavailable})` : ""}.`);
+
+					return undefined;
+				}
+
+				// (who wrote it, by its lines' blame: none for a comment not committed)
+				const wrote = await Promise.resolve(vscode.commands.executeCommand<string[]>("editor.git.authorsOf", file, comment.from + 1, comment.to + 1)).then((authors) => (Array.isArray(authors) ? authors : []), () => []);
+				const edit = new vscode.WorkspaceEdit();
+
+				edit.delete(document.uri, new vscode.Range(comment.from, 0, comment.to + 1, 0));
+
+				// (the comment out first: if that doesn't go, there's no note either)
+				if (!await vscode.workspace.applyEdit(edit)) {
+					return undefined;
+				}
+
+				const now = new Date().toISOString();
+				const note: Note = { "id": crypto.randomUUID(), "kind": "note", "ref": ref, "payload": { "text": comment.text, ...wrote.length === 0 ? {} : { "wrote": wrote } }, "author": await me(), "createdAt": now, "updatedAt": now };
+
+				await save(file, note, REPOSITORY);
+				await redraw(document.uri.toString());
+
+				return note.id;
+			});
+		}),
+		vscode.commands.registerCommand("notes.dismiss", async (id: string, uri: string) => {
+			const found = await yours(id, uri);
+
+			if (found !== undefined) {
+				await span("dismiss", { "path": uri }, async () => save(relative(vscode.Uri.parse(uri)), { ...found.note, "dismissed": true, "updatedAt": new Date().toISOString() }, found.owner));
 				await redraw(uri);
 			}
 		}),
 		// Kept where it's shown, or put back where the cursor is.
 		vscode.commands.registerCommand("notes.place", async (id: string, uri: string, line: number) => {
-			const note = await yours(id, uri);
+			const found = await yours(id, uri);
 			const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
 
-			if (note !== undefined) {
+			if (found !== undefined) {
 				const ref = await referAt(document, new vscode.Selection(line, 0, line, 0));
 
 				if (typeof ref === "string") {
@@ -285,7 +354,7 @@ export function activate(context: vscode.ExtensionContext): void {
 					return;
 				}
 
-				await span("place", { "path": uri, "count": line }, async () => save(relative(document.uri), { ...note, "ref": ref, "placed": { "strategy": "by hand", "score": 1 }, "updatedAt": new Date().toISOString() }));
+				await span("place", { "path": uri, "count": line }, async () => save(relative(document.uri), { ...found.note, "ref": ref, "placed": { "strategy": "by hand", "score": 1 }, "updatedAt": new Date().toISOString() }, found.owner));
 				await redraw(uri);
 			}
 		}),
@@ -301,10 +370,12 @@ export function activate(context: vscode.ExtensionContext): void {
 					return made;
 				};
 				const line = range.start.line;
+				const comment = commentAt(document.getText().split("\n"), line);
 
 				return [
 					...range.isEmpty ? [] : [action("Add note on this code", "notes.add")],
-					...(landed.get(uri) ?? []).filter(({ owner }) => owner === you).flatMap(({ note, line: on }) => [
+					...comment === undefined ? [] : [action("Make this comment a note", "notes.fromComment", uri, comment.from)],
+					...(landed.get(uri) ?? []).filter(({ owner }) => mine(owner, you)).flatMap(({ note, line: on }) => [
 						...on === undefined ? [action(`Put the note back here: ${shortly(note)}`, "notes.place", note.id, uri, line)] : [],
 						...on === undefined || on === line ? [action(`Dismiss note: ${shortly(note)}`, "notes.dismiss", note.id, uri)] : []
 					])

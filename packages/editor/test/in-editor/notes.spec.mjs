@@ -62,3 +62,20 @@ test("a note is beside its code, follows it, and when its code goes waits in Pro
 	await expect(workbench.locator(".pane-item.tone-info", { "hasText": "ten of them" })).toBeVisible({ "timeout": 60_000 });
 	await expect(rows.filter({ "hasText": "A note lost its place" })).toHaveCount(0, { "timeout": 60_000 });
 });
+
+test("a comment made a note: gone from the code, its text beside the code it was on, the repository's", async ({ page }) => {
+	const workbench = await openEditor(page, { ...files, "commented.mjs": "// Two, until the rate's read from settings.\nconst rate = 2;\n" });
+	const note = workbench.locator(".pane-item.tone-info", { "hasText": "Two, until the rate's read from settings." });
+
+	await openFile(workbench, "commented.mjs");
+	await top(workbench);
+	await quickFix(workbench, "Make this comment a note");
+	await expect(note).toBeVisible({ "timeout": 60_000 });
+	// (the comment's line gone: the code's first line is what it was on)
+	await expect(workbench.locator(".editor-instance .view-lines").first()).not.toContainText("// Two");
+	await expect(workbench.locator(".editor-instance .view-lines").first()).toContainText("const rate = 2;");
+	// Kept as the repository's, under .silo/notes.
+	await expect(workbench.getByRole("treeitem", { "name": ".silo", "exact": true })).toBeVisible({ "timeout": 30_000 });
+	await openFile(workbench, ".silo/notes/repository/commented.mjs.jsonl");
+	await expect(workbench.locator(".editor-instance .view-lines").first()).toContainText("Two, until the rate", { "timeout": 30_000 });
+});

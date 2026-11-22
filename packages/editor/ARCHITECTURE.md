@@ -607,6 +607,10 @@ packages/editor's lines (outside tests) are comments. Each one is:
   spans* in RUNTIME-EVIDENCE.md; `pickAnchor` for the span);
 - a note citing a doc, when it points at one (`FILE.md, *Section*`).
 
+A comment becomes a note from its lightbulb (Notes: Make This Comment a Note, extensions/notes/comments.ts): its text off
+the markers, on the code just below it, the repository's (`.silo/notes/repository/`, anyone's to change), with who wrote
+it by its lines' blame; one for a tool isn't offered.
+
 Sorted on a sample (2026-11-03, 128 comments in 9 files of `full-editor`): 53% dropped,
 39% notes, 6% notes citing a doc, 2% kept. The dropped are JSDoc restating a declaration; a file's header is always a
 note (its "what" is the feature's ledger entry), and 6 of 9 headers cite a doc. A cite of a queue entry by its number

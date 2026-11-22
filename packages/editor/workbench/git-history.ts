@@ -162,4 +162,15 @@ export function installGitHistory(vscode: typeof vscodeApi, hub: Hub, remote?: H
 		changed.fire(uri);
 		await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { "viewColumn": vscode.ViewColumn.Beside, "preview": true });
 	});
+	// Who last changed a few lines (1-based) of a file, as the blame above says it: for an extension, which can't ask the
+	// hub — the notes' Make This Comment a Note, keeping who wrote the comment.
+	vscode.commands.registerCommand("editor.git.authorsOf", async (path: unknown, from: unknown, to: unknown): Promise<string[]> => {
+		if (typeof path !== "string" || typeof from !== "number" || typeof to !== "number") {
+			return [];
+		}
+
+		const { runs } = await blame(path, from, to).catch(() => ({ "runs": [] as BlameRun[] }));
+
+		return [...new Set(runs.flatMap((run) => (run.author === undefined ? [] : [run.author])))];
+	});
 }

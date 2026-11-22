@@ -25,6 +25,11 @@
         "category": "Notes"
       },
       {
+        "command": "notes.fromComment",
+        "title": "Make This Comment a Note",
+        "category": "Notes"
+      },
+      {
         "command": "notes.dismiss",
         "title": "Dismiss Note",
         "category": "Notes"

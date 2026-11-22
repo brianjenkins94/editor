@@ -50,8 +50,9 @@ How it's kept:
      code_parses 79–98%; capability-findings, instances and cosmetic 0–2%, their features' code run by every editor and so
      not counted, what's left the terminal and review they lean on. `activate`, reached by every test, says nothing to
      it (`RARE`: a statement at most 10% of the tests ran).
-   - **Notes for comments, and agents reading them**: the migration. Then the pass's third condition, to show notes lose
-     nothing. An edit that orphans a note says so (2026-11-20: files_edit, files_write and files_replace answer
+   - **Notes for comments, and agents reading them**: the migration, with Notes: Make This Comment a Note (its lightbulb on
+     a comment, 2026-11-22: the text on the code below it, the repository's, who wrote it kept; a tool's comment stays).
+     Then the pass's third condition, to show notes lose nothing. An edit that orphans a note says so (2026-11-20: files_edit, files_write and files_replace answer
      `orphaned`, as Problems says "A note lost its place"). Agents read them (2026-11-17): `files_read` with the notes
      beside its lines, `decisions_for` with a file's among its whys. What the measure found to go on (2026-11-03, 128
      comments in 9 files): 53% dropped (JSDoc saying what a declaration's name and body do), 39% notes (whys, gotchas, a
