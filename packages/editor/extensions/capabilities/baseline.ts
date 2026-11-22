@@ -37,6 +37,7 @@ import { keptAt, localOf } from "@brianjenkins94/editor-api/git";
 import { tarballUrl } from "@brianjenkins94/editor-api/runtime";
 import { add, consumerOf, surfaceEntries } from "@brianjenkins94/util/silo/detect";
 import { JOIN, joinedBefore, joinsWanted, syncConsumer, syncPackages } from "@brianjenkins94/util/silo/evidence";
+import { resolvedSince } from "./resolved";
 import { baselinePath, LOCAL_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
 
@@ -307,8 +308,9 @@ function consumerNow(existing: BaselineFile | undefined, use: Awaited<ReturnType
 	}
 
 	// (where it starts, nothing grown: no record of where it was read from)
-	return { "consumer": syncConsumer(use.fresh ? undefined : joinedBefore(existing), use.read, added, use.seen).consumer, "join": JOIN };
+	return { "consumer": syncConsumer(use.fresh ? undefined : resolvedSince(joinedBefore(existing), use.read), use.read, added, use.seen).consumer, "join": JOIN };
 }
+
 
 /**
  * `.silo/baseline.json` (in `root`) made if there's none, else brought up to `.silo/versions.json` (lib's

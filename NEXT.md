@@ -39,11 +39,6 @@ How it's kept:
    22), the measures were taken (`.silo/zero-knowledge.json`, `.silo/last-run/`), and the features came back to rough
    parity with `full-editor` (the user's objective of 2026-11-05: that list ended 2026-11-19 with *Formatting-only
    changes marked*). In order:
-   - **A baseline made in a clone says 118 uses of its dependencies grew** (2026-11-21, `.silo/local/baseline.json` of a
-     fresh `env/` load of this repository): each "since" its own version (typescript's `env`, `fs:read`, `fs:write` since
-     6.0.3). Lib's syncConsumer counts a use that wasn't in the consumer before, of a package already in the baseline, or
-     one whose version moved (from none?), as grown; the editor reads the code's use in instalments as TypeScript loads
-     each project (baseline.ts `consumerFor`, its `seen`). Find which, from a clone's first readings.
    - **Silo, firmed up** (*Silo, firmed up*): each capability under a job and a front end; silo README's *What doesn't
      fit* answered. One owner a file is where that starts: reassess sharing from what runs show — Features and tests
      says which of a feature's files other features' tests run (2026-11-21), traces not yet; packages/admin/src/views.tsx,
@@ -122,6 +117,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
   NotAllowedError still happens after e86501b is unknown: read the next reports, which carry their stack. Also seen
   once: `[almostnode] worker_threads.Worker is not implemented` (synckit's `createSyncFn`, e4e927b).
 
+- **A seeded instance loses `.silo/` files beside a seeded `.silo/local/` one** (found 2026-11-22): an address's seed
+  (`?seed=`, the in-editor specs' `openEditor`) with `.silo/baseline.json` and `.silo/local/baseline-files.json` boots with
+  no `.silo/baseline.json` (`.silo` lists empty; `.silo/local/`, its own IndexedDB mount, mounted before the seed, holds
+  its file). With no `.silo/local/` file seeded, `.silo/`'s are there. Only a seed does this: no repository has
+  `.silo/local/` (git ignores it).
 - **A repository load the browser closed on is kept half-written** (2026-10-31): a load's files are written back to
   IndexedDB in debounced batches (workspace-fs.ts `flush`), and a browser closed in the middle keeps what landed — here
   `.git/HEAD`, `.git/config` and acquired types, no working tree. The shell's note of what it loaded (`shell:githubRepo`
@@ -198,7 +198,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
   no repository in its copy, and clones: if that's seen, the load wants a signal that its write-back is done.
 
 - **live-runs.spec misses in slow full runs** (here: "F5 just after a save" without its Debug Console output, 2026-11-19
-  in 237 s against ~175, and 2026-11-20 in 282 s; "a rule gives it a value" without its value, 2026-11-20 in 253 s).
+  in 237 s against ~175, 2026-11-20 in 282 s, and 2026-11-22; "a rule gives it a value" without its value, 2026-11-20 in
+  253 s).
   Each passes alone (15 of 15 for the spec, 2026-11-20) and in the next full run. On CI once (0e885fc4's `specs-2`):
   "Pin…", its F5 run given "seen" at its stop and the margin showing a live run's `skipped = exec ls` instead — a live
   run on its interval landing between. All four came after specs had editors of their own again (f8f3b8db), each

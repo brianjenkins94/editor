@@ -594,12 +594,14 @@
     ],
     "paths": [
       "packages/editor/extensions/capabilities/baseline.ts",
+      "packages/editor/extensions/capabilities/resolved.ts",
       "packages/editor/extensions/capabilities/exceptions.ts",
       "packages/editor/extensions/capabilities/growth.ts",
       "packages/editor/extensions/capabilities/packages-worker.ts"
     ],
     "tests": [
-      "packages/editor/test/in-editor/dependency-baseline.spec.mjs"
+      "packages/editor/test/in-editor/dependency-baseline.spec.mjs",
+      "packages/editor/test/baseline-resolved.test.mjs"
     ]
   },
   "Docking editors into windows": {

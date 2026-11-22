@@ -92,6 +92,10 @@ export async function openProject(vscode: typeof vscodeApi, root: string, log: L
 		// repo read through the API) gets a fresh one below — kept, the last repo's origin would still be where a commit
 		// pushes, and what the shell takes the workspace for (`git.origin`).
 		await vscode.workspace.fs.delete(vscode.Uri.file(root + "/.git"), { "recursive": true, "useTrash": false }).then(undefined, () => { /* none yet */ });
+		// And what was kept here about the last one's code (`.silo/local/`: its dependency baseline and what of the code it
+		// read, its runs, its coverage): kept, the new code's first reading continued the old one's — a clone's every use of
+		// a package the starter also used read as grown.
+		await vscode.workspace.fs.delete(vscode.Uri.file(root + "/.silo/local"), { "recursive": true, "useTrash": false }).then(undefined, () => { /* none yet */ });
 	}
 
 	// Written straight into the workspace's store, all at once: its change watcher (workspace-changes.ts) reports them
