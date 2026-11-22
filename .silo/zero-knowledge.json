@@ -6,7 +6,8 @@
 	"score": {
 		"as it is": 14.5,
 		"code alone": 12,
-		"of": 15
+		"of": 15,
+		"with notes": 14.5
 	},
 	"features": [
 		{
@@ -21,6 +22,9 @@
 					},
 					"code alone": {
 						"grade": 1
+					},
+					"with notes": {
+						"grade": 1
 					}
 				},
 				{
@@ -31,6 +35,9 @@
 					},
 					"code alone": {
 						"grade": 1
+					},
+					"with notes": {
+						"grade": 1
 					}
 				},
 				{
@@ -40,6 +47,9 @@
 						"grade": 1
 					},
 					"code alone": {
+						"grade": 1
+					},
+					"with notes": {
 						"grade": 1
 					}
 				},
@@ -53,6 +63,10 @@
 					"code alone": {
 						"grade": 0,
 						"said": "inferred: a resource often isn't known before the call; a rule on one resource wouldn't match non-literal arguments"
+					},
+					"with notes": {
+						"grade": 1,
+						"from": "a note (capability-stops.ts)"
 					}
 				},
 				{
@@ -63,6 +77,9 @@
 						"said": "more than the key: runs_tests' approvals send allow-once"
 					},
 					"code alone": {
+						"grade": 1
+					},
+					"with notes": {
 						"grade": 1
 					}
 				}
@@ -82,6 +99,10 @@
 					"code alone": {
 						"grade": 0.5,
 						"said": "the undo half only"
+					},
+					"with notes": {
+						"grade": 0.5,
+						"said": "right, but not the key's preview of a replacement across files"
 					}
 				},
 				{
@@ -92,6 +113,9 @@
 					},
 					"code alone": {
 						"grade": 1
+					},
+					"with notes": {
+						"grade": 1
 					}
 				},
 				{
@@ -101,6 +125,9 @@
 						"grade": 1
 					},
 					"code alone": {
+						"grade": 1
+					},
+					"with notes": {
 						"grade": 1
 					}
 				},
@@ -114,6 +141,10 @@
 					"code alone": {
 						"grade": 0.5,
 						"said": "right, from the agent tool's description string, held as an inference"
+					},
+					"with notes": {
+						"grade": 1,
+						"from": "a note (checkpoints.ts's header and RECORDS)"
 					}
 				},
 				{
@@ -125,6 +156,9 @@
 					"code alone": {
 						"grade": 1,
 						"said": "missed files_replace's pointer"
+					},
+					"with notes": {
+						"grade": 1
 					}
 				}
 			]
@@ -141,6 +175,9 @@
 					},
 					"code alone": {
 						"grade": 1
+					},
+					"with notes": {
+						"grade": 1
 					}
 				},
 				{
@@ -151,6 +188,9 @@
 					},
 					"code alone": {
 						"grade": 1
+					},
+					"with notes": {
+						"grade": 1
 					}
 				},
 				{
@@ -160,6 +200,9 @@
 						"grade": 1
 					},
 					"code alone": {
+						"grade": 1
+					},
+					"with notes": {
 						"grade": 1
 					}
 				},
@@ -173,6 +216,10 @@
 					"code alone": {
 						"grade": 0.5,
 						"said": "the same reason, inferred from the merge rule, low confidence: 'I couldn't find the reason stated'"
+					},
+					"with notes": {
+						"grade": 1,
+						"from": "a note (notes/extension.ts's header)"
 					}
 				},
 				{
@@ -184,9 +231,17 @@
 					"code alone": {
 						"grade": 0.5,
 						"said": "no tests or other callers: greps across folders timed out"
+					},
+					"with notes": {
+						"grade": 1
 					}
 				}
 			]
 		}
-	]
+	],
+	"notes": {
+		"about": "The third condition (ARCHITECTURE.md, *What's self-explanatory*): the same questions, answered from main after its comments became notes, through files_read (the notes beside their lines), files_glob and files_grep — no Markdown, no .silo/ — graded against the same key, read for the code as it is now where a feature has changed since full-editor (its ways in, mostly).",
+		"commit": "8d74d8a0",
+		"on": "2026-11-22"
+	}
 }

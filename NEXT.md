@@ -50,12 +50,6 @@ How it's kept:
      code_parses 79–98%; capability-findings, instances and cosmetic 0–2%, their features' code run by every editor and so
      not counted, what's left the terminal and review they lean on. `activate`, reached by every test, says nothing to
      it (`RARE`: a statement at most 10% of the tests ran).
-   - **Notes for comments, and agents reading them**: migrated 2026-11-22 — packages/editor's 3,094 comments on their
-     own lines, 2,754 notes (`.silo/notes/repository/`) and 359 dropped, each decided as the worked example's were (Notes:
-     Make This Comment a Note, in instances of this repository; a tool's directive kept, and a comment run stops at one).
-     Left: the pass's third condition, to show notes lose nothing — the zero-knowledge questions
-     (`.silo/zero-knowledge.json`) answered from the code with its notes through the tools, against the 14.5 of 15 the
-     comments gave. Not migrated: tests (test/), and comments inside JSX (`{/* … */}`), which the action doesn't offer.
    - **The standard**, from the pass's gaps.
    - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
      (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s

@@ -632,6 +632,10 @@ the docs, which are the answers. Agents answer them through the editor's tools i
 - the code as it is;
 - the code, comments stripped, with notes through the tools.
 
+The third (2026-11-22, main after the migration, `.silo/zero-knowledge.json`'s `with notes`): 14.5 of 15, as with the
+comments, each why the code alone missed answered from a note. Notes lose nothing the pass asks. Left as comments: a
+tool's directives, comments inside JSX, and the tests'.
+
 The first against the second is what comments carry today. The baseline (2026-11-03, three features,
 `.silo/zero-knowledge.json`): 12 of 15 from the code alone, 14.5 as it is — and what the comments carried was the whys,
 only: what a feature's for, its ways in, what's its own and what removing it takes held without them. The third against the second is whether notes lose any of
