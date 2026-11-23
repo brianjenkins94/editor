@@ -21,7 +21,9 @@ How it's kept:
    and no shell for agents (ARCHITECTURE.md, *Workspace tools*). Still open:
    - **Load cost** (a first load of this repository, last measured 2026-11-11: the workspace buffer at 32 of 128 MB, the
      first write-back 1.6 s, the restore at boot 0.43 s). What's left, by gain: each zen-fs lookup walks from the root
-     (StoreFS with `no_id_tables`, off for shared buffers), ~10× cheaper with id tables — asked upstream (#329); since
+     (StoreFS with `no_id_tables`, off for shared buffers), ~10× cheaper with id tables — upstream's answer (#329, closed
+     2026-11-03): not while its tables are a thread's own, until ECMAScript structs, and SingleBuffer's lookups are
+     O(log n) since, so what that saves here is to measure again on 2.9.0; since
      2026-11-20 the provider's `stat`, `readFile` and `readdir` ask once (a path found 3 lookups → 1: zen-fs's
      `existsSync` is two), and its stats are kept until a change says otherwise (workbench/stat-cache.ts: 32,490 of a
      reload's first 39,718 stats answered so, this repository with TypeScript loading it); then the file store's work in
