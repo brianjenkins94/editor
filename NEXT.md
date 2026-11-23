@@ -47,16 +47,28 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
 4. **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
    reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), agent-tools.mjs
    (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the
-   API stood in for) and performance.mjs (budgets, from outside). The unit tests, by what holds them out (counted
-   2026-11-04, 124 files; the user's rule, 2026-11-16: test the subject directly before shimming the runtime). Each is
-   **done when** its tests run in the editor's debugger, or stay outside with the reason in RUNNING.md, *Tests*:
-   - **Count them again**, first: every unit test run in the editor's debugger, each file that can't with what stops
-     it. Done when the counts below are this run's, and a blocker none has is deleted.
-   - **The Worker runtime** (`workerd`, `miniflare`): packages/api, 170 tests.
-   - **Real Playwright launching a browser**: 78.
-   - **`registerHooks`**: 73.
-   - **Stalls**: 52.
-   - **The capability policy on `/tmp` and `exec`**: 32.
+   API stood in for) and performance.mjs (budgets, from outside). The unit tests, counted again 2026-11-23 (every one
+   in a throwaway instance's debugger, `runs_tests`, a package at a time: packages/tsval/vendor aside, 163 files):
+   104 green, 1,550 tests passing and 43 failing in the files that load. The user's rule (2026-11-16): test the subject
+   directly before shimming the runtime. Each is **done when** its tests run in the debugger, or stay outside with the
+   reason in RUNNING.md, *Tests*:
+   - **The Worker runtime**: `workerd` won't load ("Unsupported platform"), so 21 of packages/api's 23 files don't.
+   - **`registerHooks`** (`node:module`): 8 of almostnode's 10.
+   - **Spawning a process** (`child_process` isn't supported): tsval's vm/handler-modules (14 tests), editor's
+     git-push and node-test, silo's cli and test-command. With them, `/tmp` writes: an approval allows one call, so a
+     file that writes there again is refused without asking.
+   - **`BroadcastChannel`**, left out of a run on purpose (it reaches every tab of the origin): a test each in
+     hub/hub, hub/rtc and observability/probes.
+   - **playwright-core in the runtime**: unenv's `net.getDefaultAutoSelectFamilyAttemptTimeout` isn't implemented —
+     playwright's engine and request, debug-mcp's cdp-memory.
+   - **tsval's own gaps**, a test or two each: the order of a microtask against `then` (vm/event-loop), an `async`
+     caller's frame in a stack (vm/stacks), `eval` (vm/step), a returned thenable's async context
+     (vm/stepped-async).
+   - **Stalls**: editor-api/mailbox (16 minutes), debug-mcp/sessions, hub/model, tsval/differential/test262.
+   - **One each**: bablr-language-ts's 4 import `../../bablr/dist`, a build's output; editor-api/runtime-vfs's
+     readable-stream requires `string_decoder/` (a trailing slash); api/errors `require`s an ES module with top-level
+     await; observability/metrics' "in proportion" assertion; debug-mcp's agent (a request to 127.0.0.1 refused),
+     page-tools and tabs (waits that time out) and outdated (a request timed out).
 
 ## Watching
 
