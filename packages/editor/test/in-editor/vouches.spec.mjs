@@ -11,10 +11,12 @@ const files = {
 	...READABLE_TERMINAL,
 	".silo/features.json": JSON.stringify({ "Adding": { "status": "active", "why": "Adds.", "since": "2026-11-22", "what": "Adds.", "paths": ["math.mjs"], "tests": ["add.test.mjs"] } }, null, 2) + "\n",
 	"math.mjs": "export function add(one, other) {\n\treturn one + other;\n}\n",
+	// (a constant it reads, whose file ran only as it loaded, before the test: held too)
+	"one.mjs": "export const ONE = 1;\n",
 	// (a dependency it runs, held by its package.json: an upgrade lapses the vouch)
 	"node_modules/twice/package.json": "{ \"name\": \"twice\", \"version\": \"1.0.0\", \"type\": \"module\", \"main\": \"index.js\" }\n",
 	"node_modules/twice/index.js": "export function twice(value) {\n\treturn value * 2;\n}\n",
-	"add.test.mjs": "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { twice } from \"twice\";\n\nimport { add } from \"./math.mjs\";\n\ntest(\"adds\", () => {\n\tassert.equal(add(1, 1), twice(1));\n});\n"
+	"add.test.mjs": "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { twice } from \"twice\";\n\nimport { add } from \"./math.mjs\";\nimport { ONE } from \"./one.mjs\";\n\ntest(\"adds\", () => {\n\tassert.equal(add(ONE, ONE), twice(ONE));\n});\n"
 };
 
 test("a touched test that hasn't run since its code changed runs before the commit, and the commit carries its pass", async ({ page }) => {
@@ -46,6 +48,8 @@ test("a touched test that hasn't run since its code changed runs before the comm
 	await expect(output).toContainText("\"test\":\"add.test.mjs › adds\",\"outcome\":\"pass\"", { "timeout": 30_000 });
 	await input.pressSequentially("grep -o '\"math.mj[s]\"' .silo/vouches/*.jsonl\n");
 	await expect(output).toContainText("\"math.mjs\"", { "timeout": 30_000 });
+	await input.pressSequentially("grep -o '\"one.mj[s]\"' .silo/vouches/*.jsonl\n");
+	await expect(output).toContainText("\"one.mjs\"", { "timeout": 30_000 });
 	await input.pressSequentially("grep -o '\"node_modules/twice/package.jso[n]\"' .silo/vouches/*.jsonl\n");
 	await expect(output).toContainText("\"node_modules/twice/package.json\"", { "timeout": 30_000 });
 	await input.pressSequentially("ls .silo/local; echo listed\n");

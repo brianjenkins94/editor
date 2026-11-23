@@ -75,10 +75,10 @@ How it's kept:
    CI's runs read back since a fix the same day (the workflow named `ci`, which GitHub's API 404'd, so every test was
    new; a run that can't be read now says so): 213 tests known. The editor's tsval runs vouch, and its commits carry them,
    running first the touched tests that hadn't run since their code changed (decision 12), each held to the packages it
-   loaded too, so an upgrade lapses it (2026-11-22; silo README, *Built*). Left: see a push's CI skip — a test a push
-   doesn't reach rests after 20 green runs, so from about the 20th push on; a touched one vouched for in the editor
-   sooner, once CI has passed it after a vouch (decision 19); then CI's selection by per-test reach from runs, finer than
-   a file's static reach. Done when a push's CI runs fewer tests because the rest are vouched for or resting.
+   loaded too, so an upgrade lapses it, and CI selects by each test's reach from a run where a vouch says it (2026-11-22;
+   silo README, *Built*). Left: see a push's CI skip — a test a push doesn't reach rests after 20 green runs, so from
+   about the 20th push on; a touched one vouched for in the editor sooner, once CI has passed it after a vouch (decision
+   19). Done when a push's CI runs fewer tests because the rest are vouched for or resting.
 
 ## Watching
 
@@ -199,7 +199,7 @@ packages/editor (`--all`, `--runs N`, `--json`).
   without its comments, is the same code before and after (TypeScript's printer, 244 files). Not seen before today.
 
 - **live-runs.spec misses in slow full runs** (here: "F5 just after a save" without its Debug Console output, 2026-11-19
-  in 237 s against ~175, 2026-11-20 in 282 s, and 2026-11-22; "a rule gives it a value" without its value, 2026-11-20 in
+  in 237 s against ~175, 2026-11-20 in 282 s, and 2026-11-22 twice, once in 239 s; "a rule gives it a value" without its value, 2026-11-20 in
   253 s).
   Each passes alone (15 of 15 for the spec, 2026-11-20) and in the next full run. On CI once (0e885fc4's `specs-2`):
   "Pin…", its F5 run given "seen" at its stop and the margin showing a live run's `skipped = exec ls` instead — a live

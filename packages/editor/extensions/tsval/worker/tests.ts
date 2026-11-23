@@ -14,12 +14,15 @@ const testStatements = new Map<string, number>();
 
 const testEffects = new Map<string, Map<string, Effect>>();
 
+let loadedFirst: string[] | undefined;
+
 export function testsEffects(): Map<string, Effect>[] {
 	return [...testEffects.values()];
 }
 
 export function testTold(kind: string, titles?: string, outcome?: string, error?: string, assertion?: string): void {
 	if (kind === "start" && titles !== undefined) {
+		loadedFirst ??= [...state.current?.coverage ?? []].filter(([file, entry]) => !EDITOR_SOURCES.has(file.fileName) && entry.counts.some((count) => count > 0)).map(([file]) => file.fileName);
 		testStarts.set(titles, new Map([
 			...state.current?.coverage ?? []
 		].map(([file, entry]) => [
@@ -158,6 +161,7 @@ export function tellCoverage(): void {
 
 export function startTests(): void {
 	state.testsRan = [];
+	loadedFirst = undefined;
 	testStarts.clear();
 	testEffects.clear();
 	state.testsFailed = 0;
@@ -172,7 +176,7 @@ export function testsOver(vm: Vm): boolean {
 
 export function tellTests(exitCode: number): number {
 	if (state.testsRan.length > 0) {
-		post({ "type": "tests", "tests": state.testsRan, "packages": [...packagesRan.values()] });
+		post({ "type": "tests", "tests": state.testsRan, "packages": [...packagesRan.values()], "loaded": loadedFirst ?? [] });
 	}
 
 	return exitCode === 0 && state.testsFailed > 0

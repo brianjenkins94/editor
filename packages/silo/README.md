@@ -530,7 +530,13 @@ message, the commit button's, `git_commit`'s `tests`). The terminal's `git commi
 A dependency's upgrade lapses a vouch (2026-11-22): the editor's holds each package its run loaded by that package's
 installed package.json, whose bytes change with its version; `silo vouch`'s, which run in Node and see no packages, hold
 the lockfiles over the test (`lockfilesOver`), so any dependency's change lapses them. CI reads both back as files, by
-git id. Not yet: CI's selection by per-test reach from runs.
+git id. A test is held to what ran as its modules loaded too, before any test (a constant it reads, whose file runs
+nothing in its window), as well as what ran in its own window. And CI selects by each test's reach from a run, finer
+than its file's static reach (`ranReach`, 2026-11-22): the files of its latest editor vouch that still held of the
+code at the push's base (the base's vouches read too, a vouches file keeping only each test's latest), and the push's
+changes by file as well as by declaration. Code a test didn't run can't change how it comes out unless a file it ran
+changes, and then it's touched; a vouch that didn't hold at the base says nothing, and static reach stands in. The run
+was tsval's, so a path only Node takes isn't in it: the weekly full run is what catches that.
 
 **Dogfooding in the editor.** The editor is where this is tried first, and what it already has maps onto it:
 - **Reach** is its traces: tests run on tsval's `node:test` in the editor, and their reach is BABLR span ids, kept per

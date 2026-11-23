@@ -49,7 +49,7 @@ export type WorkerEvent =
 	| { "type": "coverage"; "coverage": CoverageEvent }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" | "console" }
 	| { "type": "values"; "batch": LiveBatch; "file"?: string; "source"?: string }
-	| { "type": "tests"; "tests": TestReport[]; "packages"?: LoadedPackage[] }
+	| { "type": "tests"; "tests": TestReport[]; "packages"?: LoadedPackage[]; "loaded"?: string[] }
 	| { "type": "valueSet"; "ok": boolean; "value"?: string; "error"?: string; "snapshot"?: Snapshot }
 	| { "type": "listening"; "port": number }
 	| { "type": "serving"; "ports": number[] }

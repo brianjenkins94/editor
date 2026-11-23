@@ -61,6 +61,11 @@ export function vouchesIn(repo: string): Vouch[] {
 	return fs.existsSync(folder) ? fs.readdirSync(folder).filter((name) => name.endsWith(".jsonl")).flatMap((name) => parseVouches(fs.readFileSync(path.join(folder, name)))) : [];
 }
 
+/** Everyone's vouches as they were at `ref`. */
+export function vouchesAt(repo: string, ref: string): Vouch[] {
+	return (git(repo, ["ls-tree", "--name-only", `${ref}:${VOUCHES_DIR}`]) ?? "").split("\n").filter((name) => name.endsWith(".jsonl")).flatMap((name) => parseVouches(git(repo, ["show", `${ref}:${VOUCHES_DIR}/${name}`]) ?? ""));
+}
+
 /** git's answer, or undefined when it has none. */
 const git = (repo: string, args: string[]): string | undefined => {
 	const answer = spawnSync("git", args, { "cwd": repo, "encoding": "utf8", "maxBuffer": 1 << 28 });
@@ -144,6 +149,47 @@ export function lockfilesOver(repo: string, file: string): Record<string, string
 	return Object.fromEntries(found.flatMap((each, index) => (oids[index] === undefined || oids[index] === "" ? [] : [[each, digest(oids[index])]])));
 }
 
+/** The ids each file had at `ref`, of `files` git has there. */
+export function idsAt(repo: string, ref: string, files: readonly string[]): Map<string, string> {
+	const tree = files.length === 0 ? "" : git(repo, ["ls-tree", "-r", ref, "--", ...files]) ?? "";
+
+	return new Map(tree.split("\n").flatMap((line) => {
+		const [meta, file] = line.split("\t");
+		const oid = meta?.split(" ")[2];
+
+		return file === undefined || oid === undefined ? [] : [[file, oid] as const];
+	}));
+}
+
+/** The files a push changed since `base`, by path. */
+export function filesChangedSince(repo: string, base: string): string[] {
+	return (git(repo, ["diff", "--name-only", base, "HEAD"]) ?? "").split("\n").filter((file) => file !== "");
+}
+
+/** Each test's reach from a run, finer than its file's static reach: the files its latest run-made vouch (one held to
+ *  files, not declarations: the editor's) names — what ran as its modules loaded and in its own window, and the packages
+ *  it loaded — of those that still held of the code at the push's base (`atBase`, and what's installed `now`). Code a
+ *  test didn't run then can't change how it comes out unless a file it ran changes too, which the push's changed files
+ *  say; a vouch that no longer held at the base says nothing of what the test runs now. */
+export function ranReach(vouches: readonly Vouch[], atBase: ReadonlyMap<string, string>, now: ReadonlyMap<string, string>): Map<string, Set<string>> {
+	const held = (vouch: Vouch): boolean => Object.entries(vouch.reached).every(([file, kept]) => {
+		const oid = file.includes("node_modules/") ? now.get(file) : atBase.get(file);
+
+		return oid !== undefined && digest(oid) === kept;
+	});
+	const reach = new Map<string, Vouch>();
+
+	for (const vouch of vouches) {
+		const keys = Object.keys(vouch.reached);
+
+		if (keys.length > 0 && keys.every((key) => !key.includes("#")) && (reach.get(vouch.test)?.at ?? "") < vouch.at && held(vouch)) {
+			reach.set(vouch.test, vouch);
+		}
+	}
+
+	return new Map([...reach].map(([test, vouch]) => [test, new Set(Object.keys(vouch.reached))]));
+}
+
 export interface TestOptions {
 	"repo": string;
 	/** The test files the runner would run, from the repository's top. */
@@ -182,12 +228,15 @@ export async function selectFor(options: TestOptions): Promise<Selected[]> {
 	}
 
 	const vouches = vouchesIn(options.repo);
+	const named = filesNamedIn(options.repo, vouches);
+	const then = base === undefined ? [] : [...vouches, ...vouchesAt(options.repo, options.base!)];
+	const ran = base === undefined ? new Map<string, Set<string>>() : ranReach(then, idsAt(options.repo, options.base!, [...new Set(then.flatMap((vouch) => Object.keys(vouch.reached).filter((key) => !key.includes("#") && !key.includes("node_modules/"))))]), filesNamedIn(options.repo, then));
 
 	return selectTests({
 		"tests": tests,
-		"reach": (test) => staticReach(head, test.file),
-		"changed": new Set(base === undefined ? [] : changedDeclarations(base, head)),
-		"fingerprints": new Map([...head.fingerprints, ...filesNamedIn(options.repo, vouches)]),
+		"reach": (test) => ran.get(test.id) ?? staticReach(head, test.file),
+		"changed": new Set(base === undefined ? [] : [...changedDeclarations(base, head), ...filesChangedSince(options.repo, options.base!)]),
+		"fingerprints": new Map([...head.fingerprints, ...named]),
 		"standings": known,
 		"vouches": vouches,
 		"agreed": agreedOn(vouches, known, options.runtime),

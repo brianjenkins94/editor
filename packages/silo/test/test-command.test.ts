@@ -93,3 +93,53 @@ test("silo vouch holds a test to the lockfiles over it, so a dependency's upgrad
 	assert.deepEqual(lockfilesOver(repo, "packages/a/test/a.test.mjs"), { "packages/a/pnpm-lock.yaml": oid("packages/a/pnpm-lock.yaml"), "package-lock.json": oid("package-lock.json") });
 	assert.deepEqual(lockfilesOver(repo, "b.test.mjs"), { "package-lock.json": oid("package-lock.json") });
 });
+
+test("a test's reach from a run: the files of its latest editor vouch that held at the push's base, and what the push changed by file", async () => {
+	const { filesChangedSince, idsAt, ranReach, vouchesAt } = await import("../src/test.ts");
+	const { digest } = await import("@brianjenkins94/util/silo/graph");
+	const { execFileSync } = await import("node:child_process");
+	const { mkdirSync, mkdtempSync, writeFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const path = await import("node:path");
+	const repo = mkdtempSync(path.join(tmpdir(), "silo-ran-"));
+	const run = (...args: string[]): string => execFileSync("git", args, { "cwd": repo, "encoding": "utf8" }).trim();
+	const write = (file: string, text: string): void => {
+		mkdirSync(path.dirname(path.join(repo, file)), { "recursive": true });
+		writeFileSync(path.join(repo, file), text);
+	};
+
+	run("init", "-q");
+	run("config", "user.email", "t@localhost");
+	run("config", "user.name", "t");
+	write("a.mjs", "export const a = 1;\n");
+	write("b.mjs", "export const b = 1;\n");
+	write("a.test.mjs", "test('adds', () => {});\n");
+	run("add", ".");
+	run("commit", "-qm", "first");
+
+	const held = (files: string[]): Record<string, string> => Object.fromEntries(files.map((file) => [file, digest(run("hash-object", file))]));
+	const vouch = (test: string, at: string, reached: Record<string, string>) => ({ "test": test, "outcome": "pass" as const, "by": "brian", "at": at, "runtime": "tsval", "reached": reached });
+	// (a vouch made of the code as it is: what it ran; one of a.mjs before it changed: held to an id a.mjs no longer has)
+	const now = vouch("a.test.mjs › adds", "2026-11-22T10:00:00Z", held(["a.test.mjs", "a.mjs"]));
+	const stale = vouch("a.test.mjs › other", "2026-11-22T10:00:00Z", { ...held(["a.test.mjs"]), "a.mjs": digest("an older a.mjs") });
+	// (a declaration-held vouch, silo vouch's, says nothing of what ran)
+	const declared = vouch("a.test.mjs › declared", "2026-11-22T10:00:00Z", { "a.mjs#a": "f1" });
+
+	write(".silo/vouches/brian.jsonl", [now, stale, declared].map((each) => JSON.stringify(each) + "\n").join(""));
+	run("add", ".");
+	run("commit", "-qm", "vouched");
+
+	const base = run("rev-parse", "HEAD");
+
+	// (the push: b.mjs changed, and a newer vouch, made after a.mjs changed in the working tree, kept in its place)
+	write("b.mjs", "export const b = 2;\n");
+	write(".silo/vouches/brian.jsonl", JSON.stringify(vouch("a.test.mjs › adds", "2026-11-22T12:00:00Z", { ...held(["a.test.mjs"]), "a.mjs": digest("a newer a.mjs") })) + "\n");
+	run("commit", "-qam", "the push");
+
+	const then = vouchesAt(repo, base);
+	const reach = ranReach(then, idsAt(repo, base, ["a.test.mjs", "a.mjs"]), new Map());
+
+	assert.equal(then.length, 3);
+	assert.deepEqual([...reach].map(([test, files]) => [test, [...files].sort()]), [["a.test.mjs › adds", ["a.mjs", "a.test.mjs"]]]);
+	assert.deepEqual(filesChangedSince(repo, base), [".silo/vouches/brian.jsonl", "b.mjs"]);
+});

@@ -196,7 +196,12 @@ export function activate(context: vscode.ExtensionContext): void {
 			return path === undefined ? [] : [heldAs(path)];
 		});
 		const packages = (event.packages ?? []).map((ran) => relative(vscode.Uri.file(`${ran.dir}/package.json`)) ?? `${ran.dir}/package.json`);
-		const ranOf = (test: TestsEvent["tests"][number]): string[] => [...ranFiles(test), ...packages];
+		const loaded = (event.loaded ?? []).flatMap((ran) => {
+			const path = relative(vscode.Uri.file(ran));
+
+			return path === undefined ? [] : [heldAs(path)];
+		});
+		const ranOf = (test: TestsEvent["tests"][number]): string[] => [...loaded, ...ranFiles(test), ...packages];
 		const paths = new Set([file, ...event.tests.flatMap(ranOf)]);
 		const unsaved = vscode.workspace.textDocuments.filter((document) => document.isDirty && paths.has(relative(document.uri) ?? "")).map((document) => relative(document.uri));
 
