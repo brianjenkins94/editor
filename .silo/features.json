@@ -3191,6 +3191,7 @@
     "tests": [
       "packages/editor/test/in-editor/vouches.spec.mjs",
       "packages/editor/test/vouches.test.mjs",
+      "packages/silo/test/test-command-git.test.ts",
       "packages/silo/test/test-command.test.ts"
     ]
   }
