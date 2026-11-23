@@ -21,13 +21,13 @@ export function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<
 }
 
 async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Runtime> {
-	const [{ createFsShim, createRunGlobal, getServerBridge, observeSockets, "packageDirOf": dirOf, runEval, webSocketGlobal }, { answerServer, programGlobals, serverOn, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../../shared/workspace-runtime"), import("../../../shared/zenfs-vfs.js"), import("@brianjenkins94/editor-api/runtime-vfs")]);
+	const [{ createFsShim, createRunGlobal, getServerBridge, observeSockets, "packageDirOf": dirOf, runEval, VirtualFS, webSocketGlobal }, { answerServer, programGlobals, serverOn, workspaceRuntime }, zenfs, { asVirtualFS, RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../../shared/workspace-runtime"), import("../../../shared/zenfs-vfs.js"), import("@brianjenkins94/editor-api/runtime-vfs")]);
 
 	if (state.editorLink !== undefined) {
 		const link = state.editorLink;
 
 		await link.ready.then(() => {
-			state.programFsFor = (cwd) => createFsShim(new RuntimeVfs(state.runLayer ?? link.fs, state.runtime?.getVFS()), () => cwd);
+			state.programFsFor = (cwd) => createFsShim(asVirtualFS(new RuntimeVfs(state.runLayer ?? link.fs, state.runtime?.getVFS()), VirtualFS), () => cwd);
 		}, () => undefined);
 	}
 

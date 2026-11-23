@@ -1,8 +1,8 @@
 import type { RuntimeFs } from "@brianjenkins94/editor-api/runtime";
-import { createRuntime } from "@brianjenkins94/almostnode";
+import { createRuntime, VirtualFS } from "@brianjenkins94/almostnode";
 import { unpack } from "@brianjenkins94/almostnode/packages";
 import { connectRuntime } from "@brianjenkins94/editor-api/runtime";
-import { RuntimeVfs } from "@brianjenkins94/editor-api/runtime-vfs";
+import { asVirtualFS, RuntimeVfs } from "@brianjenkins94/editor-api/runtime-vfs";
 
 interface Message { "line"?: number; "column"?: number; "endLine"?: number; "endColumn"?: number; "message": string; "ruleId": string | null; "severity": number; "fixable": boolean }
 
@@ -102,7 +102,7 @@ async function load(files: RuntimeFs): Promise<Linter> {
 		vfs.writeFileSync(file, bytes);
 	}
 
-	const runtime = await createRuntime(vfs, { "dangerouslyAllowSameOrigin": true, "cwd": "/workspace", "browserField": false, "nativeFileImports": false });
+	const runtime = await createRuntime(asVirtualFS(vfs, VirtualFS), { "dangerouslyAllowSameOrigin": true, "cwd": "/workspace", "browserField": false, "nativeFileImports": false });
 	const loaded = await runtime.execute(`
 module.exports = async () => {
 	const { ESLint } = require("eslint");

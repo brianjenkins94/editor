@@ -112,7 +112,7 @@ function fold(known: SpanEvidence, observation: Observation): SpanEvidence {
 
 /** The store, through `vscode` — the extension API of the realm it runs in (an extension's, or core's: the workbench's
  *  own, for the notes margin's coverage) — its watchers and emitter disposed with `subscriptions`. */
-export function evidenceStore(vscode: typeof vscodeApi, subscriptions: vscodeApi.Disposable[]): EvidenceStore {
+export function evidenceStore(vscode: typeof vscodeApi, subscriptions: { "dispose": () => unknown }[]): EvidenceStore {
 	const root = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file("/workspace");
 	const text = async (uri: vscodeApi.Uri): Promise<string> => Promise.resolve(vscode.workspace.fs.readFile(uri)).then((bytes) => new TextDecoder().decode(bytes), () => "");
 	const folders = async (uri: vscodeApi.Uri): Promise<string[]> => Promise.resolve(vscode.workspace.fs.readDirectory(uri)).then((entries) => entries.filter(([, type]) => type === vscode.FileType.Directory).map(([name]) => name), () => []);

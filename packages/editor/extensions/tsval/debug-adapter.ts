@@ -19,7 +19,7 @@ type Dap = Record<string, unknown>;
 type DebugState = "starting" | "running" | "stopped" | "idle" | "terminated";
 type DebugAction = StepAction;
 
-class TsvalDebugSession implements vscode.DebugAdapter {
+class TsvalDebugSession extends vscode.Disposable implements vscode.DebugAdapter {
 	public readonly onDidSendMessage: vscode.Event<vscode.DebugProtocolMessage>;
 
 	public readonly id: string;
@@ -61,6 +61,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private readonly runtime: WorkspaceRuntime;
 
 	public constructor(session: vscode.DebugSession, runtime: WorkspaceRuntime) {
+		super(() => undefined);
 		this.onDidSendMessage = this.sendEmitter.event;
 		this.id = session.id;
 		this.runtime = runtime;
@@ -117,7 +118,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 		}
 	}
 
-	public dispose(): void {
+	public override dispose(): void {
 		this.closeWorker();
 		this.sendEmitter.dispose();
 	}

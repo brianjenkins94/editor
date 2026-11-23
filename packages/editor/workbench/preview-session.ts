@@ -45,9 +45,15 @@ function adapterOf(vscode: typeof vscodeApi, runner: NodeRunner, hub: Hub, log: 
 		}
 	};
 
-	return {
+	return Object.assign(new vscode.Disposable(() => {
+		recorded?.dispose();
+
+		for (const stop of stops) {
+			stop();
+		}
+	}), {
 		"onDidSendMessage": sent.event,
-		"handleMessage": (message) => {
+		"handleMessage": (message: vscodeApi.DebugProtocolMessage) => {
 			const { "seq": requestSeq, command } = message as Request;
 
 			send({ "type": "response", "request_seq": requestSeq, "command": command, "success": true, "body": bodies[command]?.() });
@@ -59,15 +65,8 @@ function adapterOf(vscode: typeof vscodeApi, runner: NodeRunner, hub: Hub, log: 
 			if (command === "launch") {
 				follow();
 			}
-		},
-		"dispose": () => {
-			recorded?.dispose();
-
-			for (const stop of stops) {
-				stop();
-			}
 		}
-	};
+	});
 }
 
 export function installPreviewSessions(vscode: typeof vscodeApi, runner: NodeRunner, hub: Hub, log: Logger): void {

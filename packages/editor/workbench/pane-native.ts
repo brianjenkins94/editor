@@ -15,7 +15,7 @@ function plain(markdown: string): string {
 	return first.replaceAll(/[*_`]/gu, "").trim().slice(0, 120);
 }
 
-export function installNativeFace(vscode: typeof vscodeApi): { "show": (uri: string, drawing: NativeDrawing | undefined) => void; "disposables": vscodeApi.Disposable[] } {
+export function installNativeFace(vscode: typeof vscodeApi): { "show": (uri: string, drawing: NativeDrawing | undefined) => void; "disposables": { "dispose": () => unknown }[] } {
 	const drawings = new Map<string, NativeDrawing>();
 	const hintsChanged = new vscode.EventEmitter<void>();
 	const lensesChanged = new vscode.EventEmitter<void>();

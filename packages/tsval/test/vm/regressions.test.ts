@@ -3,16 +3,18 @@
  * sub-expressions, fork policy for accessors and class prototypes). Each test is the probe that
  * exposed the bug, kept so it can't come back.
  */
-import type { Machine } from "../../src/vm.ts";
 import assert from "node:assert";
 import { test } from "node:test";
 import { createVM, interpret } from "../../src/interpret.ts";
+import { Machine } from "../../src/vm.ts";
 
 // --- #3: fork must rebind cloned closures to the forked VM ---
 
 test("#3 fork: a host-invoked closure from the fork runs on the fork", () => {
 	// (spies on the implementation's guest-call entry point — a `Machine` concern, not the host API)
-	const vm = createVM("function mk(){ let c = 0; return { inc: () => ++c }; } const o = mk(); o;").vm as Machine;
+	const { vm } = createVM("function mk(){ let c = 0; return { inc: () => ++c }; } const o = mk(); o;");
+
+	assert.ok(vm instanceof Machine);
 
 	vm.run();
 	const fork = vm.fork();

@@ -27,7 +27,7 @@ function isBrowser(request: Request) {
 	return request.headers.has("Sec-Fetch-Mode") && userAgent.startsWith("Mozilla/") && !/bot|crawl|spider|headless/iu.test(userAgent);
 }
 
-let gate: Hono<{ "Bindings": Env }>;
+let gate: ReturnType<typeof build> | undefined;
 
 // Built on the first request, not at load: the middleware asks the facilitator what it supports as it's made, and a
 // Worker can't fetch in global scope. Coinbase's facilitator checks a payment's signature, then puts the transfer on

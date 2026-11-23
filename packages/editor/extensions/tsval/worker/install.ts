@@ -58,7 +58,9 @@ function unpackPin(pin: string): boolean {
 	const vfs = state.runtime.getVFS();
 	const link = state.editorLink;
 
-	return (state.runSpan ?? workerLog()).span("editor.extensions.tsval.worker.install.fetch", { "name": name, "version": version }, (span) => {
+	const parent = state.runSpan === undefined ? workerLog() : state.runSpan;
+
+	return parent.span("editor.extensions.tsval.worker.install.fetch", { "name": name, "version": version }, (span) => {
 		post({ "type": "busy" });
 
 		const archive = link.tarball(name, version);

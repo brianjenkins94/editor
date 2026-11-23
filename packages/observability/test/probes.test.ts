@@ -5,8 +5,7 @@
 import type { ArchNodeSpec, ArchReport, ArchSink, TrafficKind } from "../src/arch.ts";
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-// From source: node won't strip types from the pnpm copy under node_modules.
-import { createHub, pipe } from "../../hub/src/index.ts";
+import { createHub, pipe } from "./hub.ts";
 import { describeJsonMessage, installNetworkProbes, windowName } from "../src/arch-probes.ts";
 import { collectArchReports, createArchReporter, previewPayload, requestArchSync } from "../src/arch.ts";
 import { elapse, until } from "./until.ts";

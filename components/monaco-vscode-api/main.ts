@@ -13,6 +13,7 @@ import {
 } from "@codingame/monaco-vscode-api";
 import { ICommandService, IExtensionService, ILogService, IViewsService } from "@codingame/monaco-vscode-api/services";
 import { StorageScope, StorageTarget } from "@codingame/monaco-vscode-api/vscode/vs/platform/storage/common/storage";
+import { URI } from "@codingame/monaco-vscode-api/vscode/vs/base/common/uri";
 import { BrowserAuxiliaryWindowService } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/auxiliaryWindow/browser/auxiliaryWindowService";
 import getAuthenticationServiceOverride from "@codingame/monaco-vscode-authentication-service-override";
 import getConfigurationServiceOverride, { initUserConfiguration } from "@codingame/monaco-vscode-configuration-service-override";
@@ -304,7 +305,7 @@ window.MonacoEnvironment = {
 const envOptions: EnvironmentOverride = {
 	// Otherwise, VSCode detect it as the first open workspace folder
 	// which make the search result extension fail as it's not able to know what was detected by VSCode
-	"userHome": vscode.Uri.file("/")
+	"userHome": URI.file("/")
 };
 
 const commonServices: IEditorOverrideServices = {
@@ -457,7 +458,7 @@ export async function boot(options: BootOptions): Promise<void> {
 	const fileSystemProvider = new RegisteredFileSystemProvider(false);
 
 	for (const file of files) {
-		const uri = vscode.Uri.file(file.path);
+		const uri = URI.file(file.path);
 
 		if (file.readonly) {
 			const content = new TextEncoder().encode(file.contents);
@@ -492,7 +493,7 @@ export async function boot(options: BootOptions): Promise<void> {
 			"workspace": {
 				// Single-folder workspace → the explorer shows just this folder by its basename
 				// (e.g. "war2") with its contents at the root, rather than a multi-root wrapper.
-				"folderUri": monaco.Uri.file(workspaceFolder)
+				"folderUri": URI.file(workspaceFolder)
 			}
 		},
 		"developmentOptions": {
@@ -775,9 +776,9 @@ export {
 	FileType
 } from "@codingame/monaco-vscode-files-service-override";
 
-// The workbench's URI class (monaco's `Uri` is the same class the file service uses), for providers that announce
-// changes to paths they weren't handed a URI for.
-export { Uri } from "monaco-editor";
+// The workbench's URI class — the file service's own (monaco's `Uri` is the same class, declared apart) — for providers
+// that announce changes to paths they weren't handed a URI for.
+export { URI as Uri } from "@codingame/monaco-vscode-api/vscode/vs/base/common/uri";
 
 export type {
 	IFileChange,

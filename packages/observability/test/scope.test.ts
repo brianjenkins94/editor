@@ -7,8 +7,7 @@ import type { LogRecord } from "@brianjenkins94/util/logger";
 import * as assert from "node:assert/strict";
 
 import { test } from "node:test";
-// From source: node won't strip types from the pnpm copy under node_modules.
-import { createHub, pipe } from "../../hub/src/index.ts";
+import { createHub, pipe } from "./hub.ts";
 import { ArchitectureStore } from "../src/arch-store.ts";
 import { collectArchReports, createArchReporter, requestArchSync } from "../src/arch.ts";
 import { installHubCollector, LOG_BACKLOG } from "../src/index.ts";

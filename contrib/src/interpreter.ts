@@ -10,7 +10,7 @@ import InterpreterWorker from "./worker?worker&inline";
 
 interface Message { "seq": number; "type": string; "command"?: string; "arguments"?: Record<string, unknown> }
 
-export class InterpreterSession implements vscode.DebugAdapter {
+export class InterpreterSession extends vscode.Disposable implements vscode.DebugAdapter {
 	private readonly emitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
 	readonly onDidSendMessage = this.emitter.event;
 	private seq = 0;
@@ -19,6 +19,8 @@ export class InterpreterSession implements vscode.DebugAdapter {
 	private readonly session: vscode.DebugSession;
 
 	constructor(session: vscode.DebugSession) {
+		// (its own dispose, below, is what disposing it does)
+		super(() => undefined);
 		this.session = session;
 	}
 
@@ -119,7 +121,7 @@ export class InterpreterSession implements vscode.DebugAdapter {
 		this.emitter.fire({ "seq": this.seq, "type": "response", "request_seq": request.seq, "success": true, "command": request.command, ...body === undefined ? {} : { "body": body } });
 	}
 
-	dispose(): void {
+	override dispose(): void {
 		this.worker?.terminate();
 		this.link?.dispose();
 		this.emitter.dispose();

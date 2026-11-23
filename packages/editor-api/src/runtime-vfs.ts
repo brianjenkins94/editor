@@ -66,11 +66,14 @@ function missing(syscall: string, path: string): Error {
 	return Object.assign(new Error(`ENOENT: no such file or directory, ${syscall} '${path}'`), { "code": "ENOENT", "errno": -2, "syscall": syscall, "path": path });
 }
 
+/** The memory a path outside the workspace goes to: what RuntimeVfs asks of it, so any almostnode's VirtualFS will do. */
+export type RuntimeMemory = Pick<VirtualFS, "existsSync" | "statSync" | "readFileSync" | "writeFileSync" | "mkdirSync" | "readdirSync" | "unlinkSync" | "rmdirSync" | "renameSync" | "realpathSync" | "watch">;
+
 export class RuntimeVfs extends VirtualFS {
 	private readonly files: RuntimeFs;
-	private readonly memory: VirtualFS;
+	private readonly memory: RuntimeMemory;
 
-	public constructor(files: RuntimeFs, memory: VirtualFS = new VirtualFS()) {
+	public constructor(files: RuntimeFs, memory: RuntimeMemory = new VirtualFS()) {
 		super();
 		this.files = files;
 		this.memory = memory;
@@ -202,4 +205,17 @@ export class RuntimeVfs extends VirtualFS {
 
 		return workspace;
 	}
+}
+
+/**
+ * A RuntimeVfs as an instance of `VirtualFS`, the caller's almostnode's (for its `createFsShim`, its `createRuntime`):
+ * the same class where they run — a bundle dedupes almostnode (the editor's build.ts, SHARED_PACKAGES) — though its types
+ * are declared twice where editor-api's own copy is installed beside the caller's. Two almostnodes at run time throw.
+ */
+export function asVirtualFS<Same extends object>(vfs: RuntimeVfs, VirtualFSOf: abstract new () => Same): Same {
+	if (vfs instanceof VirtualFSOf) {
+		return vfs;
+	}
+
+	throw new TypeError("RuntimeVfs's VirtualFS isn't its caller's: two copies of almostnode are loaded, where one is shared");
 }

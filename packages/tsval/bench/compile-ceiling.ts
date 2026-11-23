@@ -642,7 +642,8 @@ export function compileProgram(source: ts.SourceFile, globals: Record<string, an
 		return (closure) => {
 			const n = size();
 			const enter = mode.scopes ? (self: any, a: any, b: any, rest: IArguments | undefined): any => {
-				const made = makeScope(inner, closure);
+				// (with scopes, the closure is the Scope it was made in)
+				const made = makeScope(inner, closure as unknown as Scope);
 
 				if (thisSlot !== 0) made.initialize("this", self);
 				if (p0 !== undefined) made.initialize(names[0]!, a);

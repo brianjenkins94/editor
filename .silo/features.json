@@ -1442,6 +1442,7 @@
     "tests": [
       "packages/observability/test/backlog.test.ts",
       "packages/observability/test/errors.test.ts",
+      "packages/observability/test/hub.ts",
       "packages/observability/test/observe.test.ts",
       "packages/observability/test/preview.test.ts",
       "packages/observability/test/realm.test.ts",

@@ -336,9 +336,9 @@ export function watchVersions(vscode: typeof vscodeApi): vscodeApi.Disposable {
 		markReady("versions");
 	});
 
-	return { "dispose": () => {
+	return new vscode.Disposable(() => {
 		for (const listener of [...listeners, watcher]) {
 			listener.dispose();
 		}
-	} };
+	});
 }

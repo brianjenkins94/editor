@@ -2,8 +2,7 @@ import type { ArchReport } from "../src/arch.ts";
 import * as assert from "node:assert/strict";
 
 import { test } from "node:test";
-// From source: node won't strip types from the pnpm copy under node_modules (arch.ts only imports hub TYPES).
-import { createHub, createRpcClient, pipe, serve } from "../../hub/src/index.ts";
+import { createHub, createRpcClient, pipe, serve } from "./hub.ts";
 import { ArchitectureStore } from "../src/arch-store.ts";
 import { collectArchReports, createArchReporter, normalizeSubject, requestArchSync, SILENCE_MS } from "../src/arch.ts";
 import { scopedTransport } from "../src/scope.ts";
