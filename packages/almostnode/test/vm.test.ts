@@ -8,7 +8,6 @@ import * as assert from "node:assert/strict";
 import * as nodeVm from "node:vm";
 import { test } from "node:test";
 
-import "./extensionless.mjs";
 
 const ours = await import("../shims/vm.ts");
 

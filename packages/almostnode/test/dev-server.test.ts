@@ -6,8 +6,6 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
 
-// (almostnode's sources import each other without extensions: see extensionless.mjs.)
-import "./extensionless.mjs";
 
 const { ViteDevServer } = await import("../frameworks/vite-dev-server.ts");
 const { VirtualFS } = await import("../virtual-fs.ts");

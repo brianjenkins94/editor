@@ -8,7 +8,6 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
 
-import "./extensionless.mjs";
 
 const { Runtime } = await import("../runtime.ts");
 const { VirtualFS } = await import("../virtual-fs.ts");

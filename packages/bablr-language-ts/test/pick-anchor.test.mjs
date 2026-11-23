@@ -2,8 +2,7 @@
 // it selects. Run: node --test (against the built bablr dist).
 import assert from "node:assert/strict";
 import test from "node:test";
-// eslint-disable-next-line antfu/no-import-dist -- exercise the shipped artifact (dist is gitignored, local/CI-built)
-import { pickAnchor, spanAnchors } from "../../bablr/dist/index.js";
+import { pickAnchor, spanAnchors } from "../lib/anchors.ts";
 
 /** The text of the span `range` refers to. */
 function picked(source, start, end) {

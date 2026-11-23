@@ -3,8 +3,7 @@
 // Run: node --test (against the built bablr dist).
 import assert from "node:assert/strict";
 import test from "node:test";
-// eslint-disable-next-line antfu/no-import-dist -- intentional: exercise the shipped artifact (dist is gitignored, local-only)
-import { deriveIdentityAsync, editGroups } from "../../bablr/dist/index.js";
+import { deriveIdentityAsync, editGroups } from "../lib/history-identity.ts";
 
 test("deriveIdentityAsync: nodeLines maps every working node to its line, and a node re-anchors as it shifts", async () => {
 	// This is what the comment-annotations surface stands on: a stored note is pinned to a node id, and on reopen we

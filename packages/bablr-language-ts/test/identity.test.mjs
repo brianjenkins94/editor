@@ -1,11 +1,8 @@
 // Identity core: node ids survive reindent + shift, change only where the node itself changed.
-// Run: node packages/bablr-language-ts/test/identity.test.mjs  (imports the built bablr dist).
+// Run: node --import tsx --test packages/bablr-language-ts/test/identity.test.mjs, or in the editor's debugger.
 import assert from "node:assert/strict";
 import test from "node:test";
-// Local integration test against the BUILT bundle (`npm run build` in packages/bablr first): identity.ts pulls in
-// the BABLR parser via spans.ts, which only resolves once bundled. dist is gitignored, so this runs locally, not in CI.
-// eslint-disable-next-line antfu/no-import-dist -- intentional: exercise the shipped artifact
-import { fileDiffIdentity, nodeAtoms, reidentify, reidentifyFromSource } from "../../bablr/dist/index.js";
+import { fileDiffIdentity, nodeAtoms, reidentify, reidentifyFromSource } from "../lib/identity.ts";
 
 const atomOf = (nodes, needle) => nodes.find((n) => n.atom.includes(needle));
 

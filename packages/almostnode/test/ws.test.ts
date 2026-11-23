@@ -5,8 +5,6 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
 
-// (almostnode's sources import each other without extensions: see extensionless.mjs.)
-import "./extensionless.mjs";
 
 const { WebSocket, WebSocketServer } = await import("../shims/ws.ts");
 

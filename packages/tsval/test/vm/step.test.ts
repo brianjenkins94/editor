@@ -82,8 +82,8 @@ test("a leaf operand costs no step of its own: its parent reads it", () => {
 test("a simple tree — leaves under plain operators — is evaluated in its parent's step, converting as JS does", () => {
 	const program = `const log = []; const a = { valueOf() { log.push("a"); return 1; } }; const b = { valueOf() { log.push("b"); return 2; } };
 const r = a + b * -b - (~a > !b); [r, log.join()]`;
-	// eslint-disable-next-line no-eval -- the native result to compare with
-	const native = (0, eval)(`(() => { ${program.replace("[r, log.join()]", "return [r, log.join()];")} })()`);
+	// (what V8 gives: b * -b converts b twice, then a + … converts a, then ~a converts it again; !b converts nothing)
+	const native = [-3, "b,b,a,a"];
 
 	assert.deepStrictEqual(createVM(program).vm.run(), native, "the same value and the same valueOf calls, in order");
 

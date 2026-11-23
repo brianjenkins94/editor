@@ -4,8 +4,7 @@
 // properties that make it the right anchor. Run: node --test (against the built bablr dist).
 import assert from "node:assert/strict";
 import test from "node:test";
-// eslint-disable-next-line antfu/no-import-dist -- exercise the shipped artifact (dist is gitignored, local/CI-built)
-import { spanAnchors } from "../../bablr/dist/index.js";
+import { spanAnchors } from "../lib/anchors.ts";
 
 /** The Statement-span anchors whose (trimmed) source text matches, in document order. */
 const stmts = (src, text) => spanAnchors(src).filter((anchor) => anchor.type === "Statement" && src.slice(anchor.start, anchor.end).trim() === text);

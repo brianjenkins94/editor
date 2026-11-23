@@ -1,4 +1,4 @@
-// A resolve hook for tests, registered as this is imported (a test imports it before almostnode's sources):
+// A resolve hook for `npm test` in Node, registered by its `--import` (the editor's debugger needs none: its runtime resolves both itself):
 // almostnode's sources import each other without extensions (they're bundled, not run as is) — resolve such a relative
 // import to its .ts file, or a directory's index.ts, so `node --test` can load them. And unenv's Node modules, and
 // Node's code on npm (readable-stream), import Node's built-ins: those are unenv's own, as almostnode's bundles resolve
