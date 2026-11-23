@@ -63,14 +63,12 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      would hit: an ES module's own top-level `exports` (unenv's net.mjs builds one) took the CommonJS emit's name, and a
      run's console had only seven of Node's methods.
    - **almostnode's Runtime tests** (async-context, builtins, modules, run-global): a run has an `eval` since 2026-11-23
-     (*Decisions*, *Code from strings in a run*), and they run — 54 of 59 in the first three files passing. Each of the
-     5 left is judged as the rest were: async-context's two (a store read back `b` where `d` was set, through awaits),
-     builtins' parseArgs (it reads a package file by its path, where a run's packages are in memory), modules'
-     `globalFor` (an inner Runtime's "the real global" is the run's) and its backpressure test.
-   - **A run's `eval` sees almostnode's run global, not the program's** (since 86c0b147): in a run, code from a string
-     gets `globalThis` (and its free names) from the run global packages share, while the program's own global object is
-     tsval's, with the run's gated stand-ins on it — `eval("globalThis") === globalThis` is false, as Node's isn't. Done
-     when code from a string resolves through the program's global first, then the run's.
+     (*Decisions*, *Code from strings in a run*), whose names are the program's global object's, then the run's — so
+     `eval("globalThis") === globalThis`, and async-context's two, modules' `globalFor` and run-global's pass. Each of
+     the 2 left is judged as the rest were: builtins' parseArgs (it reads a package's file by the path `require.resolve`
+     gives, where a run's packages are in the runtime's memory and the program's fs has its own) and modules'
+     backpressure (its one EventEmitter is its test loader's doing, `--import ./test/extensionless.mjs`, which a run
+     doesn't take).
    - **tsval's own tests inside tsval** (vm/event-loop's ordering, vm/stacks' `async` frames, vm/stepped-async's
      thenable's context): each holds tsval to V8 and passes in Node; run in the editor, the tsval under test leans on the
      one running it for its host promises' timing, so what fails is the outer one's fidelity, not the subject — one

@@ -41,7 +41,8 @@ be skipped (*Skip Waits*) or made real. A run's globals are Node's, with what va
 other, and nothing reaches the origin's other tabs, the editor's own included, as the browser's would. And a `fetch` to a
 server listening in the run is answered there (loopback.ts), as Node's loopback is — never sent out. And a run has an
 `eval` (the user, 2026-11-23): code from a string compiled as global code in the run's scope, as almostnode compiles a
-package's (almostnode's `runEval`), `this` and `globalThis` the run's. tsval leaves `eval` to its host — a direct eval's
+package's (almostnode's `runEval`), its free names the program's global object's first, then what packages set on the
+run's, and `this` and `globalThis` the program's. tsval leaves `eval` to its host — a direct eval's
 own scope can't be modeled by an interpreter that isn't the host's — so either kind is global code here, not the
 caller's scope.
 

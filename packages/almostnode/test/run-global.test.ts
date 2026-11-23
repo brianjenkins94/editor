@@ -61,3 +61,23 @@ test("code from a string is the run's: its globals read and set, `this` the run'
 	assert.equal(evaluate.name, "eval");
 	assert.throws(() => evaluate("throw new TypeError('from the string')"), TypeError);
 });
+
+test("code from a string sees the program's globals: its global object first, then the run's — none of the host's — and `globalThis` is the program's", () => {
+	const run = createRunGlobal();
+	const table: Record<PropertyKey, unknown> = { "Math": Math, "answer": 42 };
+
+	table["globalThis"] = table;
+	run.own["shared"] = "from a package";
+
+	const evaluate = runEval(run, () => table);
+
+	assert.equal(evaluate("globalThis"), table, "the program's own global object");
+	assert.equal(evaluate("this"), table);
+	assert.equal(evaluate("answer + 1"), 43);
+	assert.equal(evaluate("shared"), "from a package");
+	assert.equal(evaluate("typeof setTimeout"), "undefined", "the host's isn't the program's");
+	evaluate("made = 1; shared = 'changed'");
+	assert.equal(table["made"], 1, "a name made is the program's global's, as sloppy code makes one");
+	assert.equal(run.own["shared"], "changed", "a run's own is set where it is");
+	assert.equal(evaluate("eval('answer')"), 42, "an eval inside it sees the same");
+});

@@ -88,16 +88,41 @@ export function createRunGlobal(host: typeof globalThis = globalThis): RunGlobal
 
 /**
  * An `eval` for a run whose host interprets its program (the tsval debugger, which leaves code from strings to its host:
- * tsval/src/globals.ts): `source` evaluated as global code in the run's global scope, as almostnode compiles a package's
- * code — natively, `this` the run's global, its completion value returned — so what it reads and sets is the run's, not
- * the host's. A direct eval's caller's own scope isn't the host's to give: either kind is global code here. Anything but a
- * string is returned as it is, as eval does.
+ * tsval/src/globals.ts): `source` evaluated as global code, natively, its completion value returned — seeing the globals
+ * the program sees. Its free names are the program's global object's (`program()`, the interpreter's: what
+ * `globalThis` is to the program), then the run's own (what packages set there), and nothing of the host's beyond
+ * them; `this` and `globalThis` are the program's global object; a name assigned is set where the program's would be,
+ * or made on its global object, as sloppy code makes one. Without a program, the run's global stands for it. A direct
+ * eval's caller's own scope isn't the host's to give: either kind is global code here. Anything but a string is
+ * returned as it is, as eval does.
  */
-export function runEval(run: RunGlobal): (source: unknown) => unknown {
-	const self = "self" in globalThis ? "var self = $global;" : "";
-	// eslint-disable-next-line no-eval -- code from strings, given to a run on purpose (packages/editor/RUNNING.md): compiled once, in the run's scope
-	const compile = (0, eval)(`(function($scope, $global) { with ($scope) { return (function() { var globalThis = $global; var global = $global; ${self} return eval(arguments[0]); }).call($global, arguments[2]); } })`) as (this: unknown, scope: object, global: object, source: string) => unknown;
-	const evaluate = (source: unknown): unknown => (typeof source === "string" ? compile.call(run.global, run.scope, run.global, source) : source);
+export function runEval(run: RunGlobal, program: () => Record<PropertyKey, unknown> | undefined = () => undefined): (source: unknown) => unknown {
+	// (`eval` and `arguments` stay the wrapper's: the eval inside is a direct one, given the source as its argument)
+	const WRAPPER = new Set<PropertyKey>(["eval", "arguments"]);
+	const names = (global: Record<PropertyKey, unknown>): object => new Proxy(Object.create(null) as object, {
+		"has": (_target, key) => typeof key === "string" && !WRAPPER.has(key),
+		"get": (_target, key) => (key === Symbol.unscopables ? undefined : key in global ? global[key] : Object.hasOwn(run.own, key) ? run.own[key] : undefined),
+		"set": (_target, key, value) => {
+			if (!(key in global) && Object.hasOwn(run.own, key)) {
+				run.own[key] = value;
+			} else {
+				global[key] = value;
+			}
+
+			return true;
+		}
+	});
+	// eslint-disable-next-line no-eval -- code from strings, given to a run on purpose (packages/editor/RUNNING.md): its wrapper compiled once
+	const compile = (0, eval)("(function($names) { return function() { with ($names) { return eval(arguments[0]); } }; })") as (scope: object) => (this: unknown, source: string) => unknown;
+	const evaluate = (source: unknown): unknown => {
+		if (typeof source !== "string") {
+			return source;
+		}
+
+		const global = program() ?? (run.global as unknown as Record<PropertyKey, unknown>);
+
+		return compile(names(global)).call(global, source);
+	};
 
 	return Object.defineProperty(evaluate, "name", { "value": "eval" });
 }

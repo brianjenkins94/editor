@@ -42,7 +42,7 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 	};
 
 	state.runGlobal = createRunGlobal();
-	state.runEval = runEval(state.runGlobal);
+	state.runEval = runEval(state.runGlobal, () => state.evaluating?.rootScope.globalObject);
 	state.runGlobal.global.WebSocket = webSocketGlobal(globalThis.WebSocket);
 	const socketsSeen = state.editorLink;
 
