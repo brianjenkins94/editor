@@ -85,3 +85,19 @@ export function createRunGlobal(host: typeof globalThis = globalThis): RunGlobal
 
 	return { "global": global, "own": own, "scope": scope };
 }
+
+/**
+ * An `eval` for a run whose host interprets its program (the tsval debugger, which leaves code from strings to its host:
+ * tsval/src/globals.ts): `source` evaluated as global code in the run's global scope, as almostnode compiles a package's
+ * code — natively, `this` the run's global, its completion value returned — so what it reads and sets is the run's, not
+ * the host's. A direct eval's caller's own scope isn't the host's to give: either kind is global code here. Anything but a
+ * string is returned as it is, as eval does.
+ */
+export function runEval(run: RunGlobal): (source: unknown) => unknown {
+	const self = "self" in globalThis ? "var self = $global;" : "";
+	// eslint-disable-next-line no-eval -- code from strings, given to a run on purpose (packages/editor/RUNNING.md): compiled once, in the run's scope
+	const compile = (0, eval)(`(function($scope, $global) { with ($scope) { return (function() { var globalThis = $global; var global = $global; ${self} return eval(arguments[0]); }).call($global, arguments[2]); } })`) as (this: unknown, scope: object, global: object, source: string) => unknown;
+	const evaluate = (source: unknown): unknown => (typeof source === "string" ? compile.call(run.global, run.scope, run.global, source) : source);
+
+	return Object.defineProperty(evaluate, "name", { "value": "eval" });
+}

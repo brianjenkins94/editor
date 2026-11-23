@@ -110,6 +110,7 @@ export interface State {
 	"runtime": Runtime | undefined;
 	"programFsFor": ((cwd: string) => FsShim) | undefined;
 	"local": Local | undefined;
+	"runEval": ((source: unknown) => unknown) | undefined;
 	"nodeGlobals": Record<string, unknown>;
 	"runGlobal": RunGlobal | undefined;
 	"programBuiltins": Record<string, unknown>;
@@ -157,6 +158,7 @@ export const state: State = {
 	"runtime": undefined,
 	"programFsFor": undefined,
 	"local": undefined,
+	"runEval": undefined,
 	"live": false,
 	"recordedResults": {},
 	"runLayer": undefined,

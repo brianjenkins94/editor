@@ -62,9 +62,12 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      mailbox failing in under a second, its Worker saying so. Settling them found and fixed two more gaps a program
      would hit: an ES module's own top-level `exports` (unenv's net.mjs builds one) took the CommonJS emit's name, and a
      run's console had only seven of Node's methods.
-   - **almostnode's Runtime tests** (async-context, builtins, modules, run-global): almostnode is an evaluator — it
-     compiles module code with an indirect `eval` — and tsval leaves `eval` out on purpose, code from strings being the
-     host's to give (tsval/src/globals.ts). Waits on a decision (*Decisions*, *Code from strings in a run*).
+   - **almostnode's Runtime tests** (async-context, builtins, modules, run-global): a run has an `eval` since 2026-11-23
+     (*Decisions*, *Code from strings in a run*), and they run — 54 of 59 in the first three files passing. Each of the
+     5 left is judged as the rest were: async-context's two (a store read back `b` where `d` was set, through awaits),
+     builtins' parseArgs (it reads a package file by its path, where a run's packages are in memory), modules'
+     `globalFor` (an inner Runtime's "the real global" is the run's) and its backpressure test. And run-global's run
+     ended with the editor's tab gone: done when it's run alone and what took the tab said.
    - **tsval's own tests inside tsval** (vm/event-loop's ordering, vm/stacks' `async` frames, vm/stepped-async's
      thenable's context): each holds tsval to V8 and passes in Node; run in the editor, the tsval under test leans on the
      one running it for its host promises' timing, so what fails is the outer one's fidelity, not the subject — one
@@ -221,10 +224,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Decisions
 
-- **Code from strings in a run** (queue item 4): does a debug run give a program an indirect `eval` (and `new
-  Function`'s), as Node does — which would bring almostnode's Runtime tests in, and any program that compiles code — or
-  do those stay outside, almostnode's tests in Node with that reason? tsval left it out on purpose: a direct `eval` can't
-  be modeled by an interpreter that isn't the host's.
+- **Code from strings in a run** (queue item 4). Decided 2026-11-23: a debug run gives a program `eval`, as Node does —
+  compiled in the run's scope (RUNNING.md, *Deterministic*); a direct eval's own scope isn't modeled, so it's global code.
 - **Item 4's verdicts** (queue item 4). Decided 2026-11-23, as proposed: what stays outside, the host its subject (in
   RUNNING.md, *Tests*); the tests that lacked only scaffolding change; the gaps a person's program would hit are fixed;
   a run has a `BroadcastChannel` of its own, Node's being the process's.

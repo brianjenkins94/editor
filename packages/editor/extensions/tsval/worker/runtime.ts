@@ -21,7 +21,7 @@ export function runtimeReady(workspace: SharedArrayBuffer | undefined): Promise<
 }
 
 async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Runtime> {
-	const [{ createFsShim, createRunGlobal, getServerBridge, observeSockets, "packageDirOf": dirOf, webSocketGlobal }, { answerServer, programGlobals, serverOn, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../../shared/workspace-runtime"), import("../../../shared/zenfs-vfs.js"), import("@brianjenkins94/editor-api/runtime-vfs")]);
+	const [{ createFsShim, createRunGlobal, getServerBridge, observeSockets, "packageDirOf": dirOf, runEval, webSocketGlobal }, { answerServer, programGlobals, serverOn, workspaceRuntime }, zenfs, { RuntimeVfs }] = await Promise.all([import("@brianjenkins94/almostnode"), import("../../../shared/workspace-runtime"), import("../../../shared/zenfs-vfs.js"), import("@brianjenkins94/editor-api/runtime-vfs")]);
 
 	if (state.editorLink !== undefined) {
 		const link = state.editorLink;
@@ -42,6 +42,7 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 	};
 
 	state.runGlobal = createRunGlobal();
+	state.runEval = runEval(state.runGlobal);
 	state.runGlobal.global.WebSocket = webSocketGlobal(globalThis.WebSocket);
 	const socketsSeen = state.editorLink;
 

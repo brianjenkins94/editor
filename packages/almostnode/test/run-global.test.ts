@@ -1,7 +1,7 @@
 /**
  * A run's own global (run-global.ts; RuntimeOptions.global): what its modules set on `globalThis` — a Proxy over a host
  * object, as just-bash's sandbox puts there, or a polyfill — is theirs, seen by their free names and their `globalThis`,
- * and not the host's.
+ * and not the host's. And code from a string (`runEval`) is the run's too.
  *
  *   node --test test/run-global.test.ts
  */
@@ -11,7 +11,7 @@ import { test } from "node:test";
 
 const { Runtime } = await import("../runtime.ts");
 const { VirtualFS } = await import("../virtual-fs.ts");
-const { createRunGlobal } = await import("../run-global.ts");
+const { createRunGlobal, runEval } = await import("../run-global.ts");
 
 test("what a run's module sets on globalThis is the run's: its free names see it, the host's global doesn't", () => {
 	const run = createRunGlobal();
@@ -44,4 +44,20 @@ test("without a run's global, a module's globalThis is the host's, as before", (
 	const runtime = new Runtime(new VirtualFS());
 
 	assert.equal(runtime.execute(`module.exports = globalThis;`, "/host.js").exports, globalThis);
+});
+
+test("code from a string is the run's: its globals read and set, `this` the run's global, its value returned — not the host's", () => {
+	const run = createRunGlobal();
+	const evaluate = runEval(run);
+
+	run.global.seen = 41;
+	assert.equal(evaluate("seen + 1"), 42);
+	evaluate("globalThis.made = 'here'; this.also = true");
+	assert.equal(run.own["made"], "here");
+	assert.equal(run.own["also"], true);
+	assert.equal((globalThis as Record<string, unknown>)["made"], undefined, "not the host's");
+	assert.equal(evaluate("(function() { return typeof made; })()"), "string");
+	assert.deepEqual(evaluate({ "not": "a string" }), { "not": "a string" });
+	assert.equal(evaluate.name, "eval");
+	assert.throws(() => evaluate("throw new TypeError('from the string')"), TypeError);
 });

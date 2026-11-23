@@ -1010,6 +1010,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 			"globals": {
 				...state.nodeGlobals,
 				"BroadcastChannel": runBroadcastChannel(),
+				...state.runEval === undefined ? {} : { "eval": state.runEval },
 				...surface.globals,
 				"__editorTest": testTold,
 				"__editorPlaywright": editorPlaywright
