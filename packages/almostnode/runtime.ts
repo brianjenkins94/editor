@@ -1858,6 +1858,18 @@ export class Runtime {
 	 *  (ERR_REQUIRE_ASYNC_MODULE). Its evaluation, while it's still going, is what's returned, for the importer to wait
 	 *  on before its own body runs; undefined when there's nothing to wait for. */
 	imported(specifier: string, fromDir: string = this.process.cwd(), requester: Requester = "program"): Promise<void> | undefined {
+		// (loaded as a require loads it, as before — import's own path loads a module's imports ahead of it, which a cycle of
+		// unenv's modules can't take — unless it's a module with top-level await, which only an import can wait for)
+		try {
+			this.require(specifier, fromDir, requester);
+
+			return undefined;
+		} catch (error) {
+			if ((error as { "code"?: unknown } | undefined)?.code !== "ERR_REQUIRE_ASYNC_MODULE") {
+				throw error;
+			}
+		}
+
 		importing += 1;
 
 		let exported: unknown;

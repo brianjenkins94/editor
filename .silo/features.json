@@ -2388,11 +2388,13 @@
       "packages/editor/extensions/tsval/worker/runtime.ts",
       "packages/editor/extensions/tsval/worker/session.ts",
       "packages/editor/extensions/tsval/worker/broadcast.ts",
+      "packages/editor/extensions/tsval/worker/guest-console.ts",
       "packages/editor/extensions/tsval/worker/state.ts"
     ],
     "tests": [
       "packages/editor/test/in-editor/debugger.spec.mjs",
-      "packages/editor/test/run-broadcast.test.mjs"
+      "packages/editor/test/run-broadcast.test.mjs",
+      "packages/editor/test/guest-console.test.mjs"
     ]
   },
   "Surface styles and Stitches": {

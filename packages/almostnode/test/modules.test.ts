@@ -442,6 +442,18 @@ test("a package named with a trailing slash is its folder, read by its package.j
 	assert.equal(runtime.execute("module.exports = require('decoder/');", "/workspace/main.js").exports, "the package");
 });
 
+test("an ES module's own `exports` is its own, as unenv's net.mjs builds one for its default — not the loader's", () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/netlike/package.json": JSON.stringify({ "name": "netlike", "type": "module", "main": "index.js" }),
+		"/workspace/node_modules/netlike/index.js": "export const isIP = (host) => host === '127.0.0.1' ? 4 : 0;\nconst exports = { isIP };\nexport { exports as all };\nexport default exports;\n"
+	});
+	const netlike = runtime.execute("module.exports = require('netlike');", "/workspace/main.js").exports as { "isIP": (host: string) => number; "all": { "isIP": unknown }; "default": { "isIP": unknown } };
+
+	assert.equal(netlike.isIP("127.0.0.1"), 4);
+	assert.equal(netlike.default.isIP, netlike.isIP, "its default, the object it built, keeping its property's name");
+	assert.equal(netlike.all, netlike.default);
+});
+
 test("require('.') and require('..') are the folder and its parent, as Node reads them", () => {
 	const runtime = runtimeWith({
 		"/workspace/node_modules/tool/package.json": JSON.stringify({ "name": "tool", "main": "lib/index.js" }),

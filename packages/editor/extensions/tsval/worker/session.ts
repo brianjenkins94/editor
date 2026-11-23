@@ -15,6 +15,7 @@ import { copySums } from "../site-sums";
 import { runBroadcastChannel } from "./broadcast";
 import { calledSeen, observeSite } from "./busy";
 import { armCapabilities, capabilityAt, capabilitySurface, functionsIn, tellEffects, watchedOf } from "./gate";
+import { consoleOf } from "./guest-console";
 import { dropUnpinned, readPins } from "./install";
 import { packagesRan, readBaseline } from "./package-calls";
 import { EXITED, held, listening, readsStdin } from "./process";
@@ -279,31 +280,16 @@ function asString(value: unknown): string {
 }
 
 export function guestConsole(): Record<string, (...args: unknown[]) => void> {
-	const write = (stream: "stdout" | "stderr", method: string) => (...args: unknown[]): void => {
+	return consoleOf((stream, method, args, indent) => {
 		if (state.probing === undefined) {
 			state.evaluating?.impure("effect", "console." + method);
 			post({
 				"type": "output",
-				"text": args.map(formatLogArg).join(" "),
+				"text": indent + args.map(formatLogArg).join(" ").replaceAll("\n", "\n" + indent),
 				"stream": stream
 			});
 		}
-	};
-
-	return Object.fromEntries(([
-		"log",
-		"info",
-		"debug",
-		"dir",
-		"warn",
-		"error",
-		"trace"
-	] as const).map((method) => [
-		method,
-		write(["warn", "error", "trace"].includes(method)
-			? "stderr"
-			: "stdout", method)
-	]));
+	});
 }
 
 export function guestStream(stream: "stdout" | "stderr"): { "isTTY": boolean; "write": (chunk: unknown, ...rest: unknown[]) => boolean } {

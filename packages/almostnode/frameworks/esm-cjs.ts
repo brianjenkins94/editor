@@ -11,28 +11,44 @@
 
 import ts from "typescript";
 
-/** What a module's own `require` (`const require = createRequire(import.meta.url)`) is renamed to: the emit's imports
- *  call `require`, which must stay the loader's — in Node an ES module's imports never go through a local `require`. */
-const OWN_REQUIRE = "require$own";
+/** The names the emit uses for the loader's — its imports call `require`, its exports assign `exports` — and what a
+ *  module's own top-level binding of one is renamed to: in Node an ES module's `require`, `exports` and `module` are
+ *  its own (`const require = createRequire(import.meta.url)`; unenv's net.mjs builds `const exports = {…}` for its
+ *  default), never the loader's, so they can't take the emit's names. */
+const OWN = new Map([["require", "require$own"], ["exports", "exports$own"], ["module", "module$own"]]);
 
-/** `code` with the module's own top-level `require` binding — and every reference to it — renamed, when it has one. */
-function renameOwnRequire(code: string, sourceFile: ts.SourceFile): string {
-	const declares = sourceFile.statements.some((statement) => (ts.isVariableStatement(statement) && statement.declarationList.declarations.some((declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === "require"))
-		|| (ts.isFunctionDeclaration(statement) && statement.name?.text === "require"));
+/** The names of `statement`'s top-level bindings. */
+function bound(statement: ts.Statement): string[] {
+	if (ts.isVariableStatement(statement)) {
+		return statement.declarationList.declarations.flatMap((declaration) => (ts.isIdentifier(declaration.name) ? [declaration.name.text] : []));
+	}
 
-	if (!declares) {
+	return (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name !== undefined ? [statement.name.text] : [];
+}
+
+/** `code` with the module's own top-level `require`, `exports` or `module` binding — and every reference to it — renamed,
+ *  when it has one; a shorthand property keeps its name (`{ exports }`, `{ exports: exports$own }`). */
+function renameOwn(code: string, sourceFile: ts.SourceFile): string {
+	const own = new Set(sourceFile.statements.flatMap(bound).filter((name) => OWN.has(name)));
+
+	if (own.size === 0) {
 		return code;
 	}
 
-	const at: number[] = [];
+	const edits: [number, number, string][] = [];
 	const visit = (node: ts.Node): void => {
-		if (ts.isIdentifier(node) && node.text === "require") {
+		if (ts.isIdentifier(node) && own.has(node.text)) {
 			const { parent } = node;
+			const to = OWN.get(node.text)!;
 			const isPropertyName = (ts.isPropertyAccessExpression(parent) && parent.name === node)
 				|| ((ts.isPropertyAssignment(parent) || ts.isMethodDeclaration(parent) || ts.isPropertyDeclaration(parent) || ts.isGetAccessor(parent) || ts.isSetAccessor(parent)) && parent.name === node);
 
-			if (!isPropertyName) {
-				at.push(node.getStart(sourceFile));
+			if (ts.isShorthandPropertyAssignment(parent) && parent.name === node) {
+				edits.push([node.getStart(sourceFile), node.getEnd(), `${node.text}: ${to}`]);
+			} else if (ts.isExportSpecifier(parent) && parent.propertyName === undefined && parent.name === node) {
+				edits.push([node.getStart(sourceFile), node.getEnd(), `${to} as ${node.text}`]);
+			} else if (!isPropertyName) {
+				edits.push([node.getStart(sourceFile), node.getEnd(), to]);
 			}
 		}
 
@@ -43,8 +59,8 @@ function renameOwnRequire(code: string, sourceFile: ts.SourceFile): string {
 
 	let renamed = code;
 
-	for (const start of at.sort((left, right) => right - left)) {
-		renamed = renamed.slice(0, start) + OWN_REQUIRE + renamed.slice(start + "require".length);
+	for (const [start, end, text] of edits.sort((left, right) => right[0] - left[0])) {
+		renamed = renamed.slice(0, start) + text + renamed.slice(end);
 	}
 
 	return renamed;
@@ -54,7 +70,7 @@ function renameOwnRequire(code: string, sourceFile: ts.SourceFile): string {
 export function transformEsmToCjsSimple(code: string): string {
 	const sourceFile = ts.createSourceFile("module.tsx", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
-	return ts.transpileModule(renameOwnRequire(code, sourceFile), {
+	return ts.transpileModule(renameOwn(code, sourceFile), {
 		"fileName": "module.tsx",
 		"compilerOptions": { "module": ts.ModuleKind.CommonJS, "target": ts.ScriptTarget.ESNext, "esModuleInterop": true, "jsx": ts.JsxEmit.Preserve, "verbatimModuleSyntax": false, "isolatedModules": true }
 	}).outputText;

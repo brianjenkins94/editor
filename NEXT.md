@@ -57,7 +57,14 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    never ran nor failed, EADDRINUSE, loopback fetch, a run's own BroadcastChannel, metrics' zero interval), and tsval's
    `then` forwarded by call, apply or Reflect.apply, found settling one. Left, each **done when** as it says:
    - **Count the changed files again** in a fresh instance (a clone of main now: the throwaway one can't pull without
-     signing in). Done when RUNNING.md's count is that run's.
+     signing in). Done when RUNNING.md's count is that run's. Counted 2026-11-23, the 32 changed files: api's, bablr's,
+     cdp-memory-realms, silo's test-command, hub's, rtc, probes, metrics, runtime-vfs and debug-mcp's agent green;
+     mailbox failing in under a second, its Worker saying so. Settling them found and fixed two more gaps a program
+     would hit: an ES module's own top-level `exports` (unenv's net.mjs builds one) took the CommonJS emit's name, and a
+     run's console had only seven of Node's methods.
+   - **almostnode's Runtime tests** (async-context, builtins, modules, run-global): almostnode is an evaluator — it
+     compiles module code with an indirect `eval` — and tsval leaves `eval` out on purpose, code from strings being the
+     host's to give (tsval/src/globals.ts). Waits on a decision (*Decisions*, *Code from strings in a run*).
    - **tsval's own tests inside tsval** (vm/event-loop's ordering, vm/stacks' `async` frames, vm/stepped-async's
      thenable's context): each holds tsval to V8 and passes in Node; run in the editor, the tsval under test leans on the
      one running it for its host promises' timing, so what fails is the outer one's fidelity, not the subject — one
@@ -183,7 +190,7 @@ packages/editor (`--all`, `--runs N`, `--json`).
   without its comments, is the same code before and after (TypeScript's printer, 244 files). Not seen before today.
 
 - **live-runs.spec misses in slow full runs** (here: "F5 just after a save" without its Debug Console output, 2026-11-19
-  in 237 s against ~175, 2026-11-20 in 282 s, and 2026-11-22 twice, once in 239 s; "a rule gives it a value" without its value, 2026-11-23 twice, 2026-11-20 in
+  in 237 s against ~175, 2026-11-20 in 282 s, and 2026-11-22 twice, once in 239 s; "a rule gives it a value" without its value, 2026-11-23 three times, F5's with it once, 2026-11-20 in
   253 s).
   Each passes alone (15 of 15 for the spec, 2026-11-20) and in the next full run. On CI once (0e885fc4's `specs-2`):
   "Pin…", its F5 run given "seen" at its stop and the margin showing a live run's `skipped = exec ls` instead — a live
@@ -214,6 +221,10 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Decisions
 
+- **Code from strings in a run** (queue item 4): does a debug run give a program an indirect `eval` (and `new
+  Function`'s), as Node does — which would bring almostnode's Runtime tests in, and any program that compiles code — or
+  do those stay outside, almostnode's tests in Node with that reason? tsval left it out on purpose: a direct `eval` can't
+  be modeled by an interpreter that isn't the host's.
 - **Item 4's verdicts** (queue item 4). Decided 2026-11-23, as proposed: what stays outside, the host its subject (in
   RUNNING.md, *Tests*); the tests that lacked only scaffolding change; the gaps a person's program would hit are fixed;
   a run has a `BroadcastChannel` of its own, Node's being the process's.
