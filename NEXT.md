@@ -49,26 +49,34 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the
    API stood in for) and performance.mjs (budgets, from outside). The unit tests, counted again 2026-11-23 (every one
    in a throwaway instance's debugger, `runs_tests`, a package at a time: packages/tsval/vendor aside, 163 files):
-   104 green, 1,550 tests passing and 43 failing in the files that load. The user's rule (2026-11-16): test the subject
-   directly before shimming the runtime. Each is **done when** its tests run in the debugger, or stay outside with the
-   reason in RUNNING.md, *Tests*:
-   - **The Worker runtime**: `workerd` won't load ("Unsupported platform"), so 21 of packages/api's 23 files don't.
-   - **`registerHooks`** (`node:module`): 8 of almostnode's 10.
-   - **Spawning a process** (`child_process` isn't supported): tsval's vm/handler-modules (14 tests), editor's
-     git-push and node-test, silo's cli and test-command. With them, `/tmp` writes: an approval allows one call, so a
-     file that writes there again is refused without asking.
-   - **`BroadcastChannel`**, left out of a run on purpose (it reaches every tab of the origin): a test each in
-     hub/hub, hub/rtc and observability/probes.
-   - **playwright-core in the runtime**: unenv's `net.getDefaultAutoSelectFamilyAttemptTimeout` isn't implemented —
-     playwright's engine and request, debug-mcp's cdp-memory.
-   - **tsval's own gaps**, a test or two each: the order of a microtask against `then` (vm/event-loop), an `async`
-     caller's frame in a stack (vm/stacks), `eval` (vm/step), a returned thenable's async context
-     (vm/stepped-async).
-   - **Stalls**: editor-api/mailbox (16 minutes), debug-mcp/sessions, hub/model, tsval/differential/test262.
-   - **One each**: bablr-language-ts's 4 import `../../bablr/dist`, a build's output; editor-api/runtime-vfs's
-     readable-stream requires `string_decoder/` (a trailing slash); api/errors `require`s an ES module with top-level
-     await; observability/metrics' "in proportion" assertion; debug-mcp's agent (a request to 127.0.0.1 refused),
-     page-tools and tabs (waits that time out) and outdated (a request timed out).
+   104 green, 1,550 tests passing and 43 failing in the files that load. What holds the rest out was then judged test
+   by test — does the test need it to test what it's meant to? (the user, 2026-11-16 and again 2026-11-23: not
+   blindly implemented, as before) — proposed 2026-11-23, waiting on the user's word (*Decisions*, *Item 4's verdicts*).
+   Each is **done when** done as its verdict says, RUNNING.md, *Tests* saying why for what stays outside:
+   - **Stays outside — the host is the subject** (to RUNNING.md, beside git-push and node-test): packages/api's suite
+     (it tests the Worker in workerd: Durable Objects, D1, R2, rate limiters, crons); almostnode's builtins floor test
+     and vm.test (Node's own modules are the reference); playwright's engine and request tests and debug-mcp
+     cdp-memory's second (a launched Chromium is the reference); tsval's vm/handler-modules (a fresh Node loader per
+     module); silo's cli tests and test-command's three (checked against real git); editor-api's mailbox (a second
+     thread blocked in `Atomics.wait`); tsval's test262 (Node's fresh realms as the control); debug-mcp's sessions (two
+     processes contending for a port).
+   - **The test changes — what's missing is its scaffolding**: api's 13 tests of pure functions (`permissionsOf`,
+     `scrub`, the password helpers…) out of their wrangler files; almostnode's 8 files lose `import "./extensionless.mjs"`
+     (a Node loader hook doing what the runtime does; into `npm test`'s command instead); bablr-language-ts's 4 import
+     `../lib/*.ts`, not `../../bablr/dist` (the build adds nothing they check); cdp-memory's first and third tests out
+     of its Chromium `before()`; tsval's vm/step computes its expected value without `eval`.
+   - **The runtime or the code is wrong — a person's program would hit it**: almostnode doesn't read a package's `main`
+     for `require("string_decoder/")` (a trailing slash; readable-stream does it); a module with top-level `await` reached
+     by a static import fails (Node waits on it); a Worker unenv constructs never runs and never errors, so a program
+     waiting on it hangs (mailbox's 16 minutes); a run's `fetch` to its own localhost server goes to the real network
+     (debug-mcp's agent test); `net`'s `listen` never says a port is taken (Vite's next-port fallback needs it);
+     observability's metrics.ts divides by a zero interval (`performance.now()` can repeat), the test right as it is.
+     And `BroadcastChannel`: left out of runs since it reaches every tab — Node's is the process's own, so a run-local
+     one is the faithful equivalent (hub, rtc, probes' three tests); a decision, since RUNNING.md says it's left out.
+   - **Not settled — a run would say**: tsval's microtask order through `Reflect.apply(p.then…)` (vm/event-loop), an
+     `async` caller's frame (vm/stacks), a returned thenable's `then` called twice (vm/stepped-async: a bug if a person's
+     program sees it); hub/model (1000 seeds — cost, or a wait?); debug-mcp's page-tools, tabs and outdated (wall-clock
+     limits on interpreted code, or a socket?).
 
 ## Watching
 
@@ -216,6 +224,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Decisions
 
+- **Item 4's verdicts** (queue item 4): the verdicts there, test by test — what stays outside and why, which tests
+  change, which runtime gaps are real, and whether a run gets a `BroadcastChannel` of its own. Proposed 2026-11-23.
 - **How few tests is enough** (queue item 2): the target its replay is held to — how many of 80 commits may still run
   everything. Suggested: under 10, the rest of what's left being package.json and the workflows, which run everything
   by design.
