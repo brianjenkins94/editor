@@ -39,6 +39,19 @@ for (const testCase of loadTest262(SAMPLE_ROOT)) {
 	});
 }
 
+// The async ones again with stepped async: their promise jobs the machine's own (src/promises.ts), held to Node's.
+for (const testCase of [...loadTest262(SAMPLE_ROOT)].filter((each) => each.meta.flags.includes("async"))) {
+	const gap = knownGap(testCase.id);
+
+	test(`test262 stepped ${testCase.id}`, gap === undefined ? {} : { "todo": gap }, async () => {
+		const outcome = await runTest262(SAMPLE_ROOT, testCase, true);
+
+		if (outcome.kind === "fail") {
+			assert.fail(`${outcome.reason}\n--- ${testCase.id} (stepped) ---\n${testCase.meta.description ?? ""}`);
+		}
+	});
+}
+
 after(() => {
 	console.log(`test262 sample: ${tally.total} tests — ${tally.pass} pass, ${tally.todo} known gaps (todo), ${tally.inconclusive} inconclusive (Node fails too), ${tally.skipped} skipped by policy`);
 });

@@ -101,7 +101,13 @@ const { vm: typed, checker } = createTypedVM(code, { hostGuard: { beforeCall: (c
 With `steppedAsync`, async code runs where a host steps: an async function runs on the main stack until its first
 `await`, where its frames are cut off as a pending fiber; when what it awaited settles, the fiber is a job the machine
 resumes once its stack is empty, in the order things settled. A guest callback handed to a host promise
-(`then`/`catch`/`finally`) is a job too, and a top-level `await` suspends the program the same way. So breakpoints,
+(`then`/`catch`/`finally`) is a job too, and a top-level `await` suspends the program the same way. The promise jobs are
+the machine's own (src/promises.ts): a promise the program makes is a host Promise — a package's and the program's pass
+the same `instanceof` — but its state is kept by the machine too, and what reacts to it (`then`, `await`, a thenable
+it adopts, `queueMicrotask`, an async generator's requests, an async function called under a host frame) is a job in
+one queue, in the order ECMAScript gives them. So the order is tsval's on any host — V8, or another tsval — and the same
+as Node's (test/vm/promise-order.test.ts holds programs to Node's order; test262's async tests run stepped too). A
+promise a package makes natively is the boundary: what reacts to it goes through the host's own `then`. So breakpoints,
 `stepStatement`, `runToBreakpoint` and `fork()` reach into async code — a fork copies its pending fibers, and resumes
 its own. With work pending and none ready the machine is `idle`: the host awaits `vm.whenSettled()` and steps on.
 Without it (the default), fibers run on the host's promise queue, each to its next suspension at once.
@@ -115,8 +121,8 @@ for (vm.runToBreakpoint(); vm.idle; vm.runToBreakpoint()) {
 ```
 
 With `eventLoop` (it implies `steppedAsync`) the machine has an event loop of its own, deterministic: `setTimeout`,
-`setInterval`, `setImmediate`, their clears and `queueMicrotask`, with Node's ordering — the promise jobs that settled,
-then timers by due time on a **virtual clock**, each callback a steppable job on the main stack. The clock moves only
+`setInterval`, `setImmediate`, their clears and `queueMicrotask`, with Node's ordering — the promise jobs, the machine's
+own, then timers by due time on a **virtual clock**, each callback a steppable job on the main stack. The clock moves only
 as timers fire (to their due time); `Date` and `Date.now()` read it, and `Math.random()` is seeded. So the same program
 from the same `now` and `seed` runs the same way every time, and so does every fork: a debugger's step forward from a
 stop it travelled back to goes the way it went. `pace` is what a wait costs — `"real"` (default) waits each timer's real
@@ -367,10 +373,10 @@ isn't rewound — the caveat time travel already carries, but now met without th
   side stack (the prototype's). With every event told, tracing costs compiled code 1.7× — so the consumer's bounds should
   reach the producer: a tracer that can say "no more for this call" lets compiled code stop building events it would
   drop.
-- **Async.** Compiled code is a host frame, and today a host frame between the main loop and an `async` call (depth > 0)
-  takes that call off the deterministic loop onto the host's promise queue. A compiled caller must keep it on: run the
-  async function's synchronous prefix nested, and at its first `await` cut those frames into a pending fiber of the main
-  machine, as `cut()` does on the main stack. Needed before any unit that calls async code compiles.
+- **Async.** Compiled code is a host frame. An `async` call with a host frame between it and the main loop (depth > 0)
+  stays on the deterministic loop with stepped async — its fiber resumed by the machine's own jobs — but isn't
+  steppable there. A compiled caller should keep it steppable: run the async function's synchronous prefix nested, and
+  at its first `await` cut those frames into a pending fiber of the main machine, as `cut()` does on the main stack.
 - **Errors.** A throw out of compiled code is a JS exception; `advance` already turns one into a guest throw. Compiled code
   must note throw sites (crash reports), let uncatchable errors through its own `try`/`catch`, and turn host stack
   overflow — compiled recursion uses the host stack, as Node's does — into a guest `RangeError`.
@@ -439,7 +445,8 @@ top-level `this` (`VMOptions.thisValue`) and installs `$DONE` as a global proper
 remains module semantics (top-level `this` is `undefined`, top-level bindings are not globals).
 Current standing on the full pinned corpus: **99.9 % of eligible tests pass**; the remaining 11
 failures all concern exact microtask ordering (`await` interleaving, async-generator ticks), which
-follows the host promise queue (`steppedAsync` keeps that order, settling jobs as the host's promises do).
+follows the host promise queue without stepped async. With it the order is the machine's own, held to Node's (the sample's
+async tests run both ways).
 
 Every destructuring pattern, parameter list and catch parameter is compiled once to a small list
 of plain-data ops run by a synthetic `pattern` frame; defaults, computed keys and member targets

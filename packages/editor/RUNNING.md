@@ -34,7 +34,8 @@ label) names tsval, almostnode or a worker.
 the network. A call the policy hasn't decided stops at its line and asks (*Capability stops*, below): the one way a run
 asks, no popups. A denied call fails as Node's would. Stand-ins remain only for a skipped or denied call.
 
-**Deterministic.** tsval's event loop has a virtual clock, a seeded random and an ordering it can replay; its waits can
+**Deterministic.** tsval's event loop has a virtual clock, a seeded random and an ordering it can replay, its promise
+jobs its own (the order the same on any host: Node's, in the browser or in a tsval running tsval); its waits can
 be skipped (*Skip Waits*) or made real. A run's globals are Node's, with what varies run to run the event loop's own:
 `performance.now` is its clock, and `crypto`'s random numbers its generator. `BroadcastChannel` is the run's own
 (extensions/tsval/worker/broadcast.ts, 2026-11-23), as Node's is the process's: channels of a name in the run hear each

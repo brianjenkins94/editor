@@ -70,6 +70,9 @@ export interface NodeFrame extends FrameBase {
 	/** `for…of` / `for await` / `yield*`: the open iteration (VM.unwind IteratorCloses a loop's on abrupt exit). */
 	"iteration"?: Iteration;
 	"syncIterator"?: boolean;
+	/** `for await` left abruptly (stepped async): what left it, raised again once its iterator's `return()` has settled
+	 *  (its phase FOR_AWAIT_CLOSED meanwhile). */
+	"closing"?: Signal;
 	/** `for…in`: the enumerated keys and the cursor. */
 	"keys"?: PropertyKey[];
 	"index"?: number;
@@ -207,3 +210,6 @@ export interface ModuleFrame extends FrameBase {
 export type SyntheticFrame = CallFrame | ConstructFrame | InitFieldsFrame | PatternFrame | AsyncFrame | ModuleFrame;
 export type Frame = NodeFrame | SyntheticFrame;
 export type SyntheticKind = SyntheticFrame["kind"];
+
+/** `for await`'s phase while its iterator's `return()` is awaited (VM.unwind, stepped async; handlers/statements.ts). */
+export const FOR_AWAIT_CLOSED = 7;

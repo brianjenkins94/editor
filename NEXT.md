@@ -82,17 +82,16 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      seeds of routing in one test) and debug-mcp's page-tools, tabs and outdated (wall-clock waits on interpreted
      debug-mcp). Not measured: done when a run says whether a fewer-seed or longer-wait run passes, and they wait on
      tsval's speed, said so in RUNNING.md, or the test's own limit is the gap.
-5. **tsval's own promise jobs** (the user, 2026-11-23: "tsval is supposed to be deterministic"). A run is repeatable,
-   but its microtask order is the host's: the guest's `Promise` is the host's, a guest callback becomes a job only as
-   the host's queue reaches it (`deferCallback`), and the event loop's `queueMicrotask` and a returned thenable's
-   adoption ride `Promise.resolve().then`. On V8 that's V8's order; hosted by tsval (a tsval test in the editor) it's
-   the outer tsval's — vm/event-loop's ordering and forwarded `then`, and vm/stepped-async's thenable's context, fail
-   there. tsval owns the job queue instead: a reaction a guest registers — `then`, `await`, a thenable adopted,
-   `queueMicrotask` — is a job in one queue in the spec's order, the guest's `Promise` still the host's class (a
-   package's promises pass `instanceof`); a native promise a package settles reaches it with one hop, the boundary the
-   README already draws. **Done when** the three files' ordering and context tests pass in the editor, and tsval's
-   tests, its test262 sample and its differential suites still match Node. (vm/stacks' two `at async` tests are a
-   cause of their own.)
+5. **tsval's own promise jobs** (the user, 2026-11-23: "tsval is supposed to be deterministic"). A run was repeatable,
+   but its microtask order was the host's. Built 2026-11-23 (src/promises.ts): a promise the program makes is still a
+   host Promise, its state kept by the machine too, and what reacts to it — `then`, `await`, a thenable adopted,
+   `queueMicrotask`, an async generator's requests, an async function under a host frame, a `for await`'s steps and its
+   iterator's `return()` — is a job in one queue, in the spec's order; a package's native promise is the boundary, one
+   pending job for its `then`'s pair (a `then(a, b)` left the other pending forever, so the run never ended).
+   test/vm/promise-order.test.ts holds 30 programs to Node's order (10 matched before, 4 of them hung); test262's 164
+   async tests run stepped too; tsval's 1,985 tests, the editor's 231 and all 51 in-editor specs pass. vm/stacks' two
+   `at async` tests pass in the editor with it. **Done when** the three files run in an editor cloned from main pass
+   (their tsval under test the new one: the throwaway editor's workspace can't pull).
 
 ## Watching
 

@@ -576,7 +576,7 @@ export function pushParentConstruct(vm: Machine, superClass: unknown, args: unkn
 	}
 
 	if (typeof superClass === "function") {
-		const made = Reflect.construct(superClass as new (...args: unknown[]) => object, args, newTarget as new (...args: unknown[]) => unknown);
+		const made = (superClass === vm.realm.Promise ? vm.promiseSuper(args, newTarget) : undefined) ?? Reflect.construct(superClass as new (...args: unknown[]) => object, args, newTarget as new (...args: unknown[]) => unknown);
 
 		// (`extends Error`: the program's stack, from where it was made — as V8's, the constructors down to `new.target`'s
 		// left out)

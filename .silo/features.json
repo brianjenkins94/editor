@@ -3166,12 +3166,14 @@
     "docs": "packages/tsval/README.md, *Usage*",
     "paths": [
       "packages/tsval/src/frame.ts",
+      "packages/tsval/src/promises.ts",
       "packages/tsval/src/scope.ts",
       "packages/tsval/src/vm.ts"
     ],
     "tests": [
       "packages/tsval/test/vm/call-steps.test.ts",
       "packages/tsval/test/vm/fork.test.ts",
+      "packages/tsval/test/vm/promise-order.test.ts",
       "packages/tsval/test/vm/step.test.ts",
       "packages/tsval/test/vm/stepped-async.test.ts",
       "packages/tsval/test/vm/stepped-patterns.test.ts",

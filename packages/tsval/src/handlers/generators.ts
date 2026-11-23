@@ -156,9 +156,9 @@ export function yieldStar(vm: Machine, frame: NodeFrame, node: ts.YieldExpressio
 			return; } // the awaited inner result (async)
 
 		case 6:
-			// async: the inner value has been awaited (AsyncGeneratorYield) — now yield it
+			// async: the inner value has been awaited (AsyncGeneratorYield) — now yield it, as it is (`raw`: not awaited again)
 			frame.delegating = true;
-			suspend(vm, frame, "yield", resumed(vm), 4);
+			suspend(vm, frame, "yield", resumed(vm), 4, true);
 
 			return;
 
@@ -207,8 +207,15 @@ export function delegateResult(vm: Machine, frame: NodeFrame, innerResult: unkno
 		return;
 	}
 
+	// async: AsyncGeneratorYield(IteratorValue(innerResult)) — the value as it is, not awaited again (as V8 has it since
+	// the spec stopped awaiting it, ecma262 #2819); without stepped async the driver awaits what it yields, as before
 	if (asyncGen) {
-		suspend(vm, frame, "await", result.value, 6);
+		if (vm.steppedAsync) {
+			frame.delegating = true;
+			suspend(vm, frame, "yield", result.value, 4, true);
+		} else {
+			suspend(vm, frame, "await", result.value, 6);
+		}
 
 		return;
 	}

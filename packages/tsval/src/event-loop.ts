@@ -18,8 +18,6 @@
  * in the order they were asked for, then the timer), recorded, and replayable (`schedule`). So a race between results,
  * or a result and a timeout, is a choice point, and every way it can go is a schedule to run (explore.ts).
  */
-import type { GuestFunction } from "./values.ts";
-import { ownedBy } from "./values.ts";
 
 /** How the event loop starts: its clock (ms since the epoch; the host's now by default), the random generator's seed
  *  (the host's random by default) — a host that wants a run again records both — and what a wait costs. */
@@ -79,7 +77,8 @@ export interface Loop {
 /** What an intrinsic needs of the machine calling it. */
 export interface LoopMachine {
 	"loop": Loop | undefined;
-	"deferCallback": (fn: GuestFunction) => (...args: unknown[]) => Promise<unknown>;
+	/** a microtask, a job of the machine's own queue (promises.ts) */
+	"queueJob": (fn: unknown) => void;
 	"asyncContext"?: AsyncContext | undefined;
 	"family": object;
 }
@@ -400,9 +399,7 @@ export function loopGlobals(): Record<string, unknown> {
 				throw new TypeError("The \"callback\" argument must be of type function");
 			}
 
-			const run = ownedBy(fn, machine) ? machine.deferCallback(fn) : fn as () => unknown;
-
-			void Promise.resolve().then(() => run());
+			machine.queueJob(fn);
 		}),
 		"Date": VirtualDate,
 		"Math": VirtualMath,

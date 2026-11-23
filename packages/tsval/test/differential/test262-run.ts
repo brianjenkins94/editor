@@ -211,22 +211,46 @@ async function runControl(test: Test262Test, program: string): Promise<Verdict> 
 	return judge(test, settled.threw, settled.error, settled.value);
 }
 
-/** tsval: the same program, with a fresh realm's intrinsics as its global object. */
-async function runSubject(test: Test262Test, program: string): Promise<Verdict> {
+/** tsval: the same program, with a fresh realm's intrinsics as its global object — `stepped`, its async work on the
+ *  machine's own jobs (steppedAsync: src/promises.ts), driven to its end as a debugger drives it. */
+async function runSubject(test: Test262Test, program: string, stepped = false): Promise<Verdict> {
 	let value: unknown;
 
 	try {
 		// test262 language tests are *scripts*: their top-level `this` is the global object.
 		const realm = freshRealm();
-		const vm = new VM({ "globalObject": realm, "realGlobals": false, "thisValue": realm });
+		const vm = new VM({ "globalObject": realm, "realGlobals": false, "thisValue": realm, ...stepped ? { "steppedAsync": true } : {} });
 
 		vm.load(parse(program));
 		vm.runUntil((metrics) => metrics.steps > STEP_BUDGET);
-		if (!vm.finished && !vm.paused) {
+
+		// (stepped: the program's jobs run as it idles, until what it completed with — `$DONE`'s promise — settles)
+		if (stepped && vm.idle) {
+			const completion = vm.completion;
+			const done = { "settled": typeof (completion as { "then"?: unknown } | undefined)?.then !== "function" };
+			const started = Date.now();
+
+			if (!done.settled) {
+				(completion as Promise<unknown>).then(() => { done.settled = true; }, () => { done.settled = true; });
+			}
+
+			while (!done.settled && vm.idle && Date.now() - started < ASYNC_TIMEOUT_MS) {
+				await Promise.race([vm.whenSettled(), new Promise((resolve) => { setTimeout(resolve, 50); })]);
+				vm.runUntil((metrics) => metrics.steps > STEP_BUDGET);
+			}
+
+			value = completion;
+		}
+
+		// (stepped, idle: its jobs ran out with work still pending — a reaction to a promise nothing settles — as Node's
+		// process ends)
+		if (!vm.finished && !vm.paused && !(stepped && vm.idle)) {
 			return { "ok": false, "reason": `step budget (${STEP_BUDGET}) exhausted` };
 		}
 
-		if (vm.paused) {
+		if (stepped && value !== undefined) {
+			// (settled above)
+		} else if (vm.paused) {
 			value = await vm.runAsync();
 		} else {
 			value = vm.completion;
@@ -240,7 +264,7 @@ async function runSubject(test: Test262Test, program: string): Promise<Verdict> 
 	return judge(test, settled.threw, settled.error, settled.value);
 }
 
-export async function runTest262(root: string, test: Test262Test): Promise<Test262Outcome> {
+export async function runTest262(root: string, test: Test262Test, stepped = false): Promise<Test262Outcome> {
 	const skip = policySkip(test);
 
 	if (skip !== undefined) {
@@ -254,7 +278,7 @@ export async function runTest262(root: string, test: Test262Test): Promise<Test2
 		return { "kind": "control-failed", "reason": control.reason };
 	}
 
-	const subject = await runSubject(test, program);
+	const subject = await runSubject(test, program, stepped);
 
 	if (subject.ok) {
 		return { "kind": "pass" };

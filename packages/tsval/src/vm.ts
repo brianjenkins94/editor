@@ -1,5 +1,6 @@
 import type { AsyncContext, EventLoopOptions, Loop } from "./event-loop.ts";
 import type { AsyncFrame, CallFrame, Frame, Iteration, ModuleFrame, NodeFrame, SyntheticFrame, SyntheticKind } from "./frame.ts";
+import { FOR_AWAIT_CLOSED } from "./frame.ts";
 import type { ModuleLoader, ModuleRecord } from "./modules.ts";
 import type { GuestClass } from "./handlers.ts";
 import type { GuestFunction, GuestFunctionMeta } from "./values.ts";
@@ -13,6 +14,8 @@ import { bindIdentifier, bindingProgram, clonePrivateElements, closeIteration, c
 import { defineExports, directoryOf, linkedSpecifiers, makeRequire, moduleOf, requireOf, setModuleOf } from "./modules.ts";
 import { Scope } from "./scope.ts";
 import type { Site } from "./stacks.ts";
+import type { Capability, JobHost, JobInput, Settlers } from "./promises.ts";
+import { isOwnResolve, OwnPromises } from "./promises.ts";
 import { giveStack, hasProgramStack } from "./stacks.ts";
 import { ownedBy } from "./values.ts";
 
@@ -504,7 +507,9 @@ export class Machine implements VM {
 	 *  follows an await back to its caller for a stack's `at async …` (sitesHere). */
 	private awaitedBy = new WeakMap<object, Frame[]>();
 	/** Stepped async: what settled, in the order it did — shared with forks (a host promise calls back once, into it). */
-	private scheduler: AsyncScheduler = { "settled": [], "ids": 0, "wakers": [] };
+	private scheduler: AsyncScheduler = { "settled": [], "ids": 0, "wakers": [], "promises": new OwnPromises() };
+	/** Stepped async: where in what settled this machine's next job may be — before it, none is pending here. */
+	private settledFrom = 0;
 	/** How many nested contexts (a host-called guest function's sub-run, a fiber's) the machine is inside: stepped
 	 *  async applies on the main stack only (depth 0); a nested context keeps the fiber drivers' behavior. */
 	private depth = 0;
@@ -1030,6 +1035,20 @@ export class Machine implements VM {
 			return this.fromHost(intrinsic(this, thisArg, args, isConstruct));
 		}
 
+		// Stepped async: a promise the program makes, and what reacts to it, are this machine's (promises.ts) — at any
+		// depth, its jobs the main loop's; not once it's finished, with no loop to run them.
+		if (this.steppedAsync && !this.finished) {
+			const own = this.ownPromiseCall(callee, thisArg, args, isConstruct);
+
+			if (own !== NOT_OWN) {
+				if (this.escapes !== undefined) {
+					this.made(own);
+				}
+
+				return this.fromHost(own);
+			}
+		}
+
 		const previousSite = this.callSite;
 		const { prototype } = this.realm.Promise;
 
@@ -1043,14 +1062,17 @@ export class Machine implements VM {
 					: (callee === Reflect.apply && promisingFn(args[0]) && Array.isArray(args[2])) ? "reflect"
 						: undefined;
 		const promising = promisingFn(callee) || forwarded !== undefined;
-		const defer = (list: readonly unknown[]): unknown[] => list.map((arg) => (ownedBy(arg, this) ? this.deferCallback(arg) : arg));
-
-		// Stepped async: a guest callback a host promise will call is a job of its own, run on the main stack.
+		// Stepped async: guest handlers a host promise (one this machine doesn't know) will call are one job, run on the
+		// main stack — through the host's `then`, whose one call of the two wrappers says how it settled.
 		if (this.steppedHere && !isConstruct && promising) {
-			args = forwarded === "call" ? [args[0], ...defer(args.slice(1))]
-				: forwarded === "apply" ? [args[0], defer(args[1] as unknown[])]
-					: forwarded === "reflect" ? [args[0], args[1], defer(args[2] as unknown[])]
-						: defer(args);
+			const [method, receiver, handlers] = forwarded === "call" ? [thisArg, args[0], args.slice(1)]
+				: forwarded === "apply" ? [thisArg, args[0], args[1] as unknown[]]
+					: forwarded === "reflect" ? [args[0], args[1], args[2] as unknown[]]
+						: [callee, thisArg, args];
+
+			if (handlers.some((handler) => ownedBy(handler, this))) {
+				return this.fromHost(this.hostReaction(method, receiver, handlers));
+			}
 		}
 
 		this.callSite = site; // (set BEFORE the guard runs: a guard may read it, or the `site` argument)
@@ -1088,7 +1110,8 @@ export class Machine implements VM {
 			// program gets one of its own instead, settled when the result's arrival is delivered as an event (event-loop.ts),
 			// so nothing — not even Promise.race — sees it before. (Not a promise the program makes itself — `new Promise`,
 			// a promise's methods and statics: that's the program chaining what it has.)
-			if (this.loop !== undefined && this.steppedHere && !promising && (callee as unknown) !== this.realm.Promise && !isPromiseStatic(this.realm.Promise, callee) && isThenable(value)) {
+			// (and not one this machine made: an async generator's request, say — promises.ts)
+			if (this.loop !== undefined && this.steppedHere && !promising && (callee as unknown) !== this.realm.Promise && !isPromiseStatic(this.realm.Promise, callee) && isThenable(value) && !this.scheduler.promises.knows(value)) {
 				return this.awaitResult(value, this.callLabel(site, callee, args));
 			}
 
@@ -1336,6 +1359,11 @@ export class Machine implements VM {
 
 		if (this.signal !== null) {
 			this.unwind(frame, this.signal);
+
+			// (a `for await` left, awaiting its iterator's `return()`: cut off as an `await` is)
+			if (this.paused && this.pauseKind === "await" && this.steppedAsync && this.depth === 0) {
+				this.cut();
+			}
 
 			return false;
 		}
@@ -1986,8 +2014,12 @@ export class Machine implements VM {
 		forked.contexts = [];
 		forked.awaitedBy = this.awaitedBy;
 		// Its own pending fibers (their frames and closures, cloned), and the shared record of what settled.
-		forked.pending = new Map([...this.pending].map(([id, each]) => [id, each.kind === "fiber" ? { "kind": "fiber", "frames": each.frames.map(cloneFrame), "values": each.values.map(clone), "base": each.base, "context": each.context } : { "kind": "callback", "fn": clone(each.fn) as GuestFunction, "context": each.context }]));
+		forked.pending = new Map([...this.pending].map(([id, each]): [number, Pending] => [id, each.kind === "fiber" ? { "kind": "fiber", "frames": each.frames.map(cloneFrame), "values": each.values.map(clone), "base": each.base, "context": each.context }
+			: each.kind === "callback" ? { "kind": "callback", "fn": clone(each.fn) as GuestFunction, "context": each.context }
+				: each.kind === "reaction" ? { "kind": "reaction", "onFulfilled": clone(each.onFulfilled), "onRejected": clone(each.onRejected), "onFinally": clone(each.onFinally), "species": each.species, "context": each.context }
+					: { "kind": "host", "context": each.context }]));
 		forked.scheduler = this.scheduler;
+		forked.settledFrom = this.settledFrom;
 		forked.loop = this.loop === undefined ? undefined : forkLoop(this.loop, clone);
 
 		return forked;
@@ -2006,7 +2038,8 @@ export class Machine implements VM {
 		const hooks = this.asyncContext;
 		const then = hooks === undefined || !isThenable(value) ? undefined : (value as { "then": unknown }).then;
 
-		if (hooks === undefined || typeof then !== "function") {
+		// (a promise this machine made: its resolve adopts a thenable in a job of its own, in the context of now)
+		if (hooks === undefined || typeof then !== "function" || isOwnResolve(resolve)) {
 			resolve(value);
 
 			return;
@@ -2028,29 +2061,12 @@ export class Machine implements VM {
 	/** Stepped async: an async function call on the main stack — its async frame (which settles its promise), then its
 	 *  call. Returns nothing: the promise reaches the caller when the body first suspends, or completes. */
 	public enterAsync(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): void {
-		let resolve!: (value: unknown) => void;
-		let reject!: (reason: unknown) => void;
-		const promise = new this.realm.Promise<unknown>((settleWith, failWith) => { resolve = settleWith; reject = failWith; });
+		const { promise, resolve, reject } = this.scheduler.promises.capability(this);
 		const frame: AsyncFrame = { "kind": "async", "node": null, "phase": 0, "scope": this.rootScope, "valuesBase": this.values.length, "promise": promise, "resolve": resolve, "reject": reject };
 
 		this.frames.push(frame);
 		this.pushCall(meta, args, thisArg);
 		this.onAsyncFiber?.(promise);
-	}
-
-	/** Stepped async: `fn` (a guest callback handed to a host promise's `then`/`catch`/`finally`) as the host calls it —
-	 *  a job of its own, run on the main stack between tasks; the host gets a promise of what it returns. */
-	public deferCallback(fn: GuestFunction): (...args: unknown[]) => Promise<unknown> {
-		this.scheduler.ids += 1;
-
-		const id = this.scheduler.ids;
-		const { scheduler } = this;
-
-		this.pending.set(id, { "kind": "callback", "fn": fn, "context": this.asyncContext?.capture() });
-
-		return (...args: unknown[]): Promise<unknown> => new this.realm.Promise<unknown>((resolve, reject) => {
-			settle(scheduler, id, { "kind": "call", "args": args, "resolve": resolve, "reject": reject });
-		});
 	}
 
 	/** Resolves when something pending settles, or the next timer may fire (the host awaits it while the machine is
@@ -2077,9 +2093,7 @@ export class Machine implements VM {
 	private awaitResult(value: object, label: string): Promise<unknown> {
 		const loop = this.loop!;
 		const { scheduler } = this;
-		let resolve!: (value: unknown) => void;
-		let reject!: (reason: unknown) => void;
-		const promise = new this.realm.Promise<unknown>((settleWith, failWith) => { resolve = settleWith; reject = failWith; });
+		const { promise, resolve, reject } = scheduler.promises.capability(this);
 
 		loop.ids += 1;
 
@@ -2190,15 +2204,24 @@ export class Machine implements VM {
 			this.values.push(boundary.promise);
 		}
 
-		Promise.resolve(awaited).then(
-			(value) => { settle(scheduler, id, { "kind": "next", "value": value }); },
-			(error: unknown) => { settle(scheduler, id, { "kind": "throw", "value": error }); }
-		);
+		// (what it awaits reacts with the fiber, a job of this machine's — a host's promise it doesn't know through the host)
+		if (!scheduler.promises.await(this, awaited, id)) {
+			Promise.resolve(awaited).then(
+				(value) => { settle(scheduler, id, { "kind": "next", "value": value }); },
+				(error: unknown) => { settle(scheduler, id, { "kind": "throw", "value": error }); }
+			);
+		}
 	}
 
 	/** Stepped async: put the first settled pending job back on the (empty) stack, to step on — true if there was one. */
 	private resumeSettled(): boolean {
-		const entry = this.scheduler.settled.find(({ id }) => this.pending.has(id));
+		const { settled } = this.scheduler;
+
+		while (this.settledFrom < settled.length && !this.pending.has(settled[this.settledFrom]!.id)) {
+			this.settledFrom += 1;
+		}
+
+		const entry = settled[this.settledFrom];
 
 		if (entry === undefined) {
 			return false;
@@ -2217,6 +2240,22 @@ export class Machine implements VM {
 		this.pending.delete(entry.id);
 		this.idle = false;
 		this.asyncContext?.enter(job.context);
+
+		if (job.kind === "host") {
+			if (input.kind === "run") {
+				this.runHostJob(input.run);
+			}
+
+			return;
+		}
+
+		if (job.kind === "reaction") {
+			if (input.kind === "fulfilled" || input.kind === "rejected") {
+				this.react(job, input.kind, input.value, input.derived);
+			}
+
+			return;
+		}
 
 		if (job.kind === "callback") {
 			if (input.kind !== "call") {
@@ -2251,6 +2290,173 @@ export class Machine implements VM {
 			this.sentValue = input.value;
 		} else if (input.kind === "throw") {
 			this.signal = { "type": "throw", "value": input.value };
+		}
+	}
+
+	/** A promise reaction's job: its handler for how the promise settled — a guest function's call on the main stack
+	 *  (its return settling the promise `then` made), a host function's call, or the outcome passed on; a `finally`'s
+	 *  callback called with nothing, the promise then settling as this one did. */
+	private react(job: Extract<Pending, { "kind": "reaction" }>, kind: "fulfilled" | "rejected", value: unknown, derived: Settlers | undefined): void {
+		const promises = this.scheduler.promises;
+		const handler = job.onFinally ?? (kind === "fulfilled" ? job.onFulfilled : job.onRejected);
+		const args = job.onFinally === undefined ? [value] : [];
+		const settleWith = job.onFinally === undefined || derived === undefined ? derived?.resolve : (result: unknown): void => { derived.resolve(promises.afterFinally(this, result, { "kind": kind, "value": value }, job.species)); };
+
+		if (typeof handler === "function" && ownedBy(handler, this)) {
+			const frame: AsyncFrame = { "kind": "async", "node": null, "phase": 0, "scope": this.rootScope, "valuesBase": this.values.length, "promise": Promise.resolve(), "resolve": settleWith ?? (() => undefined), "reject": derived?.reject ?? (() => undefined), "delivered": true };
+
+			this.frames.push(frame);
+			this.pushCall(handler.__tsval, args, undefined);
+
+			return;
+		}
+
+		this.runHostJob(() => {
+			if (typeof handler !== "function") {
+				if (kind === "fulfilled") {
+					derived?.resolve(value);
+				} else {
+					derived?.reject(value);
+				}
+
+				return;
+			}
+
+			let result: unknown;
+
+			try {
+				result = Reflect.apply(handler, undefined, args);
+			} catch (error) {
+				if (isUncatchable(error)) {
+					throw error;
+				}
+
+				derived?.reject(error);
+
+				return;
+			}
+
+			settleWith?.(result);
+		});
+	}
+
+	/** Host work as a job of this machine's: what native code it calls sets this machine's timers. */
+	private runHostJob(run: () => void): void {
+		const callingBefore = hostCalling(this);
+
+		try {
+			run();
+		} finally {
+			hostCalling(callingBefore);
+		}
+	}
+
+	/** Stepped async: `then`, `catch` or `finally` (`method`) on a host's promise, its handlers one pending job — the host
+	 *  `then`'s wrappers settle it, and what they return the handler's outcome (a promise the host's derived adopts). */
+	private hostReaction(method: unknown, receiver: unknown, handlers: unknown[]): unknown {
+		const { prototype } = this.realm.Promise;
+		const [first, second] = handlers;
+		const id = method === prototype.then ? this.reactionJob(first, second)
+			: method === prototype.catch ? this.reactionJob(undefined, first)
+				: this.reactionJob(undefined, undefined, typeof first === "function" ? first : undefined, this.realm.Promise);
+		const { scheduler } = this;
+		const wrap = (kind: "fulfilled" | "rejected") => (value: unknown): Promise<unknown> => new this.realm.Promise<unknown>((resolve, reject) => {
+			settle(scheduler, id, { "kind": kind, "value": value, "derived": { "resolve": resolve, "reject": reject } });
+		});
+
+		return Reflect.apply(prototype.then, receiver, [wrap("fulfilled"), wrap("rejected")]);
+	}
+
+	/** Promise jobs (promises.ts): a pending job for `then`'s handlers, made now — in the async context of now. */
+	public reactionJob(onFulfilled: unknown, onRejected: unknown, onFinally?: unknown, species?: unknown): number {
+		this.scheduler.ids += 1;
+		this.pending.set(this.scheduler.ids, { "kind": "reaction", "onFulfilled": onFulfilled, "onRejected": onRejected, ...onFinally === undefined ? {} : { "onFinally": onFinally, "species": species }, "context": this.asyncContext?.capture() });
+
+		return this.scheduler.ids;
+	}
+
+	/** Promise jobs: a pending job of host work, made now. */
+	public hostJob(): number {
+		this.scheduler.ids += 1;
+		this.pending.set(this.scheduler.ids, { "kind": "host", "context": this.asyncContext?.capture() });
+
+		return this.scheduler.ids;
+	}
+
+	/** Promise jobs: job `id`'s turn, after the jobs before it. */
+	public settleJob(id: number, input: JobInput): void {
+		settle(this.scheduler, id, input);
+	}
+
+	/** `for await` over a sync iterable, a step (%AsyncFromSyncIteratorPrototype%.next): a promise of `{ value, done }`,
+	 *  once `value` has settled — the jobs the spec takes, in this machine's queue. */
+	public asyncFromSync(value: unknown, done: boolean): unknown {
+		const promises = this.scheduler.promises;
+
+		return promises.invokeThen(this, promises.resolved(this, value), (settled: unknown) => ({ "value": settled, "done": done }), undefined);
+	}
+
+	/** `super(executor)` of a class extending Promise (handlers/classes.ts): its promise this machine's, the subclass
+	 *  its `new.target` — or undefined (the host's), without stepped async or an executor. */
+	public promiseSuper(args: unknown[], newTarget: unknown): object | undefined {
+		return this.steppedAsync && typeof args[0] === "function" ? this.scheduler.promises.construct(this, args[0] as (resolve: unknown, reject: unknown) => unknown, isUncatchable, newTarget) : undefined;
+	}
+
+	/** `queueMicrotask(fn)`: a job of this machine's queue (a throw from it rejects nothing anyone holds, as before). */
+	public queueJob(fn: unknown): void {
+		if (typeof fn === "function" && ownedBy(fn, this)) {
+			this.scheduler.ids += 1;
+			this.pending.set(this.scheduler.ids, { "kind": "callback", "fn": fn, "context": this.asyncContext?.capture() });
+			settle(this.scheduler, this.scheduler.ids, { "kind": "call", "args": [], "resolve": () => undefined, "reject": (reason) => { void this.realm.Promise.reject(reason); } });
+
+			return;
+		}
+
+		settle(this.scheduler, this.hostJob(), { "kind": "run", "run": () => { (fn as () => unknown)(); } });
+	}
+
+	/** A promise method or static the program calls on a promise this machine made (promises.ts), as the spec's — else
+	 *  NOT_OWN (the host's, as before). */
+	private ownPromiseCall(callee: unknown, thisArg: unknown, args: unknown[], isConstruct: boolean): unknown {
+		const promises = this.scheduler.promises;
+		const { Promise: PromiseOf } = this.realm;
+
+		if (isConstruct) {
+			return callee === PromiseOf && typeof args[0] === "function" ? promises.construct(this, args[0] as (resolve: unknown, reject: unknown) => unknown, isUncatchable) : NOT_OWN;
+		}
+
+		const { prototype } = PromiseOf;
+		const { "call": call, "apply": apply } = this.realm.Function.prototype;
+		const [method, receiver, handlers] = callee === call ? [thisArg, args[0], args.slice(1)]
+			: callee === apply ? [thisArg, args[0], Array.isArray(args[1]) ? args[1] as unknown[] : undefined]
+				: callee === Reflect.apply ? [args[0], args[1], Array.isArray(args[2]) ? args[2] as unknown[] : undefined]
+					: [callee, thisArg, args];
+
+		if (handlers !== undefined && promises.knows(receiver)) {
+			return method === prototype.then ? promises.then(this, receiver, handlers[0], handlers[1])
+				: method === prototype.catch ? promises.invokeThen(this, receiver, undefined, handlers[0])
+					: method === prototype.finally ? promises.finally(this, receiver, handlers[0])
+						: NOT_OWN;
+		}
+
+		// (a static of %Promise%'s, or a subclass's: C, its promises made by constructing it)
+		if (thisArg !== PromiseOf && !(typeof thisArg === "function" && Object.prototype.isPrototypeOf.call(PromiseOf, thisArg))) {
+			return NOT_OWN;
+		}
+
+		switch (callee) {
+			case PromiseOf.resolve: return promises.resolved(this, args[0], thisArg);
+			case PromiseOf.reject: return promises.rejected(this, args[0], thisArg);
+			case PromiseOf.all: return promises.combine(this, "all", args[0], thisArg);
+			case PromiseOf.allSettled: return promises.combine(this, "allSettled", args[0], thisArg);
+			case PromiseOf.race: return promises.combine(this, "race", args[0], thisArg);
+			case PromiseOf.any: return promises.combine(this, "any", args[0], thisArg);
+			case (PromiseOf as unknown as { "withResolvers"?: unknown }).withResolvers: {
+				const { promise, resolve, reject } = promises.capabilityOf(this, thisArg);
+
+				return { "promise": promise, "resolve": resolve, "reject": reject };
+			}
+			default: return NOT_OWN;
 		}
 	}
 
@@ -2351,8 +2557,208 @@ export class Machine implements VM {
 		return gen;
 	}
 
+	/** Stepped async: an async function called off the main stack — its body run to its first `await` now, then resumed
+	 *  by this machine's jobs as what it awaits settles; its promise settled by how the body ends. */
+	private ownAsyncCall(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): Promise<unknown> {
+		const promises = this.scheduler.promises;
+		const { promise, resolve, reject } = promises.capability(this);
+		let fiber: Fiber;
+
+		try {
+			fiber = this.seedFiber(meta, thisArg, args);
+		} catch (error) {
+			if (isUncatchable(error)) {
+				throw error;
+			}
+
+			reject(error);
+
+			return promise;
+		}
+
+		const run = (input: FiberInput): void => {
+			let result: ReturnType<Machine["stepFiber"]>;
+
+			try {
+				result = this.stepFiber(fiber, input);
+			} catch (error) {
+				fiber.done = true;
+
+				if (isUncatchable(error)) {
+					throw error;
+				}
+
+				reject(error);
+
+				return;
+			}
+
+			if (!result.paused) {
+				fiber.done = true;
+				resolve(result.value);
+			} else if (result.kind !== "await") {
+				fiber.done = true;
+				reject(new TsvalInternalError("yield inside an async (non-generator) function"));
+			} else {
+				promises.awaitWith(this, result.value, (value) => { run({ "kind": "next", "value": value }); }, (reason) => { run({ "kind": "throw", "value": reason }); });
+			}
+		};
+
+		run({ "kind": "next", "value": undefined });
+
+		return promise;
+	}
+
+	/**
+	 * Stepped async: an async generator's methods, as the spec's AsyncGenerator (AsyncGeneratorEnqueue, …Resume,
+	 * …Yield, …AwaitReturn, …DrainQueue): each request a promise of this machine's, queued; the body stepped to its next
+	 * suspension when it's suspended; an `await` and a plain `yield`'s operand awaited through this machine's jobs.
+	 */
+	private ownAsyncGenerator(fiber: Fiber): { "next": (value?: unknown) => Promise<unknown>; "return": (value?: unknown) => Promise<unknown>; "throw": (error?: unknown) => Promise<unknown> } {
+		const promises = this.scheduler.promises;
+		const queue: { "input": FiberInput; "capability": Capability }[] = [];
+		let state: "start" | "yield" | "executing" | "returning" | "done" = "start";
+		const awaiting = (value: unknown, onFulfilled: (settledValue: unknown) => void, onRejected: (reason: unknown) => void): void => {
+			promises.awaitWith(this, value, onFulfilled, onRejected);
+		};
+		const completeStep = (kind: "normal" | "throw", value: unknown, done: boolean): void => {
+			const request = queue.shift()!;
+
+			if (kind === "throw") {
+				request.capability.reject(value);
+			} else {
+				request.capability.resolve({ "value": value, "done": done });
+			}
+		};
+		const finish = (kind: "normal" | "throw", value: unknown): void => {
+			fiber.done = true;
+			state = "done";
+			completeStep(kind, value, true);
+			drain();
+		};
+		const awaitReturn = (value: unknown): void => {
+			state = "returning";
+
+			try {
+				awaiting(value, (returned) => { finish("normal", returned); }, (reason) => { finish("throw", reason); });
+			} catch (error) {
+				finish("throw", error);
+			}
+		};
+		const drain = (): void => {
+			while (queue.length > 0) {
+				const { input } = queue[0]!;
+
+				if (input.kind === "return") {
+					awaitReturn(input.value);
+
+					return;
+				}
+
+				completeStep(input.kind === "throw" ? "throw" : "normal", input.kind === "throw" ? input.value : undefined, true);
+			}
+		};
+		const run = (input: FiberInput): void => {
+			state = "executing";
+
+			let step: ReturnType<Machine["stepFiber"]>;
+
+			try {
+				step = this.stepFiber(fiber, input);
+			} catch (error) {
+				if (isUncatchable(error)) {
+					throw error;
+				}
+
+				finish("throw", error);
+
+				return;
+			}
+
+			if (!step.paused) {
+				finish("normal", step.value);
+			} else if (step.kind === "await") {
+				awaiting(step.value, (value) => { run({ "kind": "next", "value": value }); }, (reason) => { run({ "kind": "throw", "value": reason }); });
+			} else if (step.raw === true) {
+				yielded(step.value);
+			} else {
+				// (`yield v` awaits v; a rejection is a throw at the yield, which the body may catch)
+				awaiting(step.value, yielded, (reason) => { run({ "kind": "throw", "value": reason }); });
+			}
+		};
+		// AsyncGeneratorYield: the request answered; the next one, if any, goes on at once (its `return` awaited first)
+		const yielded = (value: unknown): void => {
+			completeStep("normal", value, false);
+
+			const next = queue[0];
+
+			if (next === undefined) {
+				state = "yield";
+			} else {
+				resumeWith(next.input);
+			}
+		};
+		const resumeWith = (input: FiberInput): void => {
+			if (input.kind !== "return") {
+				run(input);
+
+				return;
+			}
+
+			state = "executing";
+			awaiting(input.value, (value) => { run({ "kind": "return", "value": value }); }, (reason) => { run({ "kind": "throw", "value": reason }); });
+		};
+		const enqueue = (input: FiberInput): Promise<unknown> => {
+			const capability = promises.capability(this);
+
+			this.onAsyncFiber?.(capability.promise as Promise<IteratorResult<unknown>>);
+
+			if (state === "start" && input.kind === "throw") {
+				fiber.done = true;
+				state = "done";
+			}
+
+			if (state === "done" && input.kind !== "return") {
+				if (input.kind === "throw") {
+					capability.reject(input.value);
+				} else {
+					capability.resolve({ "value": undefined, "done": true });
+				}
+
+				return capability.promise;
+			}
+
+			queue.push({ "input": input, "capability": capability });
+
+			if (state === "start" && input.kind === "return") {
+				fiber.done = true;
+				awaitReturn(input.value);
+			} else if (state === "done") {
+				awaitReturn(input.value);
+			} else if (state === "start") {
+				run(input);
+			} else if (state === "yield") {
+				resumeWith(input);
+			}
+
+			return capability.promise;
+		};
+
+		return {
+			"next": (value?: unknown) => enqueue({ "kind": "next", "value": value }),
+			"return": (value?: unknown) => enqueue({ "kind": "return", "value": value }),
+			"throw": (error?: unknown) => enqueue({ "kind": "throw", "value": error })
+		};
+	}
+
 	/** Invoke a guest async function: returns a real Promise, driven by `await` suspensions. */
 	public callAsync(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): Promise<unknown> {
+		// Stepped async: called where a host frame is between it and the main loop — its body a fiber stepped to each
+		// `await`, resumed by this machine's jobs (promises.ts), its promise this machine's.
+		if (this.steppedAsync) {
+			return this.ownAsyncCall(meta, thisArg, args);
+		}
+
 		// An abrupt completion while binding an async function's parameters rejects the returned
 		// promise (spec) — unlike generators, whose call throws synchronously.
 		let fiber: Fiber | undefined;
@@ -2437,6 +2843,16 @@ export class Machine implements VM {
 	 */
 	public createAsyncGenerator(meta: GuestFunctionMeta, thisArg: unknown, args: unknown[]): AsyncIterator<unknown> & AsyncIterable<unknown> {
 		const fiber = this.seedFiber(meta, thisArg, args);
+
+		// Stepped async: its requests, awaits and yields are this machine's promise jobs (promises.ts).
+		if (this.steppedAsync) {
+			const gen = generatorObject(this.generatorPrototype(meta, true), this.ownAsyncGenerator(fiber)) as AsyncIterator<unknown> & AsyncIterable<unknown>;
+
+			Object.defineProperty(gen, FIBER_BRAND, { "value": true });
+
+			return gen;
+		}
+
 		const drive = (input: FiberInput): Promise<IteratorResult<unknown>> => {
 			if (fiber.done) {
 				if (input.kind === "throw") {
@@ -2786,6 +3202,23 @@ export class Machine implements VM {
 		}
 
 		if (frame.kind === undefined) {
+			// (a `for await` whose iterator's `return()` was awaited: a rejection doesn't replace a throw that left it)
+			if (frame.closing !== undefined) {
+				const leaving = frame.closing;
+
+				frame.closing = undefined;
+
+				if (leaving.type === "throw") {
+					signal = leaving;
+					this.signal = leaving;
+				}
+			}
+
+			// Stepped async: a `for await` left — not continued — awaits its iterator's `return()` first.
+			if (frame.isLoop === true && !(signal.type === "continue" && (signal.label === null || signal.label === undefined || signal.label === frame.label)) && this.closeForAwait(frame, signal)) {
+				return;
+			}
+
 			// Loop frames catch break/continue targeting them (unlabeled, or matching label).
 			if (frame.isLoop === true && (signal.type === "break" || signal.type === "continue")) {
 				if (signal.label === null || signal.label === undefined || signal.label === frame.label) {
@@ -2850,6 +3283,75 @@ export class Machine implements VM {
 			}
 			// stray break/continue at top level would be a SyntaxError; parse-time concern.
 		}
+	}
+
+	/**
+	 * Stepped async: AsyncIteratorClose for a `for await` a signal leaves — its iterator's `return()` called (a sync
+	 * iterable's through the spec's async-from-sync step) and its result awaited: the loop frame waits on it, and what
+	 * left raises again when it settles (handlers/statements.ts, FOR_AWAIT_CLOSED). False where there's nothing to wait
+	 * on, or `return()` threw (a throw that left wins; else its error does).
+	 */
+	private closeForAwait(frame: NodeFrame, signal: Signal): boolean {
+		const it = frame.iteration;
+
+		if (!this.steppedAsync || it === undefined || it.done || (frame.node as ts.ForOfStatement).awaitModifier === undefined) {
+			return false;
+		}
+
+		it.done = true;
+
+		const { iterator } = it.record;
+		let result: unknown;
+
+		try {
+			const method = (iterator as { "return"?: unknown }).return;
+
+			if (method === undefined || method === null) {
+				if (frame.syncIterator !== true) {
+					return false;
+				}
+
+				result = this.scheduler.promises.resolved(this, { "value": undefined, "done": true });
+			} else {
+				if (typeof method !== "function") {
+					throw new TypeError("iterator.return is not a function");
+				}
+
+				result = Reflect.apply(method, iterator, []);
+
+				if (frame.syncIterator === true) {
+					if ((typeof result !== "object" || result === null) && typeof result !== "function") {
+						throw new TypeError("Iterator result is not an object");
+					}
+
+					const { value, done } = result as { "value": unknown; "done": unknown };
+
+					result = this.asyncFromSync(value, Boolean(done));
+				}
+			}
+		} catch (error) {
+			if (isUncatchable(error)) {
+				throw error;
+			}
+
+			if (signal.type !== "throw") {
+				this.signal = { "type": "throw", "value": this.toGuestError(error) };
+				this.noteThrow(this.signal.value, this.currentNode);
+			}
+
+			return false;
+		}
+
+		frame.closing = signal;
+		frame.phase = FOR_AWAIT_CLOSED;
+		this.signal = null;
+		this.values.length = frame.valuesBase;
+		this.pauseValue = result;
+		this.pauseKind = "await";
+		this.pauseRaw = false;
+		this.paused = true;
+
+		return true;
 	}
 
 	/**
@@ -3231,14 +3733,15 @@ interface Fiber {
 /** Stepped async: a fiber cut off at an `await` (its frames from its async frame up, their operands, and the value-stack
  *  depth they were cut at) — or a guest callback handed to a host promise, waiting to be called. */
 /** (`context`: VMOptions.asyncContext's, as it was when the job was made) */
-type Pending = { "kind": "fiber"; "frames": Frame[]; "values": unknown[]; "base": number; "context"?: unknown } | { "kind": "callback"; "fn": GuestFunction; "context"?: unknown };
+type Pending = { "kind": "fiber"; "frames": Frame[]; "values": unknown[]; "base": number; "context"?: unknown } | { "kind": "callback"; "fn": GuestFunction; "context"?: unknown }
+	| { "kind": "reaction"; "onFulfilled": unknown; "onRejected": unknown; "onFinally"?: unknown; "species"?: unknown; "context"?: unknown } | { "kind": "host"; "context"?: unknown };
 
 /** How a pending job is resumed: a fiber with what it awaited (or the rejection, thrown at the `await`), a callback with
  *  the host's call. */
-type Settlement = { "kind": "next"; "value": unknown } | { "kind": "throw"; "value": unknown } | { "kind": "call"; "args": unknown[]; "resolve": (value: unknown) => void; "reject": (reason: unknown) => void };
+type Settlement = JobInput | { "kind": "call"; "args": unknown[]; "resolve": (value: unknown) => void; "reject": (reason: unknown) => void };
 
 /** Stepped async: what settled, in order, for which pending job; and who waits for the next. Shared by forks. */
-interface AsyncScheduler { "settled": { "id": number; "input": Settlement }[]; "ids": number; "wakers": (() => void)[] }
+interface AsyncScheduler { "settled": { "id": number; "input": Settlement }[]; "ids": number; "wakers": (() => void)[]; "promises": OwnPromises }
 
 /** What a promise's own statics make (`Promise.resolve`, `Promise.all`, …) is the program's, not external. */
 const PROMISE_STATICS = ["resolve", "reject", "all", "allSettled", "race", "any", "withResolvers"];
@@ -3253,6 +3756,9 @@ function isPromiseStatic(promise: PromiseConstructor, callee: unknown): boolean 
 
 	return false;
 }
+
+/** ownPromiseCall: not a promise call this machine makes its own. */
+const NOT_OWN = Symbol("not own");
 
 function isThenable(value: unknown): value is object {
 	return (typeof value === "object" || typeof value === "function") && value !== null && typeof (value as { "then"?: unknown }).then === "function";

@@ -2,6 +2,7 @@
  * Statements: program/block, declarations, control flow (if / loops / switch / labels / try), enums.
  */
 import type { NodeFrame } from "../frame.ts";
+import { FOR_AWAIT_CLOSED } from "../frame.ts";
 import type { BindingKind } from "../scope.ts";
 import type { Machine } from "../vm.ts";
 import type { PatternProgram } from "./patterns.ts";
@@ -9,11 +10,12 @@ import ts from "typescript";
 import { unimplemented } from "../errors.ts";
 import { Scope } from "../scope.ts";
 import { namedIf } from "./functions.ts";
-import { resumed, suspend } from "./generators.ts";
+import { enclosingFunctionMeta, resumed, suspend } from "./generators.ts";
 import { bindingNames, hoist, hoistPlan, holdsClosure } from "./hoist.ts";
 import { getAsyncOrSyncIterator, getIterator, iterationStep, iterNext } from "./iteration.ts";
 import { propertyName } from "./literals.ts";
 import { assignProgram, bindIdentifier, bindingProgram, pushPattern } from "./patterns.ts";
+import { isObjectLike } from "./realm.ts";
 import { unwrapParens } from "./references.ts";
 import { evaluating, noop, on } from "./registry.ts";
 
@@ -219,16 +221,40 @@ function ifStatement(vm: Machine, frame: NodeFrame): void {
 	}
 }
 
-const returnStatement = evaluating<ts.ReturnStatement>(
-	(node) => (node.expression ? [node.expression] : []),
-	(vm, _frame, node, [value]) => {
-		const returned = node.expression ? value : undefined;
+// `return x` — in an async generator, with stepped async, x awaited first, as the spec's Return is (a rejection a throw
+// at the return)
+function returnStatement(vm: Machine, frame: NodeFrame): void {
+	const node = frame.node as ts.ReturnStatement;
 
-		vm.observe?.(node, "return", returned);
-		vm.traced("return", node, "return", returned);
-		vm.raise({ "type": "return", "value": returned });
+	if (frame.phase === 0) {
+		frame.phase = 1;
+
+		if (node.expression !== undefined && !vm.pushOperand(node.expression, frame.scope)) {
+			return;
+		}
 	}
-);
+
+	let returned: unknown;
+
+	if (frame.phase === 1) {
+		returned = node.expression === undefined ? undefined : vm.pop();
+
+		const meta = vm.steppedAsync ? enclosingFunctionMeta(frame.scope) : undefined;
+
+		if (meta?.isAsync === true && meta.isGenerator) {
+			suspend(vm, frame, "await", returned, 2);
+
+			return;
+		}
+	} else {
+		returned = resumed(vm);
+	}
+
+	vm.frames.pop();
+	vm.observe?.(node, "return", returned);
+	vm.traced("return", node, "return", returned);
+	vm.raise({ "type": "return", "value": returned });
+}
 
 const throwStatement = evaluating<ts.ThrowStatement>(
 	(node) => [node.expression],
@@ -461,6 +487,13 @@ export function forAwaitOf(vm: Machine, frame: NodeFrame, node: ts.ForOfStatemen
 		if (frame.syncIterator) {
 			const value = iterationStep(it);
 
+			// Stepped async: the spec's async-from-sync step — the value resolved, then its result — in the machine's jobs
+			if (vm.steppedHere) {
+				suspend(vm, frame, "await", vm.asyncFromSync(value, it.done), 4);
+
+				return;
+			}
+
 			if (it.done) {
 				vm.frames.pop();
 
@@ -480,6 +513,13 @@ export function forAwaitOf(vm: Machine, frame: NodeFrame, node: ts.ForOfStatemen
 
 			suspend(vm, frame, "await", step, 4); // await the result object
 		}
+	} else if (frame.phase === FOR_AWAIT_CLOSED) {
+		// (AsyncIteratorClose: `return()`'s result awaited — then what left the loop goes on)
+		const result = resumed(vm);
+		const leaving = frame.closing!;
+
+		frame.closing = undefined;
+		vm.raise(leaving.type !== "throw" && !isObjectLike(result) ? { "type": "throw", "value": new TypeError("Iterator result is not an object") } : leaving);
 	} else if (frame.phase === 3) {
 		bindForTarget(vm, frame, node.initializer, resumed(vm));
 		frame.phase = 5;
