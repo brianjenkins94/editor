@@ -27,7 +27,7 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 		const link = state.editorLink;
 
 		await link.ready.then(() => {
-			state.programFsFor = (cwd) => createFsShim(new RuntimeVfs(state.runLayer ?? link.fs), () => cwd);
+			state.programFsFor = (cwd) => createFsShim(new RuntimeVfs(state.runLayer ?? link.fs, state.runtime?.getVFS()), () => cwd);
 		}, () => undefined);
 	}
 

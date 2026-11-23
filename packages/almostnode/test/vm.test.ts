@@ -1,6 +1,7 @@
 /**
  * node:vm's contexts as Node's are, as far as a realm of the host's own allows (shims/vm.ts): the context object is the
- * code's `globalThis`, `this` and free names; the host's global keeps none of it.
+ * code's `globalThis`, `this` and free names, with the language's built-ins on its global; the host's global keeps none
+ * of it.
  *
  *   node --test test/vm.test.ts
  */
@@ -41,4 +42,12 @@ test("a preview's instrumented prelude finds its runtime on the context's global
 test("runInThisContext runs at the global scope, as Node's", () => {
 	assert.equal(ours.runInThisContext("typeof Script"), "undefined", "none of the shim's own names");
 	assert.equal(ours.runInThisContext("1 + 1"), 2);
+});
+
+test("a context's global has the language's built-ins, as a new context of Node's has — code copying its intrinsics off globalThis finds them", () => {
+	const code = "const copied = {}; for (const name of ['Array', 'Object', 'Reflect', 'Math', 'JSON']) { copied[name] = typeof globalThis[name]; } [copied, 'Array' in globalThis, typeof globalThis.fetch, typeof globalThis.given, globalThis.globalThis === globalThis, Object.keys(globalThis).includes('given')]";
+	const [node, mine] = both(code, () => ({ "given": 1 }));
+
+	assert.equal(JSON.stringify(mine), JSON.stringify(node));
+	assert.deepEqual(mine, [[{ "Array": "function", "Object": "function", "Reflect": "object", "Math": "object", "JSON": "object" }, true, "undefined", "number", true, true], { "given": 1 }]);
 });

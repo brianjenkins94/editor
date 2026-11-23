@@ -3,8 +3,10 @@
  * answering): what a debugger gives a program's own `fs` (almostnode's `createFsShim` over this), so each of its calls
  * on a workspace file is the editor's to decide, make and keep among the run's effects — one gate for every debugger's
  * programs. Only the primitives are here: VirtualFS builds its callback forms, streams and copies on them. A path outside
- * the workspace (a program's temp files) stays in this worker's memory, as VirtualFS keeps it: the editor has nothing
- * there. The debugger's module loading isn't through this: its reads aren't the program's.
+ * the workspace (a program's temp files) stays in this worker's memory: the editor has nothing there. Which memory is
+ * the caller's to say (`memory`): a debugger gives its runtime's, where the run's packages are, so the program reads a
+ * package's file at the path `require.resolve` gives and sees what a package wrote, as one disk is a process's.
+ * The debugger's module loading isn't through this: its reads aren't the program's.
  */
 import type { Stats } from "@brianjenkins94/almostnode";
 import type { RuntimeEntry, RuntimeFs, RuntimeStat } from "./runtime.ts";
@@ -66,23 +68,25 @@ function missing(syscall: string, path: string): Error {
 
 export class RuntimeVfs extends VirtualFS {
 	private readonly files: RuntimeFs;
+	private readonly memory: VirtualFS;
 
-	public constructor(files: RuntimeFs) {
+	public constructor(files: RuntimeFs, memory: VirtualFS = new VirtualFS()) {
 		super();
 		this.files = files;
+		this.memory = memory;
 	}
 
 	public override existsSync(path: string): boolean {
 		const workspace = inWorkspace(path);
 
-		return workspace === undefined ? super.existsSync(path) : this.files.stat(workspace) !== undefined;
+		return workspace === undefined ? this.memory.existsSync(path) : this.files.stat(workspace) !== undefined;
 	}
 
 	public override statSync(path: string): Stats {
 		const workspace = inWorkspace(path);
 
 		if (workspace === undefined) {
-			return super.statSync(path);
+			return this.memory.statSync(path);
 		}
 
 		const stat = this.files.stat(workspace);
@@ -104,7 +108,7 @@ export class RuntimeVfs extends VirtualFS {
 		const workspace = inWorkspace(path);
 
 		if (workspace === undefined) {
-			return encoding === undefined ? super.readFileSync(path) : super.readFileSync(path, encoding);
+			return encoding === undefined ? this.memory.readFileSync(path) : this.memory.readFileSync(path, encoding);
 		}
 
 		const bytes = this.files.readFile(workspace);
@@ -116,7 +120,7 @@ export class RuntimeVfs extends VirtualFS {
 		const workspace = inWorkspace(path);
 
 		if (workspace === undefined) {
-			super.writeFileSync(path, data);
+			this.memory.writeFileSync(path, data);
 		} else {
 			this.files.writeFile(workspace, data);
 		}
@@ -126,7 +130,7 @@ export class RuntimeVfs extends VirtualFS {
 		const workspace = inWorkspace(path);
 
 		if (workspace === undefined) {
-			super.mkdirSync(path, options);
+			this.memory.mkdirSync(path, options);
 		} else {
 			this.files.mkdir(workspace);
 		}
@@ -135,7 +139,7 @@ export class RuntimeVfs extends VirtualFS {
 	public override readdirSync(path: string): string[] {
 		const workspace = inWorkspace(path);
 
-		return workspace === undefined ? super.readdirSync(path) : this.files.readdir(workspace);
+		return workspace === undefined ? this.memory.readdirSync(path) : this.files.readdir(workspace);
 	}
 
 	/** A workspace folder's entries with their kinds, in one call (almostnode's fs asks it for `withFileTypes`, rather than a
@@ -150,7 +154,7 @@ export class RuntimeVfs extends VirtualFS {
 		const workspace = inWorkspace(path);
 
 		if (workspace === undefined) {
-			super.unlinkSync(path);
+			this.memory.unlinkSync(path);
 		} else {
 			this.files.rm(workspace);
 		}
@@ -160,7 +164,7 @@ export class RuntimeVfs extends VirtualFS {
 		const workspace = inWorkspace(path);
 
 		if (workspace === undefined) {
-			super.rmdirSync(path);
+			this.memory.rmdirSync(path);
 		} else {
 			this.files.rm(workspace);
 		}
@@ -173,7 +177,7 @@ export class RuntimeVfs extends VirtualFS {
 		if (from !== undefined && to !== undefined) {
 			this.files.rename(from, to);
 		} else if (from === undefined && to === undefined) {
-			super.renameSync(oldPath, newPath);
+			this.memory.renameSync(oldPath, newPath);
 		} else {
 			// (across the workspace's edge: a copy, then the old one gone)
 			this.writeFileSync(newPath, this.readFileSync(oldPath));
@@ -181,11 +185,15 @@ export class RuntimeVfs extends VirtualFS {
 		}
 	}
 
+	public override watch(...args: Parameters<VirtualFS["watch"]>): ReturnType<VirtualFS["watch"]> {
+		return inWorkspace(String(args[0])) === undefined ? this.memory.watch(...args) : super.watch(...args);
+	}
+
 	public override realpathSync(path: string): string {
 		const workspace = inWorkspace(path);
 
 		if (workspace === undefined) {
-			return super.realpathSync(path);
+			return this.memory.realpathSync(path);
 		}
 
 		if (this.files.stat(workspace) === undefined) {

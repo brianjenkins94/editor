@@ -64,11 +64,12 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      run's console had only seven of Node's methods.
    - **almostnode's Runtime tests** (async-context, builtins, modules, run-global): a run has an `eval` since 2026-11-23
      (*Decisions*, *Code from strings in a run*), whose names are the program's global object's, then the run's — so
-     `eval("globalThis") === globalThis`, and async-context's two, modules' `globalFor` and run-global's pass. Each of
-     the 2 left is judged as the rest were: builtins' parseArgs (it reads a package's file by the path `require.resolve`
-     gives, where a run's packages are in the runtime's memory and the program's fs has its own) and modules'
-     backpressure (its one EventEmitter is its test loader's doing, `--import ./test/extensionless.mjs`, which a run
-     doesn't take).
+     `eval("globalThis") === globalThis`, and async-context's two, modules' `globalFor` and run-global's pass; and
+     builtins' parseArgs, since outside the workspace a program's fs is the run's memory, where its packages are, and a
+     vm context's global has the language's built-ins as Node's has. One left: modules' backpressure — its one
+     EventEmitter is its test loader's doing (`--import ./test/extensionless.mjs`, `module.registerHooks`), which a run
+     doesn't take, and plain Node without it fails the same. Done when the user decides whether runs take a program's
+     loaders, and that's built or the test's verdict is in RUNNING.md.
    - **tsval's own tests inside tsval** (vm/event-loop's ordering, vm/stacks' `async` frames, vm/stepped-async's
      thenable's context): each holds tsval to V8 and passes in Node; run in the editor, the tsval under test leans on the
      one running it for its host promises' timing, so what fails is the outer one's fidelity, not the subject — one
@@ -197,7 +198,7 @@ packages/editor (`--all`, `--runs N`, `--json`).
   in 237 s against ~175, 2026-11-20 in 282 s, and 2026-11-22 twice, once in 239 s; "a rule gives it a value" without its value, 2026-11-23 three times, F5's with it once, 2026-11-20 in
   253 s).
   Each passes alone (15 of 15 for the spec, 2026-11-20) and in the next full run. On CI once (0e885fc4's `specs-2`):
-  "Pin…", its F5 run given "seen" at its stop and the margin showing a live run's `skipped = exec ls` instead — a live
+  "Pin…" (and locally 2026-11-23 in a full run, then alone), its F5 run given "seen" at its stop and the margin showing a live run's `skipped = exec ls` instead — a live
   run on its interval landing between. All four came after specs had editors of their own again (f8f3b8db), each
   editor still starting as its test runs.
 
