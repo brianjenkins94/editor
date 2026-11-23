@@ -89,9 +89,14 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    iterator's `return()` — is a job in one queue, in the spec's order; a package's native promise is the boundary, one
    pending job for its `then`'s pair (a `then(a, b)` left the other pending forever, so the run never ended).
    test/vm/promise-order.test.ts holds 30 programs to Node's order (10 matched before, 4 of them hung); test262's 164
-   async tests run stepped too; tsval's 1,985 tests, the editor's 231 and all 51 in-editor specs pass. vm/stacks' two
-   `at async` tests pass in the editor with it. **Done when** the three files run in an editor cloned from main pass
-   (their tsval under test the new one: the throwaway editor's workspace can't pull).
+   async tests run stepped too; tsval's 1,985 tests, the editor's 231 and all 51 in-editor specs pass. In an editor
+   cloned from main (30bd7a2c), the three files pass but one test — 25 of 26: vm/event-loop's ordering and forwarded
+   `then`, and vm/stacks' two `at async` tests, now pass there. Left, **done when** it passes there too:
+   - **stepped-async's returned thenable, two tsvals deep**: its `then` is called late and twice. Not the promise jobs —
+     an older gap of tsval running tsval, the same with the tsval before 30bd7a2c: a method made in an object literal
+     (tsval's own guest-function wrapper, `{ m(...args) { … } }.m`), called through `Reflect.apply` or `.call` by the
+     tsval under test, returns a Promise (one named `then`) or throws "Function.prototype.apply was called on
+     undefined" (`other`); a plain function's right, and one level deep all of it is, deep re-entry included.
 
 ## Watching
 
