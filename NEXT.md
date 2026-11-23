@@ -49,34 +49,24 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the
    API stood in for) and performance.mjs (budgets, from outside). The unit tests, counted again 2026-11-23 (every one
    in a throwaway instance's debugger, `runs_tests`, a package at a time: packages/tsval/vendor aside, 163 files):
-   104 green, 1,550 tests passing and 43 failing in the files that load. What holds the rest out was then judged test
-   by test — does the test need it to test what it's meant to? (the user, 2026-11-16 and again 2026-11-23: not
-   blindly implemented, as before) — proposed 2026-11-23, waiting on the user's word (*Decisions*, *Item 4's verdicts*).
-   Each is **done when** done as its verdict says, RUNNING.md, *Tests* saying why for what stays outside:
-   - **Stays outside — the host is the subject** (to RUNNING.md, beside git-push and node-test): packages/api's suite
-     (it tests the Worker in workerd: Durable Objects, D1, R2, rate limiters, crons); almostnode's builtins floor test
-     and vm.test (Node's own modules are the reference); playwright's engine and request tests and debug-mcp
-     cdp-memory's second (a launched Chromium is the reference); tsval's vm/handler-modules (a fresh Node loader per
-     module); silo's cli tests and test-command's three (checked against real git); editor-api's mailbox (a second
-     thread blocked in `Atomics.wait`); tsval's test262 (Node's fresh realms as the control); debug-mcp's sessions (two
-     processes contending for a port).
-   - **The test changes — what's missing is its scaffolding**: api's 13 tests of pure functions (`permissionsOf`,
-     `scrub`, the password helpers…) out of their wrangler files; almostnode's 8 files lose `import "./extensionless.mjs"`
-     (a Node loader hook doing what the runtime does; into `npm test`'s command instead); bablr-language-ts's 4 import
-     `../lib/*.ts`, not `../../bablr/dist` (the build adds nothing they check); cdp-memory's first and third tests out
-     of its Chromium `before()`; tsval's vm/step computes its expected value without `eval`.
-   - **The runtime or the code is wrong — a person's program would hit it**: almostnode doesn't read a package's `main`
-     for `require("string_decoder/")` (a trailing slash; readable-stream does it); a module with top-level `await` reached
-     by a static import fails (Node waits on it); a Worker unenv constructs never runs and never errors, so a program
-     waiting on it hangs (mailbox's 16 minutes); a run's `fetch` to its own localhost server goes to the real network
-     (debug-mcp's agent test); `net`'s `listen` never says a port is taken (Vite's next-port fallback needs it);
-     observability's metrics.ts divides by a zero interval (`performance.now()` can repeat), the test right as it is.
-     And `BroadcastChannel`: left out of runs since it reaches every tab — Node's is the process's own, so a run-local
-     one is the faithful equivalent (hub, rtc, probes' three tests); a decision, since RUNNING.md says it's left out.
-   - **Not settled — a run would say**: tsval's microtask order through `Reflect.apply(p.then…)` (vm/event-loop), an
-     `async` caller's frame (vm/stacks), a returned thenable's `then` called twice (vm/stepped-async: a bug if a person's
-     program sees it); hub/model (1000 seeds — cost, or a wait?); debug-mcp's page-tools, tabs and outdated (wall-clock
-     limits on interpreted code, or a socket?).
+   104 green, 1,550 tests passing and 43 failing in the files that load. What held the rest out was judged test by test
+   — does the test need it to test what it's meant to? (the user, 2026-11-16 and again 2026-11-23: not blindly
+   implemented, as before) — and done as judged (the user's word, 2026-11-23): what stays outside, the host its subject,
+   is in RUNNING.md, *Tests*; the tests that only lacked scaffolding changed (06ca07e0, 697b25d1, 769d881a); what a
+   person's program would hit fixed (387e1dcc: a trailing-slash require, top-level await by static import, a Worker that
+   never ran nor failed, EADDRINUSE, loopback fetch, a run's own BroadcastChannel, metrics' zero interval), and tsval's
+   `then` forwarded by call, apply or Reflect.apply, found settling one. Left, each **done when** as it says:
+   - **Count the changed files again** in a fresh instance (a clone of main now: the throwaway one can't pull without
+     signing in). Done when RUNNING.md's count is that run's.
+   - **tsval's own tests inside tsval** (vm/event-loop's ordering, vm/stacks' `async` frames, vm/stepped-async's
+     thenable's context): each holds tsval to V8 and passes in Node; run in the editor, the tsval under test leans on the
+     one running it for its host promises' timing, so what fails is the outer one's fidelity, not the subject — one
+     level of the same programs behaves as V8's since 2026-11-23. Proposed: they stay in Node, V8 their reference. Done
+     when the user says, and RUNNING.md does.
+   - **Too slow to interpret, so far** (RUNNING.md, *A second world*: tsval faster is the answer): hub/model (1,000
+     seeds of routing in one test) and debug-mcp's page-tools, tabs and outdated (wall-clock waits on interpreted
+     debug-mcp). Not measured: done when a run says whether a fewer-seed or longer-wait run passes, and they wait on
+     tsval's speed, said so in RUNNING.md, or the test's own limit is the gap.
 
 ## Watching
 
@@ -193,7 +183,7 @@ packages/editor (`--all`, `--runs N`, `--json`).
   without its comments, is the same code before and after (TypeScript's printer, 244 files). Not seen before today.
 
 - **live-runs.spec misses in slow full runs** (here: "F5 just after a save" without its Debug Console output, 2026-11-19
-  in 237 s against ~175, 2026-11-20 in 282 s, and 2026-11-22 twice, once in 239 s; "a rule gives it a value" without its value, 2026-11-23 once, 2026-11-20 in
+  in 237 s against ~175, 2026-11-20 in 282 s, and 2026-11-22 twice, once in 239 s; "a rule gives it a value" without its value, 2026-11-23 twice, 2026-11-20 in
   253 s).
   Each passes alone (15 of 15 for the spec, 2026-11-20) and in the next full run. On CI once (0e885fc4's `specs-2`):
   "Pin…", its F5 run given "seen" at its stop and the margin showing a live run's `skipped = exec ls` instead — a live
@@ -224,8 +214,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Decisions
 
-- **Item 4's verdicts** (queue item 4): the verdicts there, test by test — what stays outside and why, which tests
-  change, which runtime gaps are real, and whether a run gets a `BroadcastChannel` of its own. Proposed 2026-11-23.
+- **Item 4's verdicts** (queue item 4). Decided 2026-11-23, as proposed: what stays outside, the host its subject (in
+  RUNNING.md, *Tests*); the tests that lacked only scaffolding change; the gaps a person's program would hit are fixed;
+  a run has a `BroadcastChannel` of its own, Node's being the process's.
 - **How few tests is enough** (queue item 2): the target its replay is held to — how many of 80 commits may still run
   everything. Suggested: under 10, the rest of what's left being package.json and the workflows, which run everything
   by design.

@@ -185,3 +185,12 @@ test("event loop: a timer native code sets — a function the host compiled, `ne
 	await toEnd(vm);
 	assert.deepStrictEqual(lines, ["native 10", "guest 20", "native, from its callback"]);
 });
+
+test("a then forwarded by call, apply or Reflect.apply keeps its place among the microtasks, as V8's does", async () => {
+	const { lines, globals } = logged();
+	const src = "const p = Promise.resolve(); Reflect.apply(p.then, p, [() => log(1)]); p.then(() => log(2)); queueMicrotask(() => log(3)); p.then.call(p, () => log(4)); p.then.apply(p, [() => log(5)]); log('sync');";
+	const { vm } = createVM(src, { "globals": globals, "eventLoop": { "pace": "fast" } });
+
+	await toEnd(vm);
+	assert.deepStrictEqual(lines, ["sync", 1, 2, 3, 4, 5]);
+});

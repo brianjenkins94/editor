@@ -1033,11 +1033,24 @@ export class Machine implements VM {
 		const previousSite = this.callSite;
 		const { prototype } = this.realm.Promise;
 
-		const promising = callee === prototype.then || callee === prototype.catch || callee === prototype.finally;
+		const promisingFn = (fn: unknown): boolean => fn === prototype.then || fn === prototype.catch || fn === prototype.finally;
+		const { "call": call, "apply": apply } = this.realm.Function.prototype;
+		// (a promise's then, catch or finally — called, or forwarded by call, apply or Reflect.apply: a guest callback that
+		// slipped past a forwarder ran ahead of the jobs queued before it, 2026-11-23)
+		const forwarded = isConstruct ? undefined
+			: (callee === call && promisingFn(thisArg)) ? "call"
+				: (callee === apply && promisingFn(thisArg) && Array.isArray(args[1])) ? "apply"
+					: (callee === Reflect.apply && promisingFn(args[0]) && Array.isArray(args[2])) ? "reflect"
+						: undefined;
+		const promising = promisingFn(callee) || forwarded !== undefined;
+		const defer = (list: readonly unknown[]): unknown[] => list.map((arg) => (ownedBy(arg, this) ? this.deferCallback(arg) : arg));
 
 		// Stepped async: a guest callback a host promise will call is a job of its own, run on the main stack.
 		if (this.steppedHere && !isConstruct && promising) {
-			args = args.map((arg) => (ownedBy(arg, this) ? this.deferCallback(arg) : arg));
+			args = forwarded === "call" ? [args[0], ...defer(args.slice(1))]
+				: forwarded === "apply" ? [args[0], defer(args[1] as unknown[])]
+					: forwarded === "reflect" ? [args[0], args[1], defer(args[2] as unknown[])]
+						: defer(args);
 		}
 
 		this.callSite = site; // (set BEFORE the guard runs: a guard may read it, or the `site` argument)
