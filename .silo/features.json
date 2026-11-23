@@ -78,7 +78,8 @@
       "packages/api/src/rbac.ts"
     ],
     "tests": [
-      "packages/api/test/admin.test.ts"
+      "packages/api/test/admin.test.ts",
+      "packages/api/test/rbac.test.ts"
     ]
   },
   "Admin: sign-ins and their timelines": {
@@ -808,7 +809,8 @@
       "packages/api/src/errors.ts"
     ],
     "tests": [
-      "packages/api/test/errors.test.ts"
+      "packages/api/test/errors.test.ts",
+      "packages/api/test/errors-scrub.test.ts"
     ]
   },
   "Event Sheet": {
@@ -1350,6 +1352,7 @@
     ],
     "tests": [
       "packages/api/test/account.test.ts",
+      "packages/api/test/device-label.test.ts",
       "packages/api/test/sessions.test.ts"
     ]
   },
@@ -1369,7 +1372,8 @@
     ],
     "tests": [
       "packages/observability/test/metrics.test.ts",
-      "packages/debug-mcp/test/cdp-memory.test.ts"
+      "packages/debug-mcp/test/cdp-memory.test.ts",
+      "packages/debug-mcp/test/cdp-memory-realms.test.ts"
     ]
   },
   "Mock a value": {
@@ -2256,7 +2260,8 @@
       "packages/api/src/password.ts"
     ],
     "tests": [
-      "packages/api/test/password.test.ts"
+      "packages/api/test/password.test.ts",
+      "packages/api/test/password-rules.test.ts"
     ]
   },
   "Sign-in and account": {
@@ -2693,7 +2698,8 @@
       "packages/api/src/tripwire.ts"
     ],
     "tests": [
-      "packages/api/test/tripwire.test.ts"
+      "packages/api/test/tripwire.test.ts",
+      "packages/api/test/tripwire-watch.test.ts"
     ]
   },
   "Two-factor sign-in": {
@@ -2760,6 +2766,7 @@
     ],
     "tests": [
       "packages/api/test/behavior.test.ts",
+      "packages/api/test/behavior-model.test.ts",
       "packages/api/test/detection.test.ts"
     ]
   },

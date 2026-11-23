@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
-import type { Model } from "../src/behavior.ts";
-import { actionOf, differences, FLOWS, proxied, START, surprisal } from "../src/behavior.ts";
+import { START } from "../src/behavior.ts";
 import { BROWSER } from "./browser.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
@@ -94,15 +93,6 @@ const CHROME_142 = BROWSER["user-agent"]?.replace("Chrome/141", "Chrome/142") as
 
 // ── Actions ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-test("a proxied call is its template: the query's names kept, every value left for the hash", () => {
-	assert.deepEqual(proxied("api", "GET", "/repos/octo/hello/git/trees/main", "?recursive=1"), { "template": "GET /repos/:owner/:repo/git/trees/:ref?recursive", "repository": "octo/hello", "rest": "main\n?recursive=1" });
-	assert.deepEqual(proxied("api", "GET", "/user", ""), { "template": "GET /user", "rest": "" });
-	assert.equal(proxied("api", "DELETE", "/repos/octo/hello", ""), undefined, "a method the editor doesn't use");
-	assert.equal(proxied("api", "GET", "/repos/octo/hello/git/trees/heads/../../secret", ""), undefined, "a ref can't climb");
-	assert.deepEqual(proxied("git", "GET", "/octo/hello.git/info/refs", "?service=git-receive-pack"), { "template": "GET /:owner/:repo.git/info/refs?service", "repository": "octo/hello", "rest": "?service=git-receive-pack" }, "a push's, the same template as a clone's");
-	assert.equal(proxied("git", "GET", "/octo/hello.git/info/refs", "?service=git-upload-archive"), undefined, "no other service");
-});
-
 test("a route that doesn't exist, asked for while signed in, is a probe: 404, recorded with its path hashed", async () => {
 	const holder = await client();
 	const { access_token, grantId } = await signedIn(holder);
@@ -147,18 +137,6 @@ test("an admin sign-in probing under /admin is a probe too", async () => {
 });
 
 // ── A sign-in's client ─────────────────────────────────────────────────────────────────────────────────────────────
-
-test("weighing a difference: what a browser update or a new release does is tolerated; a browser becoming something else is strong", () => {
-	const known = { "origin": "o", "sec-fetch-mode": "m", "user-agent": "u141", "accept-language": "en", "browser": "Chrome", "major": "141", "os": "macOS" };
-	const weigh = (now: Record<string, string | null>): string[] => differences(known, { ...known, ...now }).map((difference) => `${difference.strength}: ${difference.name} ${difference.kind}`);
-
-	assert.deepEqual(weigh({ "sec-ch-ua": "new" }), ["tolerated: sec-ch-ua added"]);
-	assert.deepEqual(weigh({ "user-agent": "u142", "major": "142" }), ["tolerated: user-agent changed", "tolerated: major changed"]);
-	assert.deepEqual(weigh({ "origin": null }), ["strong: origin omitted"]);
-	assert.deepEqual(weigh({ "user-agent": "u140", "major": "140" }), ["medium: user-agent changed", "strong: major changed"]);
-	assert.deepEqual(weigh({ "browser": "Firefox" }), ["strong: browser changed"]);
-	assert.deepEqual(weigh({ "accept-language": "de" }), ["medium: accept-language changed"]);
-});
 
 test("a sign-in that isn't a browser's from the start is recorded once, by what it didn't send", async () => {
 	const script = await client({ "user-agent": "my-mcp-server/1.0" });
@@ -216,38 +194,6 @@ async function score(grantId: string): Promise<{ "steps": number; "mean": number
 const settle = async (): Promise<void> => {
 	await env.DB.prepare("UPDATE actions SET first_seen = 0").run();
 };
-
-test("an action is its route's template, the proxy's template, or no route at all", () => {
-	assert.equal(actionOf("GET", new URL("https://api.test/github/api/repos/octo/hello/git/trees/main?recursive=1"), "/github/api/*"), "GET /github/api/repos/:owner/:repo/git/trees/:ref?recursive");
-	assert.equal(actionOf("DELETE", new URL("https://api.test/github/api/repos/octo/hello"), "/github/api/*"), "DELETE /github/api/… (refused)");
-	assert.equal(actionOf("POST", new URL("https://api.test/sessions/abc/revoke"), "/sessions/:id/revoke"), "POST /sessions/:id/revoke");
-	assert.equal(actionOf("GET", new URL("https://api.test/wp-admin"), "/*"), "GET (no such route)");
-});
-
-test("the editor's flows name only calls the proxy allows", () => {
-	for (const action of new Set(FLOWS.flat())) {
-		const [method = "", template = ""] = action.split(" ");
-
-		if (template.startsWith("/github/")) {
-			const [path = "", names] = template.split("?");
-			const url = new URL(`https://api.test${path.replaceAll(":owner", "octo").replaceAll(":repo", "hello").replaceAll(":ref", "main")}${names === undefined ? "" : `?${names === "service" ? "service=git-upload-pack" : `${names}=1`}`}`);
-
-			assert.equal(actionOf(method, url, "/github/*"), action, action);
-		}
-	}
-});
-
-test("the score: a step the editor takes is unsurprising, a jump it never makes is, a new action is capped, and too little behind an action isn't scored", () => {
-	const model: Model = { "counts": new Map(), "out": new Map(), "into": new Map(), "total": 0, "firstSeen": new Map([["GET /github/api/repos/:owner/:repo/git/blobs/:ref", 0], ["POST /account/delete", 0]]) };
-	const from = "GET /github/api/repos/:owner/:repo/git/trees/:ref?recursive";
-	const usual = surprisal(model, { "from": from, "to": "GET /github/api/repos/:owner/:repo/git/blobs/:ref", "gap": 0 }) as number;
-	const jump = surprisal(model, { "from": from, "to": "POST /account/delete", "gap": 0 }) as number;
-
-	assert.ok(usual < 3, `a flow's step: ${usual} bits`);
-	assert.ok(jump > usual + 3, `a jump: ${jump} bits`);
-	assert.equal(surprisal(model, { "from": from, "to": "GET /brand-new-feature", "gap": 0 }), 4, "new: capped");
-	assert.equal(surprisal(model, { "from": "GET /never-seen", "to": "POST /account/delete", "gap": 0 }), undefined, "nothing behind it");
-});
 
 test("a sign-in's steps are kept in its Grant and flushed into the model: our routes, the admin's, and the proxy's, by template", async () => {
 	const editor = await client();

@@ -4,7 +4,6 @@ import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
-import { deviceLabel } from "../src/account.ts";
 import { BROWSER } from "./browser.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
 
@@ -102,14 +101,6 @@ interface Listed { "id": string; "current": boolean; "label": string | null; "cr
 async function sessions(of: Awaited<ReturnType<typeof signIn>>): Promise<Listed[]> {
 	return (await (await of.call("GET", "/sessions")).json() as { "sessions": Listed[] }).sessions;
 }
-
-test("a device label is the browser and the OS, nothing more", () => {
-	assert.equal(deviceLabel("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"), "Chrome on macOS");
-	assert.equal(deviceLabel("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0"), "Edge on Windows");
-	assert.equal(deviceLabel("Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"), "Safari on iOS");
-	assert.equal(deviceLabel("Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0"), "Firefox on Linux");
-	assert.equal(deviceLabel(undefined), undefined);
-});
 
 test("sessions: your live sign-ins, this one marked, labelled — not anyone else's, not ended ones", async () => {
 	const me = user();

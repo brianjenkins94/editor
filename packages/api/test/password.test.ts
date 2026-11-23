@@ -7,7 +7,7 @@ import { base64url, exportJWK, generateKeyPair } from "jose";
 import { createTestHarness } from "wrangler";
 import type { Answer, App } from "./helpers.ts";
 import { testBrowser, someone } from "./helpers.ts";
-import { hashPassword, passwordProblem, verifyPassword } from "../src/password-hash.ts";
+import { hashPassword, verifyPassword } from "../src/password-hash.ts";
 import { hotp, stepAt, unbase32 } from "@brianjenkins94/util/auth/totp";
 
 // C3 in workerd (README.md, C3): someone who signed in by email sets a password from their account (a code to
@@ -135,21 +135,6 @@ test("a password's hash is Argon2id at OWASP's baseline, the same as Node's own,
 	assert.equal(Buffer.from(hash, "base64").toString("hex"), Buffer.from(node).toString("hex"));
 	assert.equal(await verifyPassword("correct horse battery staple", phc), true);
 	assert.equal(await verifyPassword("correct horse battery stapl", phc), false);
-});
-
-test("a hash stored before the switch to @noble/hashes (made by @hallaxius/argon2w, 2026-10-21) still verifies", async () => {
-	const stored = "$argon2id$v=19$m=19456,t=2,p=1$Rzb4ru0fdDfjsPFnIj5xYQ$AQYFlycaDrSxJCcV0qm1ZaH6On/C/dnnHiVo/YaZ/GY";
-
-	assert.equal(await verifyPassword("correct horse battery staple", stored), true);
-	assert.equal(await verifyPassword("correct horse battery stapl", stored), false);
-});
-
-test("the rules: 10 to 100 printable ASCII characters, no space at either end, said plainly", () => {
-	assert.equal(passwordProblem("short"), "shorter than 10 characters");
-	assert.equal(passwordProblem("x".repeat(101)), "longer than 100 characters");
-	assert.equal(passwordProblem("pässwörter-lang"), "only letters, digits, spaces and the symbols on a US keyboard");
-	assert.equal(passwordProblem(" leading space ok?"), "starts or ends with a space");
-	assert.equal(passwordProblem("a perfectly fine passphrase"), undefined);
 });
 
 // ── Setting one, and signing in with it ────────────────────────────────────────────────────────────────────────────

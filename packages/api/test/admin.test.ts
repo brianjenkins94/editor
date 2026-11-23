@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { createTestHarness } from "wrangler";
-import { PERMISSIONS, permissionsOf } from "../src/rbac.ts";
+import { PERMISSIONS } from "../src/rbac.ts";
 import { BROWSER } from "./browser.ts";
 import { keyed } from "../src/behavior.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
@@ -95,11 +95,6 @@ const someone = (): number => 1_000_000 + Math.floor(Math.random() * 1e9);
 async function refusals(grantId: string): Promise<string[]> {
 	return (await env.DB.prepare("SELECT reason FROM audit WHERE grant_id = ? AND event IN ('auth_refused', 'token_rejected') ORDER BY id").bind(grantId).all<{ "reason": string }>()).results.map((row) => row.reason);
 }
-
-test("roles map to permissions: the owner holds every one, no role holds none", () => {
-	assert.deepEqual(permissionsOf(["owner"]), [...PERMISSIONS]);
-	assert.deepEqual(permissionsOf([]), []);
-});
 
 test("/admin/me: the owner, signed in to the admin app, is the owner with every permission", async () => {
 	const holder = await browser();
