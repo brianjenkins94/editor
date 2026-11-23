@@ -556,3 +556,46 @@ test("a package's code has Node's Buffer as a global, though the realm it runs i
 		host.Buffer = kept;
 	}
 });
+
+test("module.registerHooks: every require after it goes through its hooks, as Node's in-thread ones — a package's built-in resolved to a file, a source changed as it's loaded, and none once deregistered", () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/greet/package.json": JSON.stringify({ "name": "greet", "main": "index.js" }),
+		"/workspace/node_modules/greet/index.js": "module.exports = { \"events\": require(\"events\") };",
+		"/workspace/own-events.js": "module.exports = { \"mine\": true };",
+		"/workspace/shout.js": "module.exports = \"quiet\";"
+	});
+	const found = runtime.execute(`
+const { registerHooks } = require("node:module");
+const asked = [];
+const hooks = registerHooks({
+	"resolve": (specifier, context, next) => {
+		asked.push(specifier + " from " + context.parentURL);
+
+		if (specifier === "events" && context.parentURL.includes("/node_modules/greet/")) {
+			return { "url": "file:///workspace/own-events.js", "shortCircuit": true };
+		}
+
+		return specifier === "virtual" ? { "url": "file:///workspace/own-events.js", "shortCircuit": true } : next(specifier, context);
+	},
+	"load": (url, context, next) => {
+		const loaded = next(url, context);
+
+		return url.endsWith("/shout.js") ? { ...loaded, "source": String(loaded.source).replace("quiet", "LOUD") } : loaded;
+	}
+});
+const greet = require("greet");
+const found = { "fromPackage": greet.events, "fromProgram": typeof require("events"), "shouted": require("./shout.js"), "virtual": require.resolve("virtual"), "asked": asked.slice(0, 2) };
+hooks.deregister();
+try { require.resolve("virtual"); } catch (error) { found.after = error.message; }
+module.exports = found;
+`, "/workspace/main.js").exports;
+
+	assert.deepEqual(found, {
+		"fromPackage": { "mine": true },
+		"fromProgram": "function",
+		"shouted": "LOUD",
+		"virtual": "/workspace/own-events.js",
+		"asked": ["greet from file:///workspace/main.js", "events from file:///workspace/node_modules/greet/index.js"],
+		"after": "Cannot find module 'virtual'"
+	});
+});

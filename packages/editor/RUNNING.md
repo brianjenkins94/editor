@@ -46,7 +46,10 @@ run's, and `this` and `globalThis` the program's. tsval leaves `eval` to its hos
 own scope can't be modeled by an interpreter that isn't the host's — so either kind is global code here, not the
 caller's scope. And outside the workspace, a program's `fs` is the run's memory, where its packages are unpacked
 (`/node_modules`): a package's file reads at the path `require.resolve` gives, and what a package writes there the
-program sees, as one disk is a process's.
+program sees, as one disk is a process's. And a run takes node's `--import` (the terminal's `node`, so a package's `npm test` as written; a
+launch configuration's `runtimeArgs`; `runs_tests`' `imports`): the module loads before the program, and what it
+registers with `module.registerHooks` — Node's in-thread resolve and load hooks — every require and import after it
+goes through, the program's and its packages'. `module.register`'s hooks, off-thread, aren't (tsx's).
 
 **Output goes where it was started.** A run from the terminal prints there, reads its stdin there, and has the args, cwd
 and env the command line gave; one from F5 uses the Debug Console. **What's running** is one registry (workbench/runs.ts):

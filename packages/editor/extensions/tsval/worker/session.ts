@@ -1068,6 +1068,17 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	armCapabilities(loaded.sourceFile);
 	arm(loaded.vm);
 
+	for (const specifier of message.imports ?? []) {
+		try {
+			await run.span("editor.extensions.tsval.worker.session.import", { "specifier": specifier }, async () => loadedRuntime.imported(specifier, where.cwd ?? packageProcess.cwd(), "program"));
+		} catch (error) {
+			post({ "type": "output", "text": `node: --import ${specifier} failed: ${error instanceof Error && error.stack !== undefined ? error.stack : String(error)}\n`, "stream": "stderr" });
+			finish(1);
+
+			return;
+		}
+	}
+
 	state.history = [];
 	state.index = -1;
 	state.done = false;

@@ -55,21 +55,16 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    is in RUNNING.md, *Tests*; the tests that only lacked scaffolding changed (06ca07e0, 697b25d1, 769d881a); what a
    person's program would hit fixed (387e1dcc: a trailing-slash require, top-level await by static import, a Worker that
    never ran nor failed, EADDRINUSE, loopback fetch, a run's own BroadcastChannel, metrics' zero interval), and tsval's
-   `then` forwarded by call, apply or Reflect.apply, found settling one. Left, each **done when** as it says:
+   `then` forwarded by call, apply or Reflect.apply, found settling one. almostnode's Runtime tests all pass here
+   since 2026-11-23: a run's `eval` sees the program's globals, a program's fs outside the workspace is the run's
+   memory, a vm context has the language's built-ins, and a run takes `--import` and `module.registerHooks` (modules'
+   backpressure test needs its loader: `runs_tests` with `imports`, or `npm test` in the terminal). Left, each **done when** as it says:
    - **Count the changed files again** in a fresh instance (a clone of main now: the throwaway one can't pull without
      signing in). Done when RUNNING.md's count is that run's. Counted 2026-11-23, the 32 changed files: api's, bablr's,
      cdp-memory-realms, silo's test-command, hub's, rtc, probes, metrics, runtime-vfs and debug-mcp's agent green;
      mailbox failing in under a second, its Worker saying so. Settling them found and fixed two more gaps a program
      would hit: an ES module's own top-level `exports` (unenv's net.mjs builds one) took the CommonJS emit's name, and a
      run's console had only seven of Node's methods.
-   - **almostnode's Runtime tests** (async-context, builtins, modules, run-global): a run has an `eval` since 2026-11-23
-     (*Decisions*, *Code from strings in a run*), whose names are the program's global object's, then the run's — so
-     `eval("globalThis") === globalThis`, and async-context's two, modules' `globalFor` and run-global's pass; and
-     builtins' parseArgs, since outside the workspace a program's fs is the run's memory, where its packages are, and a
-     vm context's global has the language's built-ins as Node's has. One left: modules' backpressure — its one
-     EventEmitter is its test loader's doing (`--import ./test/extensionless.mjs`, `module.registerHooks`), which a run
-     doesn't take, and plain Node without it fails the same. Done when the user decides whether runs take a program's
-     loaders, and that's built or the test's verdict is in RUNNING.md.
    - **tsval's own tests inside tsval** (vm/event-loop's ordering, vm/stacks' `async` frames, vm/stepped-async's
      thenable's context): each holds tsval to V8 and passes in Node; run in the editor, the tsval under test leans on the
      one running it for its host promises' timing, so what fails is the outer one's fidelity, not the subject — one

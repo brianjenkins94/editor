@@ -21,7 +21,15 @@ function resolvePosix(base: string, path: string): string {
 
 const EVAL_DIR = "/workspace/.silo/local/node-eval";
 
-export type NodeInvocation = { "file": string; "args": string[] } | { "code": string; "print": boolean; "args": string[] } | { "tests": string[] } | { "unsupported": string; "exitCode": number };
+export type NodeInvocation = ({ "file": string; "args": string[] } | { "code": string; "print": boolean; "args": string[] } | { "tests": string[] }) & { "imports"?: string[] } | { "unsupported": string; "exitCode": number };
+
+export function matchesGlob(pattern: string, path: string): boolean {
+	const source = pattern.replace(/^\.\//u, "").replaceAll(/\*\*\/|\*\*|[*?.+^${}()|[\]\\]/gu, (token) => ({ "**/": "(?:[^/]+/)*", "**": ".*", "*": "[^/]*", "?": "[^/]" })[token] ?? `\\${token}`);
+
+	return new RegExp(`^${source}$`, "u").test(path);
+}
+
+const isGlob = (arg: string): boolean => /[*?]/u.test(arg);
 
 export function isTestFile(path: string): boolean {
 	const parts = path.split("/");
@@ -36,26 +44,28 @@ export function isTestFile(path: string): boolean {
 
 export function invocationOf(config: Juvy): NodeInvocation {
 	const program = config.get("program") as string[];
+	const imports = config.get("import") as string[];
+	const preloads = imports.length === 0 ? {} : { "imports": imports };
 
 	if (config.get("version") === true) {
-		return { "code": "process.version", "print": true, "args": [] };
+		return { "code": "process.version", "print": true, "args": [], ...preloads };
 	}
 
 	if (config.get("eval") !== "" || config.get("print") !== "") {
 		const print = config.get("print") !== "";
 
-		return { "code": config.get(print ? "print" : "eval") as string, "print": print, "args": program };
+		return { "code": config.get(print ? "print" : "eval") as string, "print": print, "args": program, ...preloads };
 	}
 
 	if (config.get("test") === true) {
-		return { "tests": program };
+		return { "tests": program, ...preloads };
 	}
 
 	if (program.length === 0) {
 		return { "unsupported": "node: there's no REPL here yet — `node -e` runs a line of code, `node` with a file runs a program", "exitCode": 0 };
 	}
 
-	return { "file": program[0], "args": program.slice(1) };
+	return { "file": program[0], "args": program.slice(1), ...preloads };
 }
 
 export function create({ runner, writeLive, captured, terminal }: CommandHost): Handler {
@@ -70,7 +80,9 @@ export function create({ runner, writeLive, captured, terminal }: CommandHost): 
 		}
 
 		if ("tests" in invocation) {
-			const files = invocation.tests.length > 0 ? invocation.tests : await testFilesUnder(ctx.cwd);
+			const files = invocation.tests.length === 0
+				? await filesUnder(ctx.cwd, isTestFile)
+				: (await Promise.all(invocation.tests.map(async (each) => (isGlob(each) ? filesUnder(ctx.cwd, (path) => matchesGlob(each, path)) : [each])))).flat();
 
 			if (files.length === 0) {
 				return { "stdout": "", "stderr": `node: no test files under ${ctx.cwd}\n`, "exitCode": 1 };
@@ -111,7 +123,7 @@ export function create({ runner, writeLive, captured, terminal }: CommandHost): 
 			}
 		}
 
-		async function testFilesUnder(dir: string): Promise<string[]> {
+		async function filesUnder(dir: string, keep: (path: string) => boolean): Promise<string[]> {
 			const found: string[] = [];
 			const walk = async (relative: string): Promise<void> => {
 				const names = await ctx.fs.readdir(resolvePosix(dir, relative || ".")).catch((): string[] => []);
@@ -127,7 +139,7 @@ export function create({ runner, writeLive, captured, terminal }: CommandHost): 
 
 					if (stat?.isDirectory === true) {
 						await walk(path);
-					} else if (isTestFile(path)) {
+					} else if (keep(path)) {
 						found.push(path);
 					}
 				}
@@ -171,7 +183,7 @@ export function create({ runner, writeLive, captured, terminal }: CommandHost): 
 			};
 
 			try {
-				const debugged = await runner.debug(file, ctx.cwd, env, { "runId": run.id, "onOutput": output, "signal": controller.signal, "args": programArgs, "onListening": listening });
+				const debugged = await runner.debug(file, ctx.cwd, env, { "runId": run.id, "onOutput": output, "signal": controller.signal, "args": programArgs, "runtimeArgs": ("imports" in invocation ? invocation.imports ?? [] : []).flatMap((each) => ["--import", each]), "onListening": listening });
 
 				if (debugged.attached) {
 					return ended(debugged.exitCode);

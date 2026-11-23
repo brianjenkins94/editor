@@ -551,6 +551,37 @@ export function packageDirOf(filename: string): string | undefined {
 /** The package folders each runtime (by its module cache) has told its host of (onPackage). */
 const toldPackages = new WeakMap<Record<string, Module>, Set<string>>();
 
+/** module.registerHooks' resolve hook, as Node's: given a specifier, where it is (`url`: a file: URL, or `node:` and a
+ *  built-in's name), or the next hook's answer (`next`). */
+export type ResolveHook = (specifier: string, context: { "conditions": string[]; "importAttributes": Record<string, string>; "parentURL"?: string }, next: (specifier: string, context?: object) => { "url": string; "format"?: string; "shortCircuit"?: boolean }) => { "url": string; "format"?: string; "shortCircuit"?: boolean };
+
+/** module.registerHooks' load hook, as Node's: given a module's URL, its source, or the next hook's (`next`). */
+export type LoadHook = (url: string, context: { "conditions": string[]; "format"?: string; "importAttributes": Record<string, string> }, next: (url: string, context?: object) => { "format"?: string; "source"?: string | ArrayBuffer | Uint8Array; "shortCircuit"?: boolean }) => { "format"?: string; "source"?: string | ArrayBuffer | Uint8Array; "shortCircuit"?: boolean };
+
+/** The hooks a runtime's code registered (module.registerHooks), by its module cache, in the order registered: a
+ *  process's, as Node's are — every require and import goes through them, the program's and its packages'. */
+const loaderHooks = new WeakMap<Record<string, Module>, { "resolve"?: ResolveHook; "load"?: LoadHook }[]>();
+
+const hooksOf = (cache: Record<string, Module>): { "resolve"?: ResolveHook; "load"?: LoadHook }[] => {
+	const hooks = loaderHooks.get(cache) ?? [];
+
+	loaderHooks.set(cache, hooks);
+
+	return hooks;
+};
+
+/** `hooks` in a chain ending at `last`, the last registered first; each given its own context, merged over the one it
+ *  was given. */
+function chained<C extends object, R>(hooks: ((input: string, context: C, next: (input: string, context?: object) => R) => R)[], last: (input: string, context: C) => R): (input: string, context: C) => R {
+	return hooks.reduce<(input: string, context: C) => R>((next, hook) => (input, context) => hook(input, context, (nextInput, nextContext) => next(nextInput, { ...context, ...nextContext })), last);
+}
+
+/** A file's URL, as a hook is given and gives one. */
+const fileUrl = (path: string): string => "file://" + encodeURI(path);
+
+/** A module's format, as Node's load says it by its name. */
+const formatOf = (path: string): string | undefined => (path.endsWith(".json") ? "json" : /\.m[jt]s$/u.test(path) ? "module" : /\.c[jt]s$/u.test(path) ? "commonjs" : undefined);
+
 /** Who asks for a module: the program's own code, or a package's. */
 export type Requester = "program" | "package";
 
@@ -671,9 +702,11 @@ function createRequire(
 	moduleCache: Record<string, Module>,
 	options: RuntimeOptions,
 	processedCodeCache?: Map<string, string>,
-	requester: Requester = "package"
+	requester: Requester = "package",
+	parentFile: string = pathShim.join(currentDir, "[require]")
 ): RequireFunction {
 	const isProgram = options.isProgram ?? outsideNodeModules;
+	const hooks = hooksOf(moduleCache);
   // Module resolution cache for faster repeated imports
 	const resolutionCache = new Map<string, string | null>();
 
@@ -1039,6 +1072,40 @@ function createRequire(
 		throw new Error(`Cannot find module '${id}'`);
 	};
 
+	/** A file's source, as the load hooks give it (module.registerHooks), else as it is. */
+	const sourceOf = (resolvedPath: string): string => {
+		const loads = hooks.flatMap(({ load }) => (load === undefined ? [] : [load]));
+
+		if (loads.length === 0) {
+			return vfs.readFileSync(resolvedPath, "utf8");
+		}
+
+		const format = formatOf(resolvedPath);
+		const load = chained(loads, (url: string) => ({ ...format === undefined ? {} : { "format": format }, "source": vfs.readFileSync(decodeURIComponent(new URL(url).pathname), "utf8") }));
+		const { source } = load(fileUrl(resolvedPath), { "conditions": ["node", "require"], ...format === undefined ? {} : { "format": format }, "importAttributes": {} });
+
+		return typeof source === "string" ? source : new TextDecoder().decode(source);
+	};
+
+	/** Where `id` is, as the resolve hooks say (module.registerHooks): a built-in's name, or a file's path. */
+	const hookedResolve = (id: string): string => {
+		const resolve = chained(hooks.flatMap((each) => (each.resolve === undefined ? [] : [each.resolve])), (specifier: string) => {
+			const bare = specifier.replace(/^node:/u, "");
+
+			// (what require answers itself, by its name: the fs, process and module it makes, and its stand-ins)
+			if (bare === "fs/promises" || bare === "module" || /^(?:rollup|esbuild|prettier)(?:\/|$)|^@(?:rollup|esbuild)\//u.test(bare)) {
+				return { "url": "node:" + bare };
+			}
+
+			const resolved = resolveModule(specifier, currentDir);
+
+			return { "url": resolved.startsWith("/") ? fileUrl(resolved) : "node:" + resolved };
+		});
+		const { url } = resolve(id, { "conditions": ["node", "require"], "importAttributes": {}, "parentURL": fileUrl(parentFile) });
+
+		return url.startsWith("node:") ? url.slice("node:".length) : url.startsWith("file://") ? decodeURIComponent(new URL(url).pathname) : url;
+	};
+
 	const loadModule = (resolvedPath: string): Module => {
     // Return cached module
 		if (moduleCache[resolvedPath]) {
@@ -1061,7 +1128,7 @@ function createRequire(
 
     // Handle JSON files
 		if (resolvedPath.endsWith(".json")) {
-			const content = vfs.readFileSync(resolvedPath, "utf8");
+			const content = sourceOf(resolvedPath);
 
 			module.exports = JSON.parse(content);
 			module.loaded = true;
@@ -1070,7 +1137,7 @@ function createRequire(
 		}
 
     // Read and execute JS file
-		const rawCode = vfs.readFileSync(resolvedPath, "utf8");
+		const rawCode = sourceOf(resolvedPath);
 		const dirname = pathShim.dirname(resolvedPath);
 		const program = isProgram(resolvedPath);
 
@@ -1092,7 +1159,7 @@ function createRequire(
     // A program file, evaluated by the host's own evaluator (the tsval debugger), from its source as written
 		if (program && options.evaluateProgram !== undefined) {
 			try {
-				options.evaluateProgram(module, createRequire(vfs, fsShim, process, dirname, moduleCache, options, processedCodeCache, "program"), rawCode);
+				options.evaluateProgram(module, createRequire(vfs, fsShim, process, dirname, moduleCache, options, processedCodeCache, "program", resolvedPath), rawCode);
 				module.loaded = true;
 			} catch (error) {
 				delete moduleCache[resolvedPath];
@@ -1134,7 +1201,8 @@ function createRequire(
 			moduleCache,
 			options,
 			processedCodeCache,
-			program ? "program" : "package"
+			program ? "program" : "package",
+			resolvedPath
 		);
 
 		moduleRequire.cache = moduleCache;
@@ -1221,6 +1289,17 @@ function createRequire(
 	};
 
 	const require: RequireFunction = (id: string): unknown => {
+		// The resolve hooks' answer first (module.registerHooks): a file is loaded as it says, a built-in's name is required
+		if (hooks.some(({ resolve }) => resolve !== undefined)) {
+			const target = hookedResolve(id);
+
+			if (target.startsWith("/")) {
+				return exportsOf(target);
+			}
+
+			id = target;
+		}
+
     // Handle node: protocol prefix (Node.js 16+)
 		if (id.startsWith("node:")) {
 			id = id.slice(5);
@@ -1258,7 +1337,8 @@ function createRequire(
 					moduleCache,
 					options,
 					processedCodeCache,
-					isProgram(fromPath) ? "program" : "package"
+					isProgram(fromPath) ? "program" : "package",
+					fromPath
 				);
 
 				newRequire.cache = moduleCache;
@@ -1290,7 +1370,15 @@ function createRequire(
 				...shared["Module"] as Record<string, unknown>,
 				"createRequire": createRequireAt,
 				"_load": (request: string, parent?: { "filename"?: unknown }): unknown => requireFrom(parentPath(parent))(request),
-				"_resolveFilename": (request: string, parent?: { "filename"?: unknown }): string => requireFrom(parentPath(parent)).resolve(request)
+				"_resolveFilename": (request: string, parent?: { "filename"?: unknown }): string => requireFrom(parentPath(parent)).resolve(request),
+				// Node's in-thread hooks: every require and import after it, the program's and its packages', goes through them
+				"registerHooks": (given: { "resolve"?: ResolveHook; "load"?: LoadHook }): { "deregister": () => void } => {
+					hooks.push(given);
+
+					return { "deregister": () => {
+						hooks.splice(hooks.indexOf(given), 1);
+					} };
+				}
 			};
 
 			return {
@@ -1299,6 +1387,7 @@ function createRequire(
 				"default": Module,
 				"_load": Module._load,
 				"_resolveFilename": Module._resolveFilename,
+				"registerHooks": Module.registerHooks,
 				"createRequire": createRequireAt
 			};
 		}
@@ -1326,8 +1415,11 @@ function createRequire(
 			return builtinModules["prettier"];
 		}
 
-		const resolved = resolveModule(id, currentDir);
+		return exportsOf(resolveModule(id, currentDir));
+	};
 
+	/** The exports of the module at `resolved` (a file's path, or a built-in's name). */
+	const exportsOf = (resolved: string): unknown => {
     // If resolved to a built-in name (shouldn't happen but safety check)
 		if (builtinModules[resolved]) {
 			return builtinModules[resolved];
@@ -1359,6 +1451,10 @@ function createRequire(
 	};
 
 	require.resolve = (id: string): string => {
+		if (hooks.some(({ resolve }) => resolve !== undefined)) {
+			return hookedResolve(id);
+		}
+
 		if (id === "fs" || id === "process" || builtinModules[id]) {
 			return id;
 		}
@@ -1766,7 +1862,8 @@ export class Runtime {
 			this.moduleCache,
 			this.options,
 			this.processedCodeCache,
-			"program"
+			"program",
+			filename
 		);
 
     // Create module object
@@ -1936,6 +2033,8 @@ export class Runtime {
 
     // A package's code runs again from here: its host is told again (onPackage), as for a fresh runtime.
 		toldPackages.delete(this.moduleCache);
+		// (and its hooks: what registers them runs again too)
+		loaderHooks.delete(this.moduleCache);
 	}
 
   /**

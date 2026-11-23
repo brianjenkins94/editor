@@ -450,7 +450,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitServ
 
 	serve(hub, "tests.coverage", async () => ({ "coverage": Object.fromEntries(coverageOf(await keptIn(COVERAGE) as CoverageKept[])) }));
 
-	const runFile = async (file: string, signal: AbortSignal, approved: string[], stopAll: () => void): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "effects": Effect[]; "output": string; "attached": boolean; "statements"?: Record<string, Statements>; "asked"?: Asked; "stalled"?: string }> => {
+	const runFile = async (file: string, signal: AbortSignal, approved: string[], stopAll: () => void, imports: string[] = []): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "effects": Effect[]; "output": string; "attached": boolean; "statements"?: Record<string, Statements>; "asked"?: Asked; "stalled"?: string }> => {
 		const controller = new AbortController();
 		const stop = (): void => {
 			controller.abort();
@@ -532,6 +532,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitServ
 			const debugged = await runner.debug(`${ROOT}/${file}`, ROOT, {}, {
 				"runId": run.id,
 				"noDebug": true,
+				"runtimeArgs": imports.flatMap((each) => ["--import", each]),
 				"signal": controller.signal,
 				"onOutput": (_stream, text) => {
 					output = (output + text).slice(-OUTPUT);
@@ -562,8 +563,8 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitServ
 		return { "files": ran.length, "pass": outcomes.filter((outcome) => outcome === "pass").length, "fail": outcomes.filter((outcome) => outcome === "fail").length + ran.filter((file) => diedOutsideATest(file.exitCode, file.tests)).length, "skip": outcomes.filter((outcome) => outcome === "skip" || outcome === "todo").length };
 	};
 
-	const runAndKeep = async (file: string, signal: AbortSignal, approvals: string[], stopAll: () => void, last: ReadonlyMap<string, string>): Promise<Ran | { "asked": Asked }> => {
-		const result = await runFile(file, signal, approvals, stopAll);
+	const runAndKeep = async (file: string, signal: AbortSignal, approvals: string[], stopAll: () => void, last: ReadonlyMap<string, string>, imports: string[] = []): Promise<Ran | { "asked": Asked }> => {
+		const result = await runFile(file, signal, approvals, stopAll, imports);
 
 		if (result.asked !== undefined) {
 			return { "asked": result.asked };
@@ -605,8 +606,9 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitServ
 	};
 
 	const runBatch = async (batch: Batch): Promise<Record<string, unknown>> => {
-		const { files, "affected": onlyAffected, approved } = batch.args as { "files"?: unknown; "affected"?: unknown; "approved"?: unknown };
+		const { files, "affected": onlyAffected, approved, imports } = batch.args as { "files"?: unknown; "affected"?: unknown; "approved"?: unknown; "imports"?: unknown };
 		const approvals = Array.isArray(approved) ? approved.filter((key): key is string => typeof key === "string") : [];
+		const preloads = Array.isArray(imports) ? imports.filter((each): each is string => typeof each === "string") : [];
 		const { signal } = batch.controller;
 
 		batch.now = { "doing": "waiting for the editor to be up (its workspace, its debugger and its packages' versions)", "since": performance.now() };
@@ -639,7 +641,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitServ
 				continue;
 			}
 
-			const kept = await runAndKeep(file, signal, approvals, () => { batch.controller.abort(); }, last);
+			const kept = await runAndKeep(file, signal, approvals, () => { batch.controller.abort(); }, last, preloads);
 
 			if ("asked" in kept) {
 				return { "ask": kept.asked, "rest": chosen.slice(index) };

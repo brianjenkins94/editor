@@ -25,7 +25,7 @@ function globalOf(context: Record<PropertyKey, unknown>): Record<PropertyKey, un
 		"get": (_target, key) => (builtIn(context, key) ? Reflect.get(globalThis, key) : !(key in context) && ITSELF.has(key) ? global : context[key]),
 		"has": (_target, key) => key in context || builtIn(context, key),
 		"getOwnPropertyDescriptor": (_target, key) => (builtIn(context, key) ? { ...Reflect.getOwnPropertyDescriptor(globalThis, key), "configurable": true } : Reflect.getOwnPropertyDescriptor(context, key)),
-		"ownKeys": () => [...new Set([...Reflect.ownKeys(context), ...[...BUILT_INS].filter((key) => key in globalThis)])]
+		"ownKeys": () => [...new Set([...Reflect.ownKeys(context), ...[...BUILT_INS].filter((key): key is string => typeof key === "string" && key in globalThis)])]
 	});
 
 	return global;

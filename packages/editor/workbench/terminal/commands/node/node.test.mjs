@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { juvy } from "@brianjenkins94/util/juvy";
 
 import definition from "./command.ts";
-import { invocationOf, isTestFile } from "./node.ts";
+import { invocationOf, isTestFile, matchesGlob } from "./node.ts";
 
 /** node's arguments, as juvy parses them by its definition. */
 const parsed = async (args) => invocationOf(await juvy(definition.options, { "stopEarly": true }).parse(args));
@@ -18,6 +18,16 @@ test("node's arguments, read as node reads them", async () => {
 	assert.deepEqual(await parsed([]), { "unsupported": "node: there's no REPL here yet — `node -e` runs a line of code, `node` with a file runs a program", "exitCode": 0 });
 	await assert.rejects(parsed(["-e"]), /argument missing/u);
 	await assert.rejects(parsed(["--nope", "app.ts"]), /Unknown option '--nope'/u, "node's own options are checked");
+});
+
+test("node --import loads modules before the program, as node's does — a package's npm test script, as written", async () => {
+	assert.deepEqual(await parsed(["--import", "./test/extensionless.mjs", "--test", "--test-force-exit", "test/**/*.test.ts"]), { "tests": ["test/**/*.test.ts"], "imports": ["./test/extensionless.mjs"] });
+	assert.deepEqual(await parsed(["--import", "a", "--import=b", "app.ts", "--import", "c"]), { "file": "app.ts", "args": ["--import", "c"], "imports": ["a", "b"] }, "again for another; after the file, the program's");
+});
+
+test("node --test takes a glob as node's does", () => {
+	assert.deepEqual(["test/a.test.ts", "test/deep/b.test.ts", "c.test.ts", "test/a.test.js"].filter((path) => matchesGlob("test/**/*.test.ts", path)), ["test/a.test.ts", "test/deep/b.test.ts"]);
+	assert.deepEqual(["a.test.mjs", "test/a.test.mjs"].filter((path) => matchesGlob("./*.test.mjs", path)), ["a.test.mjs"]);
 });
 
 test("node --test finds test files as node does", () => {

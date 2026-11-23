@@ -141,6 +141,14 @@
                 },
                 "description": "Its arguments: process.argv after the node and the file.",
                 "default": []
+              },
+              "runtimeArgs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "node's own options: --import <module> loads a module before the program, as node's does (a loader's registerHooks, say); the rest are accepted.",
+                "default": []
               }
             }
           }

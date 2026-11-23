@@ -14,6 +14,7 @@ export interface NodeRunHooks {
 	"signal"?: AbortSignal;
 	"onListening"?: (port: number) => void;
 	"noDebug"?: boolean;
+	"runtimeArgs"?: string[];
 }
 
 export interface NodeRunner {
@@ -110,7 +111,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 				return;
 			}
 
-			hub.publish("debug.launch", { "runId": runId, "file": file, "cwd": cwd, "env": env, ...hooks.args === undefined ? {} : { "args": hooks.args }, ...hooks.noDebug === true ? { "noDebug": true } : {} });
+			hub.publish("debug.launch", { "runId": runId, "file": file, "cwd": cwd, "env": env, ...hooks.args === undefined ? {} : { "args": hooks.args }, ...hooks.runtimeArgs === undefined || hooks.runtimeArgs.length === 0 ? {} : { "runtimeArgs": hooks.runtimeArgs }, ...hooks.noDebug === true ? { "noDebug": true } : {} });
 		});
 	});
 

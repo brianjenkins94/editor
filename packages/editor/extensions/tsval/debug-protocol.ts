@@ -13,7 +13,7 @@ export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack"
 export interface Crash { "line": number; "at": [number, number]; "message": string; "file"?: string; "stopped"?: true }
 
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "places"?: Record<string, RulePlace[]>; "live"?: boolean; "recorded"?: Record<string, unknown>; "program"?: string; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string>; "replay"?: Replay }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "imports"?: string[]; "places"?: Record<string, RulePlace[]>; "live"?: boolean; "recorded"?: Record<string, unknown>; "program"?: string; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string>; "replay"?: Replay }
 	| { "type": "explore"; "source": string; "fileName": string; "policy"?: Policy; "args"?: string[]; "eventLoop": LoopStart; "maxRuns"?: number; "workspace"?: SharedArrayBuffer }
 	| { "type": "setBreakpoints"; "lines": number[]; "file"?: string }
 	| { "type": "decide"; "deny"?: boolean; "skip"?: boolean; "policy"?: Policy; "give"?: unknown; "decided"?: "once" | "always" | "refused" }

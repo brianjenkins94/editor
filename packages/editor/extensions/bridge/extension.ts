@@ -138,7 +138,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 
 		context.subscriptions.push(
 			{ "dispose": bridgeHub.subscribe("debug.launch", (data) => {
-				const info = data as { "runId": string; "file": string; "args"?: string[]; "cwd"?: string; "env"?: Record<string, string>; "noDebug"?: boolean };
+				const info = data as { "runId": string; "file": string; "args"?: string[]; "runtimeArgs"?: string[]; "cwd"?: string; "env"?: Record<string, string>; "noDebug"?: boolean };
 
 				if (!canTrack) {
 					bridgeHub.publish(`debug.declined.${info.runId}`, {});
@@ -147,7 +147,7 @@ export function activate(context: vscode.ExtensionContext): BridgeExports {
 				}
 
 				void (async () => {
-					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file.split("/").pop() ?? info.file}`, "program": info.file, ...info.args !== undefined && info.args.length > 0 ? { "args": info.args } : {}, ...info.cwd === undefined ? {} : { "cwd": info.cwd }, ...info.env === undefined ? {} : { "env": info.env }, "internalConsoleOptions": "neverOpen", "__runId": info.runId, "__startedBy": "terminal" }, { "suppressDebugView": true, ...info.noDebug === true ? { "noDebug": true } : {} });
+					const started = await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": `node ${info.file.split("/").pop() ?? info.file}`, "program": info.file, ...info.args !== undefined && info.args.length > 0 ? { "args": info.args } : {}, ...info.runtimeArgs === undefined ? {} : { "runtimeArgs": info.runtimeArgs }, ...info.cwd === undefined ? {} : { "cwd": info.cwd }, ...info.env === undefined ? {} : { "env": info.env }, "internalConsoleOptions": "neverOpen", "__runId": info.runId, "__startedBy": "terminal" }, { "suppressDebugView": true, ...info.noDebug === true ? { "noDebug": true } : {} });
 
 					if (started !== true) {
 						bridgeHub.publish(`debug.declined.${info.runId}`, {});

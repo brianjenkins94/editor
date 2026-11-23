@@ -37,6 +37,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private worker: ReturnType<typeof startWorker> | undefined;
 	private program = "";
 	private args: string[] = [];
+	private imports: string[] = [];
 	private places: Record<string, RulePlace[]> = {};
 	private where: { "cwd"?: string; "env"?: Record<string, string> } = {};
 	private eventLoop: LoopStart | undefined;
@@ -140,6 +141,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 	private launchRequest(request: DapRequest, args: Record<string, unknown>): void {
 		this.program = (args["program"] as string | undefined) ?? "";
 		this.args = Array.isArray(args["args"]) ? (args["args"] as unknown[]).map(String) : [];
+		this.imports = importsOf(Array.isArray(args["runtimeArgs"]) ? (args["runtimeArgs"] as unknown[]).map(String) : []);
 		this.where = { ...typeof args["cwd"] === "string" ? { "cwd": args["cwd"] } : {}, ...typeof args["env"] === "object" && args["env"] !== null ? { "env": args["env"] as Record<string, string> } : {} };
 		this.eventLoop = loopStartOf(args["eventLoop"]);
 		this.noDebug = args["noDebug"] === true;
@@ -398,7 +400,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 
 		const trace = this.startAction("launch");
 
-		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "places": this.places, ...this.live ? { "live": true, "recorded": this.recorded } : {}, "args": this.args, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop }, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } } }, trace);
+		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "places": this.places, ...this.live ? { "live": true, "recorded": this.recorded } : {}, "args": this.args, ...this.imports.length === 0 ? {} : { "imports": this.imports }, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop }, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } } }, trace);
 	}
 
 	private control(message: Control, trace?: { "traceId": string; "parentSpanId": string }): void {
@@ -564,6 +566,10 @@ function messageOf(error: unknown): string {
 	const thrown = error as string | number | boolean | null | undefined;
 
 	return String(thrown);
+}
+
+function importsOf(runtimeArgs: string[]): string[] {
+	return runtimeArgs.flatMap((arg, index) => (arg === "--import" && index + 1 < runtimeArgs.length ? [runtimeArgs[index + 1]] : arg.startsWith("--import=") ? [arg.slice("--import=".length)] : []));
 }
 
 function loopStartOf(value: unknown): LoopStart | undefined {
