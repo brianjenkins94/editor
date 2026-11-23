@@ -1880,11 +1880,13 @@
       "packages/editor/extensions/tsval/canary.ts",
       "packages/editor/extensions/tsval/capability-calls.ts",
       "packages/editor/extensions/tsval/worker/gate.ts",
+      "packages/editor/extensions/tsval/worker/loopback.ts",
       "packages/editor/extensions/tsval/worker/package-calls.ts",
       "packages/editor/silo-enforce.d.ts"
     ],
     "tests": [
-      "packages/editor/test/capabilities.test.mjs"
+      "packages/editor/test/capabilities.test.mjs",
+      "packages/editor/test/loopback-fetch.test.mjs"
     ]
   },
   "Redacted logging": {
@@ -2385,10 +2387,12 @@
       "packages/editor/extensions/tsval/extension.ts",
       "packages/editor/extensions/tsval/worker/runtime.ts",
       "packages/editor/extensions/tsval/worker/session.ts",
+      "packages/editor/extensions/tsval/worker/broadcast.ts",
       "packages/editor/extensions/tsval/worker/state.ts"
     ],
     "tests": [
-      "packages/editor/test/in-editor/debugger.spec.mjs"
+      "packages/editor/test/in-editor/debugger.spec.mjs",
+      "packages/editor/test/run-broadcast.test.mjs"
     ]
   },
   "Surface styles and Stitches": {

@@ -1,7 +1,7 @@
 /**
  * The http shim's streamed serve (shims/http.ts, Server.serve): the answer comes at the head, the body as it's written, a
  * full queue holding the writer back until the reader takes some, a reader hanging up closing the request — and a
- * request body read as the handler reads it.
+ * request body read as the handler reads it. And a port already listened on refused, as Node refuses one.
  */
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
@@ -117,4 +117,19 @@ test("a request body streamed in is read as the handler reads it", async () => {
 	const answer = await answering;
 
 	assert.equal(text((await answer.body.getReader().read()).value), "a|b|c");
+});
+
+test("a port a server here listens on is taken: the next says EADDRINUSE, as Node's does, and listens once it's free", async () => {
+	const first = createServer(() => undefined);
+	const second = createServer(() => undefined);
+
+	await new Promise<void>((resolve) => { first.listen(4517, resolve); });
+
+	const refused = await new Promise<{ "code"?: string; "port"?: number }>((resolve) => { second.once("error", resolve); second.listen(4517); });
+
+	assert.equal(refused.code, "EADDRINUSE");
+	assert.equal(refused.port, 4517);
+	await new Promise<void>((resolve) => { first.close(() => { resolve(); }); });
+	await new Promise<void>((resolve) => { second.listen(4517, resolve); });
+	second.close();
 });

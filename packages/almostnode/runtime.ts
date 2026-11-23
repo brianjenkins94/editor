@@ -840,7 +840,20 @@ function createRequire(
 					return basePath;
 				}
 
-        // Directory - its index, as Node looks for one: index.js, then index.json
+				// Directory - its package.json's `main` first, as Node reads a folder (a package named with a trailing slash,
+				// `require("string_decoder/")` as readable-stream asks, comes here), then its index: index.js, index.json
+				const main = getParsedPackageJson(pathShim.join(basePath, "package.json"))?.main;
+
+				if (typeof main === "string" && main !== "") {
+					const mainPath = pathShim.join(basePath, main);
+
+					for (const candidate of [mainPath, mainPath + ".js", mainPath + ".json", mainPath + ".cjs", pathShim.join(mainPath, "index.js")]) {
+						if (vfs.existsSync(candidate) && vfs.statSync(candidate).isFile()) {
+							return candidate;
+						}
+					}
+				}
+
 				for (const index of ["index.js", "index.json"]) {
 					const indexPath = pathShim.join(basePath, index);
 
@@ -1838,6 +1851,24 @@ export class Runtime {
 	 *  code its own way (the tsval debugger, packages/tsval/README.md, *Modules*). */
 	require(specifier: string, fromDir: string = this.process.cwd(), requester: Requester = "program"): unknown {
 		return createRequire(this.vfs, this.fsShim, this.process, fromDir, this.moduleCache, this.options, this.processedCodeCache, requester)(specifier);
+	}
+
+	/** `specifier` loaded as a static `import` from `fromDir` loads it, for a host evaluating the program's ES modules its
+	 *  own way: a module with top-level await may load, as in Node's ESM graph, where `require` couldn't take it
+	 *  (ERR_REQUIRE_ASYNC_MODULE). Its evaluation, while it's still going, is what's returned, for the importer to wait
+	 *  on before its own body runs; undefined when there's nothing to wait for. */
+	imported(specifier: string, fromDir: string = this.process.cwd(), requester: Requester = "program"): Promise<void> | undefined {
+		importing += 1;
+
+		let exported: unknown;
+
+		try {
+			exported = this.require(specifier, fromDir, requester);
+		} finally {
+			importing -= 1;
+		}
+
+		return exported !== null && typeof exported === "object" ? evaluating.get(exported)?.done : undefined;
 	}
 
 	/** Where `specifier` resolves from `fromDir`, and what it is: a built-in (its name), a package's file, or a program

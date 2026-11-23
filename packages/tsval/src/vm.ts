@@ -1684,6 +1684,38 @@ export class Machine implements VM {
 		return false;
 	}
 
+	/** A file about to run, once the program files it imports have: what of the packages it imports is still evaluating
+	 *  (a module with top-level await), for it to wait on before its body runs, as an ES module waits on its imports. */
+	public importsPending(source: ts.SourceFile): Promise<unknown> | undefined {
+		const loader = this.modules;
+
+		if (loader?.imported === undefined) {
+			return undefined;
+		}
+
+		const waits: Promise<void>[] = [];
+
+		for (const specifier of linkedSpecifiers(source)) {
+			let resolved: ReturnType<typeof loader.resolve>;
+
+			try {
+				resolved = loader.resolve(specifier, directoryOf(source.fileName));
+			} catch {
+				continue; // not found: its import binding says so
+			}
+
+			if (resolved.kind === "package") {
+				const pending = loader.imported(specifier, directoryOf(source.fileName));
+
+				if (pending !== undefined) {
+					waits.push(pending);
+				}
+			}
+		}
+
+		return waits.length === 0 ? undefined : Promise.all(waits);
+	}
+
 	/** A file's exports, once its bindings are declared: an ES module's, on its module's `exports` (modules.ts). */
 	public linkExports(source: ts.SourceFile, scope: Scope): void {
 		const module = this.modules === undefined ? undefined : moduleOf(scope);

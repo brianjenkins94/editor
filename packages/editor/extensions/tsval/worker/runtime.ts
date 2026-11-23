@@ -115,6 +115,10 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 		post({ "type": "listening", "port": port });
 	} });
 
+	state.local = {
+		"listening": (port) => serverOn(port) !== undefined,
+		"answer": async (request) => answerServer(serverOn(request.port)!, request)
+	};
 	state.nodeGlobals = programGlobals(state.runtime);
 
 	return state.runtime;
@@ -179,6 +183,7 @@ export function programModules(loaded: Runtime): ModuleLoader {
 	return {
 		"resolve": (specifier, fromDir) => (EDITOR_MODULES.has(specifier) ? { "kind": "program", "filename": EDITOR_MODULES.get(specifier) } : loaded.resolve(specifier, fromDir)),
 		"require": (specifier, fromDir) => loaded.require(specifier, fromDir, "program"),
+		"imported": (specifier, fromDir) => loaded.imported(specifier, fromDir, "program"),
 		"source": (filename) => EDITOR_SOURCES.get(filename) ?? vfs.readFileSync(filename, "utf8"),
 		"cached": (filename) => loaded.cached(filename),
 		"register": (filename, module) => {

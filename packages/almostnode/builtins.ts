@@ -15,7 +15,8 @@
  *     (feross/buffer, the browser's Buffer: Node's own is native), constants (Node's values).
  *   - unenv's own, where Node's can't run here and nothing on npm is Node's: os (a made-up Linux machine: there's no real
  *     one to describe), tty (not a terminal: `isatty` false), worker_threads (its Worker constructs and never runs —
- *     tools make one as they load and never use it here: eslint-plugin-jsonc, through synckit; one that threw broke them), diagnostics_channel (`hasSubscribers` a boolean, as Node's),
+ *     tools make one as they load and never use it here: eslint-plugin-jsonc, through synckit; one that threw broke them;
+ *     waited on, it fails as Node's does when a worker can't start: shims/worker_threads.ts), diagnostics_channel (`hasSubscribers` a boolean, as Node's),
  *     path.win32 (pathe's, posix-like: a program here runs on posix), trace_events, inspector, cluster, perf_hooks, domain,
  *     dns (with almostnode's lookup over them: Vite resolving `localhost`).
  *   - almostnode's own (`oursOver`, unenv filling in what it lacks): what the editor is behind (http, https, http2, net,
@@ -76,6 +77,7 @@ import * as unenvWorkerThreads from "unenv/node/worker_threads";
 import * as unenvZlib from "unenv/node/zlib";
 import * as asyncHooksShim from "./shims/async_hooks";
 import * as childProcessShim from "./shims/child_process";
+import * as workerThreadsShim from "./shims/worker_threads";
 import * as cryptoShim from "./shims/crypto";
 import * as dnsShim from "./shims/dns";
 import * as domainShim from "./shims/domain";
@@ -265,9 +267,9 @@ export function nodeBuiltins(own: { "console": Namespace }): Record<string, unkn
 		"inspector/promises": unenv(unenvInspectorPromises),
 		"trace_events": unenv(unenvTraceEvents),
 		"repl": unenv(unenvRepl),
-		// (its Worker unenv's mock, which constructs and never runs: a Worker that threw as it's made broke tools that make
-		// one as they load and never use it here — eslint-plugin-jsonc, through synckit)
-		"worker_threads": unenv(unenvWorkerThreads),
+		// (its Worker unenv's mock, which constructs and never runs — a Worker that threw as it's made broke tools that make
+		// one as they load and never use it here, eslint-plugin-jsonc through synckit — failing once it's waited on)
+		"worker_threads": unenvWith(unenvWorkerThreads, workerThreadsShim as unknown as Namespace, ["Worker"]),
 		"util/types": types,
 		// unenv's, with a program's needs over it
 		"dns": unenvWith(unenvDns, dnsShim as unknown as Namespace, ["lookup", "resolve", "resolve4", "resolve6", "reverse", "promises"]),

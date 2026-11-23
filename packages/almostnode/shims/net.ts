@@ -171,6 +171,9 @@ export class Socket extends stream.Duplex {
 /**
  * Virtual Server implementation
  */
+/** Each port a server here listens on, and the server. */
+const listeningOn = new Map<number, Server>();
+
 export class Server extends EventEmitter {
 	private _listening = false;
 	private _address: AddressInfo | null = null;
@@ -238,11 +241,21 @@ export class Server extends EventEmitter {
 			cb = typeof hostOrCallback === "function" ? hostOrCallback : callback;
 		}
 
-    // Assign random port if 0
+		// A port another server here listens on is taken, as Node says (a dev server's next-port fallback asks it); port 0,
+		// any free one
 		if (port === 0) {
-			port = 3000 + Math.floor(Math.random() * 1000);
+			do {
+				port = 3000 + Math.floor(Math.random() * 1000);
+			} while (listeningOn.has(port));
+		} else if (listeningOn.has(port) && listeningOn.get(port) !== this) {
+			const taken = port;
+
+			queueMicrotask(() => { this.emit("error", Object.assign(new Error(`listen EADDRINUSE: address already in use ${host}:${taken}`), { "code": "EADDRINUSE", "errno": -48, "syscall": "listen", "address": host, "port": taken })); });
+
+			return this;
 		}
 
+		listeningOn.set(port, this);
 		this._address = {
 			"address": host,
 			"family": "IPv4",
@@ -266,6 +279,10 @@ export class Server extends EventEmitter {
 	}
 
 	close(callback?: (err?: Error) => void): this {
+		if (this._address !== null && listeningOn.get(this._address.port) === this) {
+			listeningOn.delete(this._address.port);
+		}
+
 		this._listening = false;
 		this.listening = false;
 		keepAlive()?.release(this); // no longer listening — stop holding the process open

@@ -8,6 +8,7 @@ import { givenResult } from "@brianjenkins94/util/silo/policy";
 import ts from "typescript";
 import { capabilityBreakLines } from "../capability-calls";
 import { capabilityStandins, standinCapability, givenAs } from "../canary";
+import { answerLocally } from "./loopback";
 import { EXITED, stdin } from "./process";
 import { guestConsole, guestStream, placeOf } from "./session";
 import { post, state } from "./state";
@@ -386,7 +387,15 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 		let made: unknown;
 
 		if (typeof value === "function") {
-			made = gate(value as (...args: unknown[]) => unknown, real !== undefined && key === "fetch" ? (...args: unknown[]) => (fetch as (...fetchArgs: unknown[]) => unknown)(...args) : undefined);
+			const gatedCall = gate(value as (...args: unknown[]) => unknown, real !== undefined && key === "fetch" ? (...args: unknown[]) => (fetch as (...fetchArgs: unknown[]) => unknown)(...args) : undefined);
+
+			made = key === "fetch"
+				? function(this: unknown, ...args: unknown[]): unknown {
+					const local = state.local === undefined ? undefined : answerLocally(args[0], args[1] as RequestInit | undefined, state.local);
+
+					return local ?? gatedCall.apply(this, args);
+				}
+				: gatedCall;
 		} else if (typeof value === "object" && value !== null) {
 			const module = realOf(key);
 			const effectOf = (name: string): ((...args: unknown[]) => unknown) | undefined => {

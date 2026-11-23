@@ -36,8 +36,10 @@ asks, no popups. A denied call fails as Node's would. Stand-ins remain only for 
 
 **Deterministic.** tsval's event loop has a virtual clock, a seeded random and an ordering it can replay; its waits can
 be skipped (*Skip Waits*) or made real. A run's globals are Node's, with what varies run to run the event loop's own:
-`performance.now` is its clock, and `crypto`'s random numbers its generator. `BroadcastChannel` isn't there: this one reaches
-every tab of the origin, the editor's own included.
+`performance.now` is its clock, and `crypto`'s random numbers its generator. `BroadcastChannel` is the run's own
+(extensions/tsval/worker/broadcast.ts, 2026-11-23), as Node's is the process's: channels of a name in the run hear each
+other, and nothing reaches the origin's other tabs, the editor's own included, as the browser's would. And a `fetch` to a
+server listening in the run is answered there (loopback.ts), as Node's loopback is — never sent out.
 
 **Output goes where it was started.** A run from the terminal prints there, reads its stdin there, and has the args, cwd
 and env the command line gave; one from F5 uses the Debug Console. **What's running** is one registry (workbench/runs.ts):

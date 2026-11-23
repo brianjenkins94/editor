@@ -87,6 +87,26 @@ test("ES modules: named, default, re-exported — the imported files evaluated f
 	assert.deepStrictEqual(await run(files, "/w/main.ts"), ["greet", "answer, after ada", "main", "hello, ada", 42, 42]);
 });
 
+test("a package still evaluating — its top level awaits — is waited for before its importer's body, as Node's ESM graph does", async () => {
+	const slow: { "value"?: number } = {};
+	const files = { "/w/main.ts": "import { value } from 'slow';\nlog(value);\n" };
+	const lines: unknown[] = [];
+	let asked = 0;
+	const loader: ModuleLoader = {
+		...loaderOf(files, { "slow": slow }),
+		"imported": (specifier) => {
+			asked += 1;
+
+			// (the first time, its evaluation still going, done a little later; after, nothing to wait for)
+			return specifier === "slow" && asked === 1 ? new Promise<void>((resolve) => { setTimeout(() => { slow.value = 42; resolve(); }, 5); }) : undefined;
+		}
+	};
+	const { vm } = createVM(files["/w/main.ts"], { "fileName": "/w/main.ts", "modules": loader, "globals": { "log": (value: unknown) => { lines.push(value); } }, "eventLoop": { "pace": "fast" } });
+
+	await runToEnd(vm);
+	assert.deepStrictEqual(lines, [42], "its value, once it's evaluated");
+});
+
 test("an import's own imports run first, even one its importer imports later: ESM's depth-first order", async () => {
 	// (npm.test: pnpm.ts reads npm's definition at its top level, and the test imports that definition after pnpm.ts)
 	const files = {

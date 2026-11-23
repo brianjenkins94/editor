@@ -12,6 +12,7 @@ import { createVM, ProgramSyntaxError, TsvalInternalError } from "@brianjenkins9
 import ts from "typescript";
 import { replayGuard, replayProgram } from "../replay-run";
 import { copySums } from "../site-sums";
+import { runBroadcastChannel } from "./broadcast";
 import { calledSeen, observeSite } from "./busy";
 import { armCapabilities, capabilityAt, capabilitySurface, functionsIn, tellEffects, watchedOf } from "./gate";
 import { dropUnpinned, readPins } from "./install";
@@ -1022,6 +1023,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 			"sharedGlobals": state.runGlobal?.own,
 			"globals": {
 				...state.nodeGlobals,
+				"BroadcastChannel": runBroadcastChannel(),
 				...surface.globals,
 				"__editorTest": testTold,
 				"__editorPlaywright": editorPlaywright

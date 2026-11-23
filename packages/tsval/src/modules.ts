@@ -38,6 +38,10 @@ export interface ModuleLoader {
 	"register": (filename: string, module: ModuleRecord) => void;
 	/** Take a module out of the cache: its evaluation threw. */
 	"forget"?: (filename: string) => void;
+	/** A module that isn't the program's, loaded as a static `import` loads it: one with top-level await may load, and
+	 *  its evaluation, while it's still going, is returned for the importer to wait on (Node's ESM graph; `require` can't
+	 *  take such a module). Without it, an import is a `require`. */
+	"imported"?: (specifier: string, fromDir: string) => Promise<void> | undefined;
 }
 
 /** Each module's require, by the file it resolves from. */

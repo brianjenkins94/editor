@@ -284,6 +284,19 @@ test("top-level await, imported: a module importing one waits for it, as Node's 
 	assert.equal((await (runtime.execute("module.exports = import('./outer.js');", "/workspace/main.js").exports as Promise<{ "count": number }>)).count, 3, "and a module importing it waited too");
 });
 
+test("imported: a package loaded as a static import loads it, for a host's own ES modules — one with top-level await may load, its evaluation the host's to wait on", async () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/codes/package.json": JSON.stringify({ "name": "codes", "main": "index.js" }),
+		"/workspace/node_modules/codes/index.js": "export const code = await Promise.resolve('ready');\n"
+	});
+	const waiting = runtime.imported("codes", "/workspace");
+
+	assert.ok(waiting instanceof Promise, "still evaluating: its wait, where require() would throw ERR_REQUIRE_ASYNC_MODULE");
+	await waiting;
+	assert.equal((runtime.require("codes", "/workspace") as { "code": string }).code, "ready", "and once it's done, it's what it exported");
+	assert.equal(runtime.imported("codes", "/workspace"), undefined, "nothing to wait for after");
+});
+
 test("nativeFileImports: false — import() of a file: URL is loaded from the runtime's files, its query dropped, as Node reads one", async () => {
 	const runtime = runtimeWith({ "/workspace/eslint.config.js": "export default { 'rules': {} };\n" }, { "nativeFileImports": false });
 	const config = await (runtime.execute("module.exports = import('file:///workspace/eslint.config.js?mtime=1');", "/workspace/main.js").exports as Promise<{ "default": unknown }>);
@@ -418,6 +431,15 @@ module.exports = heard;
 `, "/workspace/main.js").exports;
 
 	assert.equal(heard, 1);
+});
+
+test("a package named with a trailing slash is its folder, read by its package.json's main — readable-stream's require('string_decoder/')", () => {
+	const runtime = runtimeWith({
+		"/workspace/node_modules/decoder/package.json": JSON.stringify({ "name": "decoder", "main": "lib/decoder.js" }),
+		"/workspace/node_modules/decoder/lib/decoder.js": "module.exports = 'the package';"
+	});
+
+	assert.equal(runtime.execute("module.exports = require('decoder/');", "/workspace/main.js").exports, "the package");
 });
 
 test("require('.') and require('..') are the folder and its parent, as Node reads them", () => {

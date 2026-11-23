@@ -27,9 +27,27 @@ const { NodeFlags } = ts;
 function sourceFile(vm: Machine, frame: NodeFrame): void {
 	const node = frame.node as ts.SourceFile;
 
+	if (frame.phase === 2) {
+		// (what it waited on is evaluated: on to its body)
+		vm.sentValue = undefined;
+		frame.phase = 0;
+
+		return;
+	}
+
 	if (frame.phase === 0) {
 		// The program's modules (README.md, *Modules*): the program files it imports from, evaluated first.
 		if (vm.linkImports(node, frame)) {
+			return;
+		}
+
+		// And a package it imports still evaluating (its top level awaits) is waited for, as an ES module waits on its
+		// imports — back here once it's done.
+		const pending = vm.importsPending(node);
+
+		if (pending !== undefined) {
+			suspend(vm, frame, "await", pending, 2);
+
 			return;
 		}
 

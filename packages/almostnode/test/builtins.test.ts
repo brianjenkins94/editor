@@ -265,6 +265,13 @@ test("what almostnode can't do says so as it's used: a UDP socket, v8's serializ
 	runtime.execute("new (require(\"worker_threads\").Worker)(\"./w.js\");", "/worker.js");
 });
 
+test("a Worker waited on fails as Node's does when a worker can't start — not a wait forever", async () => {
+	const runtime = new Runtime(new VirtualFS());
+	const waited = runtime.execute("const { once } = require(\"events\"); module.exports = once(new (require(\"worker_threads\").Worker)(\"./w.js\"), \"message\");", "/waits.js").exports as Promise<unknown>;
+
+	await assert.rejects(waited, (error: { "code"?: string }) => error.code === "ERR_WORKER_INIT_FAILED");
+});
+
 test("fs's withFileTypes takes the kinds from a VFS that lists them (one call a folder), else stats each entry — the same Dirents either way, in all three forms", async () => {
 	const { createFsShim } = await import("../shims/fs.ts");
 	const make = (vfs: InstanceType<typeof VirtualFS>): void => {

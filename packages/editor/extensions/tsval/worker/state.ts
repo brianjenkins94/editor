@@ -9,6 +9,7 @@ import type { Policy } from "@brianjenkins94/util/silo/policy";
 import type ts from "typescript";
 import type { WorkerEvent } from "../debug-protocol";
 import type { SiteSums } from "../site-sums";
+import type { Local } from "./loopback";
 import type { Runtime } from "./runtime";
 
 export function workerLog(): RuntimeConnection["log"] {
@@ -108,6 +109,7 @@ export interface State {
 	"guestProcess": { "exitCode"?: number } | undefined;
 	"runtime": Runtime | undefined;
 	"programFsFor": ((cwd: string) => FsShim) | undefined;
+	"local": Local | undefined;
 	"nodeGlobals": Record<string, unknown>;
 	"runGlobal": RunGlobal | undefined;
 	"programBuiltins": Record<string, unknown>;
@@ -154,6 +156,7 @@ export const state: State = {
 	"guestProcess": undefined,
 	"runtime": undefined,
 	"programFsFor": undefined,
+	"local": undefined,
 	"live": false,
 	"recordedResults": {},
 	"runLayer": undefined,

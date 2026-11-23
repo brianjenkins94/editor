@@ -232,7 +232,9 @@ export function meteredDataChannel(channel: RTCDataChannel): { "transport": Tran
 		},
 		"gauge": () => {
 			const now = performance.now();
-			const seconds = (now - since) / 1000;
+			// (at least a millisecond: two readings in the same one — a clock that repeats, as a debug run's or a browser's
+			// coarsened one can — would divide by zero)
+			const seconds = Math.max(now - since, 1) / 1000;
 			const rates = { "in": received / 1024 / seconds, "out": sent / 1024 / seconds };
 
 			sent = 0;
