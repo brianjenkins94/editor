@@ -1,7 +1,7 @@
 import type { HttpClient } from "isomorphic-git";
 // eslint-disable-next-line node/prefer-global/buffer -- the browser has NO global Buffer; this import IS the polyfill we assign to globalThis below (isomorphic-git needs it)
 import { Buffer } from "node:buffer";
-import { KEPT, latestVouches, localOf, PENDING_VOUCHES } from "@brianjenkins94/editor-api/git";
+import { latestVouches, PENDING_VOUCHES } from "@brianjenkins94/editor-api/git";
 import { userSlug } from "@brianjenkins94/util/silo/evidence";
 import { LOCAL_DIR, SILO_DIR, vouchesPath } from "@brianjenkins94/util/silo/layout";
 import { parseVouches, vouchesText } from "@brianjenkins94/util/silo/select";
@@ -54,28 +54,6 @@ export async function includeSilo(): Promise<void> {
 		if (wanted.join("\n") !== lines.join("\n")) {
 			await fs.promises.mkdir(DIR + "/.git/info", { "recursive": true });
 			await fs.promises.writeFile(file, wanted.join("\n"));
-		}
-	}
-
-	await keepLocal();
-}
-
-async function keepLocal(): Promise<void> {
-	for (const name of KEPT) {
-		const shared = `${SILO_DIR}/${name}`;
-
-		if (!fs.existsSync(`${DIR}/${shared}`)) {
-			continue;
-		}
-
-		const [row] = await statusMatrix({ "fs": fs, "dir": DIR, "filepaths": [shared] }).catch(() => [[shared, 0, 2, 0] as const]);
-
-		if (row !== undefined && row[1] === 0 && row[3] === 0) {
-			const local = `${DIR}/${localOf(shared)}`;
-
-			await fs.promises.mkdir(local.slice(0, local.lastIndexOf("/")), { "recursive": true });
-			await fs.promises.writeFile(local, await fs.promises.readFile(`${DIR}/${shared}`));
-			await fs.promises.unlink(`${DIR}/${shared}`);
 		}
 	}
 }

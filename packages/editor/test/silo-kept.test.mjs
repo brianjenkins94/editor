@@ -1,8 +1,9 @@
 /**
  * The files the editor makes for a project (`.silo/versions.json`, `baseline.json`) are the
  * repository's once it has committed them, and local until then (editor-api's git.ts `keptAt`): loading a repository
- * doesn't put them in its next commit. And one an earlier editor wrote at `.silo/` untracked is moved to its local copy
- * as the workspace becomes a repository (git-engine.ts `includeSilo`), on zen-fs's in-memory filesystem.
+ * doesn't put them in its next commit; `.silo/local/` is git's to ignore (git-engine.ts `includeSilo`). One at `.silo/`
+ * untracked (a seed's) stays where it is, read there: what moved it to its local copy, for what editors before 2026-10-30
+ * wrote there, went 2026-11-22. On zen-fs's in-memory filesystem.
  *
  *   node --import tsx --test test/silo-kept.test.mjs
  */
@@ -25,21 +26,23 @@ test("where a kept file is: at .silo/ when the repository has it there, else in 
 	assert.equal(await keptAt(".silo/baseline.json", async () => false), ".silo/local/baseline.json");
 });
 
-test("an untracked kept file at .silo/ moves to its local copy; a committed one stays, and git sees neither move", async () => {
+test("a kept file at .silo/ stays there, committed or not, and .silo/local/ is git's to ignore", async () => {
 	await fs.promises.rm(DIR, { "recursive": true, "force": true });
 	await fs.promises.mkdir(`${DIR}/.silo`, { "recursive": true });
 	await engine.ensureRepo();
 	await fs.promises.writeFile(`${DIR}/.silo/baseline.json`, "{ \"shared\": true }\n");
 	await add({ "fs": fs, "dir": DIR, "filepath": ".silo/baseline.json" });
 	await commit({ "fs": fs, "dir": DIR, "message": "the repository shares its baseline", "author": { "name": "test", "email": "test@localhost" } });
-	await fs.promises.writeFile(`${DIR}/.silo/versions.json`, "{ \"from\": \"an earlier editor\" }\n");
+	await fs.promises.writeFile(`${DIR}/.silo/versions.json`, "{ \"from\": \"a seed\" }\n");
 
 	await engine.includeSilo();
 
-	assert.equal(fs.existsSync(`${DIR}/.silo/versions.json`), false);
-	assert.equal(await fs.promises.readFile(`${DIR}/.silo/local/versions.json`, "utf8"), "{ \"from\": \"an earlier editor\" }\n");
+	assert.equal(await fs.promises.readFile(`${DIR}/.silo/versions.json`, "utf8"), "{ \"from\": \"a seed\" }\n", "untracked: where it was put");
 	assert.equal(await fs.promises.readFile(`${DIR}/.silo/baseline.json`, "utf8"), "{ \"shared\": true }\n", "committed: the repository's");
-	assert.deepEqual(silo((await engine.status()).unstaged), [], "nothing for a commit: .silo/local/ is git's to ignore, by .git/info/exclude");
+	await fs.promises.mkdir(`${DIR}/.silo/local`, { "recursive": true });
+	await fs.promises.writeFile(`${DIR}/.silo/local/baseline.json`, "{}\n");
+	assert.deepEqual(silo((await engine.status()).unstaged), [".silo/versions.json"], "the seed's for a commit; .silo/local/ is git's to ignore, by .git/info/exclude");
+	await fs.promises.unlink(`${DIR}/.silo/versions.json`);
 	assert.equal(fs.existsSync(`${DIR}/.silo/.gitignore`), false, "and .silo/ has nothing new of its own for it");
 	assert.match(await fs.promises.readFile(`${DIR}/.git/info/exclude`, "utf8"), /^\/\.silo\/local\/$/mu);
 });

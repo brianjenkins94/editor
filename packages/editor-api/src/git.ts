@@ -12,7 +12,6 @@ import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 export const REFS_DIR = ".refs";
 
 /** The files the editor makes for a project, under `.silo/`: the versions it pins, the dependency baseline. */
-export const KEPT = ["versions.json", "baseline.json"];
 
 /** The vouches the editor's test runs made since the last commit (packages/silo/README.md, *Vouches*): the History
  *  extension writes them, the next commit carries them in its author's `.silo/vouches/<user>.jsonl` (workbench/git-engine.ts). */

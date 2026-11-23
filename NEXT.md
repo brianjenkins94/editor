@@ -111,12 +111,6 @@ packages/editor (`--all`, `--runs N`, `--json`).
   NotAllowedError still happens after e86501b is unknown: read the next reports, which carry their stack. Also seen
   once: `[almostnode] worker_threads.Worker is not implemented` (synckit's `createSyncFn`, e4e927b).
 
-- **A seeded `.silo/baseline.json` moves to `.silo/local/`** (found 2026-11-22): git-engine.ts `keepLocal` moves a kept
-  file git has neither committed nor staged from `.silo/` to its local copy — a migration for what editors before
-  2026-10-30 wrote there. A seed's (`?seed=`, the specs' `openEditor`) is untracked, so it moves too (seen with a
-  `.silo/local/` file seeded beside it; dependency-baseline.spec's, without one, stays: why, not looked into). Nothing is
-  lost — the extension reads the local copy — but a spec can't open it where it seeded it. Whether the migration has
-  done its work by now is the question.
 - **A repository load the browser closed on is kept half-written** (2026-10-31): a load's files are written back to
   IndexedDB in debounced batches (workspace-fs.ts `flush`), and a browser closed in the middle keeps what landed — here
   `.git/HEAD`, `.git/config` and acquired types, no working tree. The shell's note of what it loaded (`shell:githubRepo`
@@ -144,7 +138,10 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 - **tsval runs some files V8 rejects** (found 2026-11-04): a file the parser rejects now fails at its load, as in Node, but what
   V8 calls early errors and TypeScript leaves to its binder and checker aren't the parser's to report. Tried: `let a; let a;` runs
-  on, a stray `break` ends the file there, and a malformed regular expression throws only when it's reached.
+  on, a stray `break` ends the file there, and a malformed regular expression throws only when it's reached. TypeScript 6's
+  checker reports all three (2451, 1105, and 1005 inside the pattern), on a one-file program with no lib (2026-11-22,
+  13 ms for seven lines): a check before a file runs, at a checker's cost on every load, and only its grammar codes and
+  2451, since others vary with the options and would refuse a valid program.
 
 - **A save can be dropped, silently:** VS Code abandons a save when its code actions on save are cancelled, and
   getCodeActions cancels itself when a code action provider is registered while it waits (as extensions starting up do). Seen
