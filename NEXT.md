@@ -38,9 +38,11 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    (2026-11-17: 149 tests, a median of 100% in their own features' code, 26 under half, mostly a dependency); CI's, from
    a dispatched architecture run (2026-11-20, 41 specs, a median of 17%, `activate` and what every editor runs left
    out); Features and tests says which of a feature's files other features' tests run (2026-11-21); the known case,
-   packages/admin/src/views.tsx, split 2026-11-22. **Done when** the ledger says how a file several features run is
-   owned, `silo check` holds it, and each file `silo observed` shows other features' tests running most of is split
-   or declared that way. Waits on a decision (*Decisions*, *Several owners*).
+   packages/admin/src/views.tsx, split 2026-11-22. Decided: several owners if and only if real coverage shows it
+   (*Decisions*, *Several owners*). Written 2026-11-22, not yet in lib: the ownership check reading
+   `.silo/sharing.json` and `silo observed --share` writing it. **Done when** `silo check` holds a file several
+   features own to that record, and each file `silo observed` shows other features' tests running most of is split
+   or shared on it.
 4. **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
    reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), agent-tools.mjs
    (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the
@@ -204,8 +206,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **How few tests is enough** (queue item 2): the target its replay is held to — how many of 80 commits may still run
   everything. Suggested: under 10, the rest of what's left being package.json and the workflows, which run everything
   by design.
-- **Several owners** (queue item 3): may a file belong to several features in the ledger (`paths` in more than one
-  entry, `silo check` allowing it), or does a shared file always become a feature of its own (as ui.tsx's split did)?
+- **Several owners** (queue item 3). Decided 2026-11-22: a file may be several features' if and only if real coverage
+  shows it — each owner's tests running it, recorded from runs (`silo observed <reach> --share`, `.silo/sharing.json`),
+  not from static reach; otherwise it's split, or one feature's.
 - **Tests by feature**, silo's for any repository, the editor's rewrite first (packages/silo/README.md, *Tests by
   feature, in your face*). Decided 2026-10-29: the list view; touched tests run in the background, and before the
   commit what hasn't; declared tests only in the rewrite, best-effort attribution meanwhile; rest after 20 green runs,
