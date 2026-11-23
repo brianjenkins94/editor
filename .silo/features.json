@@ -1179,6 +1179,7 @@
       "packages/almostnode/server-bridge.ts",
       "packages/almostnode/shims",
       "packages/almostnode/types",
+      "packages/almostnode/npm-util.ts",
       "packages/almostnode/unenv-resolve.ts",
       "packages/almostnode/utils",
       "packages/almostnode/virtual-fs.ts"

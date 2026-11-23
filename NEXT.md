@@ -67,11 +67,6 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      5 left is judged as the rest were: async-context's two (a store read back `b` where `d` was set, through awaits),
      builtins' parseArgs (it reads a package file by its path, where a run's packages are in memory), modules'
      `globalFor` (an inner Runtime's "the real global" is the run's) and its backpressure test.
-   - **A program can crash the editor** (found 2026-11-23, run-global.test in the editor, three times): a failed
-     `assert.equal` between two global objects takes the tab — the page's last load "failed", nothing logged first. The
-     same comparison by `assert.ok` just fails. Likely the debug worker rendering both sides for the AssertionError (a
-     whole global, deep) runs out of memory, and a dedicated worker shares the page's renderer. Done when a run that
-     makes something that big fails alone — its worker stopped, said so — and the editor stays up.
    - **A run's `eval` sees almostnode's run global, not the program's** (since 86c0b147): in a run, code from a string
      gets `globalThis` (and its free names) from the run global packages share, while the program's own global object is
      tsval's, with the run's gated stand-ins on it — `eval("globalThis") === globalThis` is false, as Node's isn't. Done

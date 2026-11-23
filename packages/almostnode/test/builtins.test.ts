@@ -67,6 +67,39 @@ test("util.parseArgs loads where there's no Node `global`: bundled, its primordi
 	assert.equal(globalThisFor("global[name]", "/x/node_modules/other/index.js"), undefined, "only the file that needs it");
 });
 
+test("inspect, bundled for a browser, stops going deeper within a budget its heap can hold — a rendering that would grow without end ends (unenvResolve)", async () => {
+	const { BROWSER_INSPECT_BUDGET, inspectBudgetFor } = await import("../unenv-resolve.ts");
+	const require = createRequire(import.meta.url);
+	const file = require.resolve("node-inspect-extracted");
+	const code = inspectBudgetFor(readFileSync(file, "utf8"), file);
+
+	assert.ok(code !== undefined, "its budget found in the file");
+
+	// (its UMD wrapper takes CommonJS's module and exports)
+	const context = createContext({ "module": { "exports": {} }, "exports": {} });
+
+	runInContext(code, context);
+
+	const { inspect } = (context.module as { "exports": { "inspect": (value: unknown, options: object) => string } }).exports;
+	// (a tree eight wide at every level, made as it's read: rendered 40 deep, 8 ** 40 objects, it would never end)
+	const tree = (): object => new Proxy({}, { "ownKeys": () => ["a", "b", "c", "d", "e", "f", "g", "h"], "getOwnPropertyDescriptor": () => ({ "value": tree(), "enumerable": true, "configurable": true }), "get": () => tree() });
+	const rendered = inspect(tree(), { "depth": 40 });
+
+	assert.ok(rendered.length < BROWSER_INSPECT_BUDGET * 2, `bounded: ${rendered.length}`);
+	assert.equal(inspectBudgetFor("x>2**27&&y", "/x/node_modules/other/index.js"), undefined, "only inspect's");
+});
+
+test("assert renders what it compares with Node's inspect, as Node's does — npm's util with Node's inspect in it, budget and all (npm-util.ts)", async () => {
+	const { unenvModuleFor } = await import("../unenv-resolve.ts");
+	const npmUtil = await import("../npm-util.ts");
+	const { inspect } = await import("node-inspect-extracted");
+	const require = createRequire(import.meta.url);
+
+	assert.match(unenvModuleFor("util/", require.resolve("assert/build/internal/assert/assertion_error.js")) ?? "", /npm-util\.ts$/u);
+	assert.equal(npmUtil.inspect, inspect);
+	assert.equal(typeof (npmUtil as unknown as { "types": { "isPromise": unknown } }).types.isPromise, "function", "and the rest of npm's util, its types among it");
+});
+
 test("fs.promises.mkdtemp makes a new folder by its prefix, as mkdtempSync does — and both are writes to the gate", async () => {
 	const { FS_ASYNC, FS_SYNC } = await import("../shims/fs-capabilities.ts");
 	const vfs = new VirtualFS();
