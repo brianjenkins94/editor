@@ -33,7 +33,8 @@
     "resolve.exports": "latest",
     "string_decoder": "latest",
     "typescript": "^6",
-    "unenv": "rc"
+    "unenv": "rc",
+    "util": "latest"
   },
   "devDependencies": {
     "@types/node": "latest",
