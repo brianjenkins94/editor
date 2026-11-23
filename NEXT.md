@@ -66,38 +66,19 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    `then` forwarded by call, apply or Reflect.apply, found settling one. almostnode's Runtime tests all pass here
    since 2026-11-23: a run's `eval` sees the program's globals, a program's fs outside the workspace is the run's
    memory, a vm context has the language's built-ins, and a run takes `--import` and `module.registerHooks` (modules'
-   backpressure test needs its loader: `runs_tests` with `imports`, or `npm test` in the terminal). Left, each **done when** as it says:
+   backpressure test needs its loader: `runs_tests` with `imports`, or `npm test` in the terminal). tsval's own tests
+   that hold it to V8 pass here too since 2026-11-23 (30bd7a2c, e283640d): its promise jobs are its own, so the tsval
+   under test orders as V8 whoever hosts it, and its event loop takes only a promise a host call returns as external. Left, each **done when** as it says:
    - **Count the changed files again** in a fresh instance (a clone of main now: the throwaway one can't pull without
      signing in). Done when RUNNING.md's count is that run's. Counted 2026-11-23, the 32 changed files: api's, bablr's,
      cdp-memory-realms, silo's test-command, hub's, rtc, probes, metrics, runtime-vfs and debug-mcp's agent green;
      mailbox failing in under a second, its Worker saying so. Settling them found and fixed two more gaps a program
      would hit: an ES module's own top-level `exports` (unenv's net.mjs builds one) took the CommonJS emit's name, and a
      run's console had only seven of Node's methods.
-   - **tsval's own tests inside tsval** (vm/event-loop's ordering, vm/stacks' `async` frames, vm/stepped-async's
-     thenable's context): each holds tsval to V8 and passes in Node; run in the editor, the tsval under test leans on the
-     one running it for its host promises' timing, so what fails is the outer one's fidelity, not the subject — one
-     level of the same programs behaves as V8's since 2026-11-23. Proposed: they stay in Node, V8 their reference. Done
-     when the user says, and RUNNING.md does.
    - **Too slow to interpret, so far** (RUNNING.md, *A second world*: tsval faster is the answer): hub/model (1,000
      seeds of routing in one test) and debug-mcp's page-tools, tabs and outdated (wall-clock waits on interpreted
      debug-mcp). Not measured: done when a run says whether a fewer-seed or longer-wait run passes, and they wait on
      tsval's speed, said so in RUNNING.md, or the test's own limit is the gap.
-5. **tsval's own promise jobs** (the user, 2026-11-23: "tsval is supposed to be deterministic"). A run was repeatable,
-   but its microtask order was the host's. Built 2026-11-23 (src/promises.ts): a promise the program makes is still a
-   host Promise, its state kept by the machine too, and what reacts to it — `then`, `await`, a thenable adopted,
-   `queueMicrotask`, an async generator's requests, an async function under a host frame, a `for await`'s steps and its
-   iterator's `return()` — is a job in one queue, in the spec's order; a package's native promise is the boundary, one
-   pending job for its `then`'s pair (a `then(a, b)` left the other pending forever, so the run never ended).
-   test/vm/promise-order.test.ts holds 30 programs to Node's order (10 matched before, 4 of them hung); test262's 164
-   async tests run stepped too; tsval's 1,985 tests, the editor's 231 and all 51 in-editor specs pass. In an editor
-   cloned from main (30bd7a2c), the three files pass but one test — 25 of 26: vm/event-loop's ordering and forwarded
-   `then`, and vm/stacks' two `at async` tests, now pass there. Left, **done when** it passes there too:
-   - **stepped-async's returned thenable, two tsvals deep**: its `then` is called late and twice. Not the promise jobs —
-     an older gap of tsval running tsval, the same with the tsval before 30bd7a2c: a method made in an object literal
-     (tsval's own guest-function wrapper, `{ m(...args) { … } }.m`), called through `Reflect.apply` or `.call` by the
-     tsval under test, returns a Promise (one named `then`) or throws "Function.prototype.apply was called on
-     undefined" (`other`); a plain function's right, and one level deep all of it is, deep re-entry included.
-
 ## Watching
 
 How each architecture test has gone in CI lately, failing and flaky first: `node test/outcomes.mjs` in
