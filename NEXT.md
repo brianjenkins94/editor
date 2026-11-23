@@ -82,6 +82,17 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      seeds of routing in one test) and debug-mcp's page-tools, tabs and outdated (wall-clock waits on interpreted
      debug-mcp). Not measured: done when a run says whether a fewer-seed or longer-wait run passes, and they wait on
      tsval's speed, said so in RUNNING.md, or the test's own limit is the gap.
+5. **tsval's own promise jobs** (the user, 2026-11-23: "tsval is supposed to be deterministic"). A run is repeatable,
+   but its microtask order is the host's: the guest's `Promise` is the host's, a guest callback becomes a job only as
+   the host's queue reaches it (`deferCallback`), and the event loop's `queueMicrotask` and a returned thenable's
+   adoption ride `Promise.resolve().then`. On V8 that's V8's order; hosted by tsval (a tsval test in the editor) it's
+   the outer tsval's — vm/event-loop's ordering and forwarded `then`, and vm/stepped-async's thenable's context, fail
+   there. tsval owns the job queue instead: a reaction a guest registers — `then`, `await`, a thenable adopted,
+   `queueMicrotask` — is a job in one queue in the spec's order, the guest's `Promise` still the host's class (a
+   package's promises pass `instanceof`); a native promise a package settles reaches it with one hop, the boundary the
+   README already draws. **Done when** the three files' ordering and context tests pass in the editor, and tsval's
+   tests, its test262 sample and its differential suites still match Node. (vm/stacks' two `at async` tests are a
+   cause of their own.)
 
 ## Watching
 
