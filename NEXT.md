@@ -61,8 +61,10 @@ How it's kept:
      (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s
      `why`, the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). Not yet trusted:
      every commit of the last 80 touched a file no test here reaches; replayed, 34 of them would run everything (code
-     nothing reaches, package.json, the workflow). Next: reach for what's untested here, the UI specs' most; then rerun as
-     you write, checking coverage and capability expansion (silo README).
+     nothing reaches, package.json, the workflow). CI's specs: by reach, nothing saved — each boots the whole workbench,
+     so a change to the editor's code reaches every one (2026-11-22, silo README, *Built*); the architecture workflow
+     runs only for a change to what its suites are made of (17 of the last 52 commits changed none). Next: reach for
+     what's untested here; then rerun as you write, checking coverage and capability expansion (silo README).
    - **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
      reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), agent-tools.mjs
      (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the

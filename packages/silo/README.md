@@ -538,6 +538,13 @@ changes by file as well as by declaration. Code a test didn't run can't change h
 changes, and then it's touched; a vouch that didn't hold at the base says nothing, and static reach stands in. The run
 was tsval's, so a path only Node takes isn't in it: the weekly full run is what catches that.
 
+The editor's in-editor specs aren't selected by reach (measured 2026-11-22, the specs' reach from a dispatched
+coverage run at eef840c4, replayed over the 52 commits after it): every spec boots the whole workbench, so each has run
+the top of every module it loads, and a change to the editor's code reaches all of them — by file, 33 of the 52 commits
+needed all 25 traced specs even with reach as fresh as the commit before, and with the reach as recorded, all 52; by
+line, at best no better. What does pay is what the suites are made of: the architecture workflow runs only for a change
+to it (`paths`; 17 of the 52 changed none), and weekly for what changes upstream.
+
 **Dogfooding in the editor.** The editor is where this is tried first, and what it already has maps onto it:
 - **Reach** is its traces: tests run on tsval's `node:test` in the editor, and their reach is BABLR span ids, kept per
   file (`.silo/local/traces`). CI's architecture suites have reach records too (`.silo/evidence/ci/architecture.json`)

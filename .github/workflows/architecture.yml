@@ -1,12 +1,75 @@
 {
   "name": "architecture",
+  # Only for a change to what the suites are made of: the editor, the packages it links, its components, the dev server,
+  # the harness and these suites, the manifests that install them, and this workflow. Docs, unit tests, the benches and
+  # the repository's other packages can't change how a suite comes out — of the 52 commits after eef840c4, 17 changed
+  # none of it (2026-11-22). Selecting specs by what each ran was measured too, and saves nothing: every spec boots the
+  # whole workbench, so every change to the editor's code reaches every spec's reach (packages/silo/README.md, *Built*).
+  # The weekly run catches what changes with no push here: the monaco-vscode-api component installs its latest.
   "on": {
     "pull_request": {
-      "branches": ["main"]
+      "branches": ["main"],
+      "paths": [
+        "packages/editor/**",
+        "packages/account/**",
+        "packages/almostnode/**",
+        "packages/bablr/**",
+        "packages/bablr-language-ts/**",
+        "packages/debug-mcp/**",
+        "packages/editor-api/**",
+        "packages/hub/**",
+        "packages/observability/**",
+        "packages/playwright/**",
+        "packages/theme/**",
+        "packages/tsval/**",
+        "components/**",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "tsconfig.json",
+        ".github/workflows/architecture.yml",
+        "!**/*.md",
+        "!packages/*/test/**",
+        "!packages/editor/bench/**",
+        "packages/editor/test/*.mjs",
+        "packages/editor/test/*.json",
+        "packages/editor/test/in-editor/**",
+        "packages/editor/test/fixtures/**",
+        "!packages/editor/test/*.test.mjs"
+      ]
     },
     "push": {
-      "branches": ["main"]
+      "branches": ["main"],
+      "paths": [
+        "packages/editor/**",
+        "packages/account/**",
+        "packages/almostnode/**",
+        "packages/bablr/**",
+        "packages/bablr-language-ts/**",
+        "packages/debug-mcp/**",
+        "packages/editor-api/**",
+        "packages/hub/**",
+        "packages/observability/**",
+        "packages/playwright/**",
+        "packages/theme/**",
+        "packages/tsval/**",
+        "components/**",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "tsconfig.json",
+        ".github/workflows/architecture.yml",
+        "!**/*.md",
+        "!packages/*/test/**",
+        "!packages/editor/bench/**",
+        "packages/editor/test/*.mjs",
+        "packages/editor/test/*.json",
+        "packages/editor/test/in-editor/**",
+        "packages/editor/test/fixtures/**",
+        "!packages/editor/test/*.test.mjs"
+      ]
     },
+    "schedule": [{ "cron": "0 6 * * 1" }],
     "workflow_dispatch": null
   },
   # One run per branch at a time. On main a run always finishes (a newer push would otherwise cut it off partway, and
