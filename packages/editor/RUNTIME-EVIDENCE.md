@@ -451,7 +451,7 @@ counts runs or reads what they said seeds `run.liveRuns` off, since a save start
 
 Reintroduced 2026-11-06 (`extensions/tsval/live-run.ts`), but not yet what a save reaches: the old one also ran again each test
 and program whose trace held code the save changed, and ended one of those before a call with nothing to give it. That's the
-live loop's (NEXT.md item 2, *Which tests to run at all*), which waits for parity. Nor is a line's *replayed* or *skipped* kept
+live loop's (NEXT.md, *Which tests a change runs, here*), which waits for parity. Nor is a line's *replayed* or *skipped* kept
 across a reload with its buttons: a run restored from `.silo/local/traces/` shows the value and not *Pin…* or *Rule…* until the
 next one.
 

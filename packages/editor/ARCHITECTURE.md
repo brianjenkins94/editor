@@ -574,7 +574,7 @@ feature owns (decision 22). The core's tests are the first written.
   a week unless it failed lately, can't run where it was vouched, or is audited (*Vouches*). The editor's commit flow
   makes the vouches, so working in the editor is what lets CI run less.
 
-**The bench does it, for any repository.** This rebuild is the refactor bench's first job (NEXT.md item 1), and what
+**The bench does it, for any repository.** This rebuild is the refactor bench's first job (NEXT.md's first item until 2026-11-22, when what was left of it went to *Watching* and *Parked*), and what
 it takes is the product: a prototype-grown repository measured, reduced to a declared core, and its features
 reintroduced with purpose, by a person and agents in the editor. None of the steps is this repository's own: the
 ledger, ownership and attribution are silo's, for any repository (packages/silo/README.md), and the bench's tools are
@@ -712,7 +712,7 @@ line; the editor), and what supersedes what. Where it starts:
 
 **Visibility: anything we'd ever debug, without a profiler.** What exists: the metrics plane, span rates and latencies
 from every context's `→ x` / `← x (12ms)` records, the workspace's fill, and each zen-fs store operation counted as an
-architecture edge by caller with its bytes (`observeZenfs`). What it didn't show: the repository's load (NEXT.md item 1)
+architecture edge by caller with its bytes (`observeZenfs`). What it didn't show: the repository's load (NEXT.md, *Parked*: *The workspace's load cost*)
 was explained by CPU profiles and hand-placed logpoints counting the provider's calls (~190,000 for 14,000 paths) and
 finding who walked the tree. So every boundary between the filesystems is a span: VS Code's file service into the
 workspace provider and the node_modules provider, zen-fs (its operations timed, not only counted, and its path

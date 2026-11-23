@@ -13,87 +13,59 @@ How it's kept:
 
 ## Queue
 
-1. **The refactor bench: refactor this repo in the editor, reading from and committing to GitHub.** Its first job is
-   item 2's rebuild, and what that takes is the product, for any repository (ARCHITECTURE.md, *The bench does it*): a
-   step it can't support is a gap here. It works: a clone of this repository in ~2 s and an editor open in under 10 s,
-   its packages in node_modules as npm puts them (ARCHITECTURE.md, *Packages*), commits pushed through the editor's
-   sign-in, pulls that fast-forward, review by hunk, `silo check` in its terminal (19 s), CI's outcome in its status bar,
-   and no shell for agents (ARCHITECTURE.md, *Workspace tools*). Still open:
-   - **Load cost** (a first load of this repository, last measured 2026-11-11: the workspace buffer at 32 of 128 MB, the
-     first write-back 1.6 s, the restore at boot 0.43 s). What's left, by gain: each zen-fs lookup walks from the root
-     (StoreFS with `no_id_tables`, off for shared buffers), ~10× cheaper with id tables — upstream's answer (#329, closed
-     2026-11-03): not while its tables are a thread's own, until ECMAScript structs, and SingleBuffer's lookups are
-     O(log n) since. Measured again on 2.9.0 (2026-11-22, Node, this repository's 2,597 files in a 128 MB SingleBuffer):
-     a shared buffer, which has no tables, writes them in 3.3 s against 0.74, stats each in 95 µs against 13, reads them
-     all in 1.0 s against 0.16 — the walk still costs 5–7×. What's ours to do: a path's inode kept per thread, dropped
-     when a shared counter beside the buffer says another moved or removed one (the design in #329's thread), on the
-     StoreFS instance the workspace mounts, not in zen-fs; or the numbers taken back upstream. Neither yet (the user,
-     2026-11-22: not ready to). Since
-     2026-11-20 the provider's `stat`, `readFile` and `readdir` ask once (a path found 3 lookups → 1: zen-fs's
-     `existsSync` is two), and its stats are kept until a change says otherwise (workbench/stat-cache.ts: 32,490 of a
-     reload's first 39,718 stats answered so, this repository with TypeScript loading it); then the file store's work in
-     a worker. The
-     restore's span (`editor.workbench.workspace-fs.restore`, 2026-11-20): this repository's 3,065 files, 698 folders, in
-     0.71 s of a reload. zen-fs 2.8's v2 is ~30% slower than 2.7.6 on its own
-     (write 2.8 → 3.7 s, stat 1.2 → 1.6 s for 2,258 files), patched or not: upstream's to hear of.
-   - **Type gaps** (2026-10-31): features-map.ts's `wa-card` (ts 2345, L157) resolves, but one run showed it after 4
-     minutes: likely TypeScript checking before type acquisition wrote Web Awesome's types, and never told after
-     (ts-projects.ts skips node_modules). Unconfirmed; catch it happening before changing that. eslint.config.js's
-     `@brianjenkins94/util/eslint` has no declaration file (ts 7016, a suggestion).
-2. **The rewrite, in place, worked in the editor** (packages/editor/ARCHITECTURE.md, *The rewrite, in place*). Done
-   from the editor, by people or agents over debug-mcp; what the editor can't do for it goes here as its own item. The
-   reduction landed 2026-11-03 (4fbb0f68, `full-editor` the tag before it), every code file has one owner (decision
-   22), the measures were taken (`.silo/zero-knowledge.json`, `.silo/last-run/`), and the features came back to rough
-   parity with `full-editor` (the user's objective of 2026-11-05: that list ended 2026-11-19 with *Formatting-only
-   changes marked*). In order:
-   - **Silo, firmed up** (*Silo, firmed up*; each capability under its job, *What doesn't fit* answered 2026-11-22). Left:
-     one owner a file is where it starts — reassess sharing from what runs show. Features and tests says which of a
-     feature's files other features' tests run (2026-11-21), traces not yet. The known case, packages/admin/src/views.tsx
-     (five features' pages under one owner), split 2026-11-22: each page its feature's file, what they share ui.tsx.
-     `silo observed .silo/local/reach` compares each test's reach with the ledger (2026-11-17: 149 tests, a median of
-     100% in their own features' code, 26 under half, mostly a dependency). CI's reach, from a dispatched architecture
-     run (2026-11-20, 44800937124: half the specs, the other half past the limit, 60 min since), each spec its own file's
-     now: 41 tests to tell, a median of 17% in their own features' code — review-panel, checkpoints, way-in-reach and
-     code_parses 79–98%; capability-findings, instances and cosmetic 0–2%, their features' code run by every editor and so
-     not counted, what's left the terminal and review they lean on. `activate`, reached by every test, says nothing to
-     it (`RARE`: a statement at most 10% of the tests ran).
-   - **Which tests to run at all** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
-     (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s
-     `why`, the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). Not yet trusted:
-     every commit of the last 80 touched a file no test here reaches; replayed, 34 of them would run everything (code
-     nothing reaches, package.json, the workflow). CI's specs: by reach, nothing saved — each boots the whole workbench,
-     so a change to the editor's code reaches every one (2026-11-22, silo README, *Built*); the architecture workflow
-     runs only for a change to what its suites are made of (17 of the last 52 commits changed none). Next: reach for
-     what's untested here; then rerun as you write, checking coverage and capability expansion (silo README).
-   - **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
-     reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), agent-tools.mjs
-     (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the
-     API stood in for: a `route` of the editor's own would move it) and performance.mjs (budgets, from outside). Of the
-     unit tests across the repository (measured 2026-11-04, 124 files), what holds the rest in the debugger: the Worker
-     runtime (`workerd`, `miniflare`: packages/api, 170 tests), real Playwright launching a browser (78), `registerHooks`
-     (73), stalls (52), the capability policy on `/tmp` and `exec` (32).
-   - **What reintroduced features left for later**: *Capability findings* moving to TypeScript 7 once it loads a tsserver
-     plugin (TypeScript's to do).
-   - Far off, still the mission: *Event Sheet*, *Build a game by painting a level*.
-3. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Decided 2026-10-29
-   and 2026-11-20 (decisions 15–20), the report node:test's (the user, 2026-11-22). Built 2026-11-22: lib
-   `util/silo/select` (selection by test from what a change reaches by declaration, vouches that lapse when what they
-   reached changes, resting after 20 green runs, the week's window, audits, runtimes that must have agreed) and silo's
-   `silo test` (CI's step: selects, runs, its reporter's lines read back from the workflow's logs) and `silo vouch`; ci.yml
-   passes the push's base and runs everything Mondays; packages/editor's unit tests run through `silo test` (2026-11-22).
-   CI's runs read back since a fix the same day (the workflow named `ci`, which GitHub's API 404'd, so every test was
-   new; a run that can't be read now says so): 213 tests known. The editor's tsval runs vouch, and its commits carry them,
-   running first the touched tests that hadn't run since their code changed (decision 12), each held to the packages it
-   loaded too, so an upgrade lapses it, and CI selects by each test's reach from a run where a vouch says it (2026-11-22;
-   silo README, *Built*). Left: see a push's CI skip — a test a push doesn't reach rests after 20 green runs, so from
-   about the 20th push on; a touched one vouched for in the editor sooner, once CI has passed it after a vouch (decision
-   19). Done when a push's CI runs fewer tests because the rest are vouched for or resting.
+Each item says what finishes it. One that has no such line yet waits on a decision, under *Decisions*.
+
+1. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Built 2026-11-22:
+   lib `util/silo/select` and silo's `silo test` and `silo vouch` (selection by test, vouches that lapse when what they
+   reached changes, resting after 20 green runs, the week's window, audits, runtimes that must have agreed); ci.yml
+   passes the push's base and runs everything Mondays; packages/editor's unit tests run through `silo test`, CI's runs
+   read back (213 tests known). The editor's tsval runs vouch and its commits carry them, running first the touched tests
+   that hadn't run since their code changed (decision 12), each held to the packages it loaded, so an upgrade lapses
+   it; CI selects by each test's reach from a run where a vouch says it. Nothing's left to build. **Done when** a push's
+   CI log says it skipped tests as resting or vouched: a test a push doesn't reach rests after 20 green runs, so from
+   about the 20th push after 2026-11-22; a touched one vouched for in the editor sooner, once CI has passed it after a
+   vouch (decision 19).
+2. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
+   (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s
+   `why`, the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). Replayed over the
+   last 80 commits (2026-11-16), 34 would run everything: code nothing here reaches, package.json, the workflow. CI's
+   specs aren't selected by reach — each boots the whole workbench, so every change to the editor's code reaches every
+   one (2026-11-22, silo README, *Built*); the architecture workflow runs only for a change to what its suites are made
+   of. **Done when** the same replay, over the 80 commits before it's run, runs everything for no more than the
+   target, which waits on a decision (*Decisions*, *How few tests is enough*).
+3. **Where code is shared between features** (*Silo, firmed up*: one owner a file is where it starts, reassessed from
+   what runs show). What's there: `silo observed .silo/local/reach` compares each test's reach with the ledger
+   (2026-11-17: 149 tests, a median of 100% in their own features' code, 26 under half, mostly a dependency); CI's, from
+   a dispatched architecture run (2026-11-20, 41 specs, a median of 17%, `activate` and what every editor runs left
+   out); Features and tests says which of a feature's files other features' tests run (2026-11-21); the known case,
+   packages/admin/src/views.tsx, split 2026-11-22. **Done when** the ledger says how a file several features run is
+   owned, `silo check` holds it, and each file `silo observed` shows other features' tests running most of is split
+   or declared that way. Waits on a decision (*Decisions*, *Several owners*).
+4. **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
+   reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), agent-tools.mjs
+   (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the
+   API stood in for) and performance.mjs (budgets, from outside). The unit tests, by what holds them out (counted
+   2026-11-04, 124 files; the user's rule, 2026-11-16: test the subject directly before shimming the runtime). Each is
+   **done when** its tests run in the editor's debugger, or stay outside with the reason in RUNNING.md, *Tests*:
+   - **Count them again**, first: every unit test run in the editor's debugger, each file that can't with what stops
+     it. Done when the counts below are this run's, and a blocker none has is deleted.
+   - **The Worker runtime** (`workerd`, `miniflare`): packages/api, 170 tests.
+   - **Real Playwright launching a browser**: 78.
+   - **`registerHooks`**: 73.
+   - **Stalls**: 52.
+   - **The capability policy on `/tmp` and `exec`**: 32.
 
 ## Watching
 
 How each architecture test has gone in CI lately, failing and flaky first: `node test/outcomes.mjs` in
 packages/editor (`--all`, `--runs N`, `--json`).
 
+- **A type error shown 4 minutes, once** (2026-10-31): features-map.ts's `wa-card` (ts 2345, L157) resolves, but one
+  run showed it after 4 minutes: likely TypeScript checking before type acquisition wrote Web Awesome's types, and never
+  told after (ts-projects.ts skips node_modules). Unconfirmed; catch it happening before changing that. eslint.config.js's
+  `@brianjenkins94/util/eslint` has no declaration file (ts 7016, a suggestion).
+- **Capability findings on TypeScript 7** wait for TypeScript 7 to load a tsserver plugin (TypeScript's to do): then
+  they move from the editor's TypeScript to it.
 - **main's ruleset** (GitHub ruleset 26500207, 2026-11-03, in GitHub's settings, not this repository): pull requests to main
   need `silo / silo check`. Repository admins can bypass, so direct pushes and the editor's own commit flow keep working,
   and rely on `cd` not deploying after a red `ci`. Close that once the bench works through pull requests. A push from the
@@ -229,6 +201,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Decisions
 
+- **How few tests is enough** (queue item 2): the target its replay is held to — how many of 80 commits may still run
+  everything. Suggested: under 10, the rest of what's left being package.json and the workflows, which run everything
+  by design.
+- **Several owners** (queue item 3): may a file belong to several features in the ledger (`paths` in more than one
+  entry, `silo check` allowing it), or does a shared file always become a feature of its own (as ui.tsx's split did)?
 - **Tests by feature**, silo's for any repository, the editor's rewrite first (packages/silo/README.md, *Tests by
   feature, in your face*). Decided 2026-10-29: the list view; touched tests run in the background, and before the
   commit what hasn't; declared tests only in the rewrite, best-effort attribution meanwhile; rest after 20 green runs,
@@ -249,6 +226,18 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Parked
 
+- **The workspace's load cost** (parked by the user, 2026-11-22: not ready to). Each zen-fs lookup in the workspace's
+  shared SingleBuffer walks from the root (StoreFS with `no_id_tables`, set for shared buffers); upstream won't keep
+  id tables there before ECMAScript structs (#329, closed 2026-11-03). On 2.9.0 (2026-11-22, Node, this repository's
+  2,597 files in 128 MB) a shared buffer writes them in 3.3 s against 0.74, stats each in 95 µs against 13, reads them
+  all in 1.0 s against 0.16. Already done: the provider's `stat`, `readFile` and `readdir` ask once, and its stats are
+  kept until a change says otherwise (workbench/stat-cache.ts: 32,490 of a reload's first 39,718). How it could come
+  back: a path's inode kept per thread, dropped when a shared counter beside the buffer says another moved or removed
+  one, on the StoreFS instance the workspace mounts; the numbers taken upstream; the file store's work in a worker. A
+  first load measured 2026-11-11: the buffer at 32 of 128 MB, the first write-back 1.6 s, the restore 0.43 s (0.71 s,
+  3,065 files, 2026-11-20).
+- **The Event Sheet and building a game by painting a level** (far off, still the mission): what the editor is for,
+  after the house is in order.
 - **Docking editors into windows** (parked by the user, 2026-11-10: fine for now, another time). How it could come back,
   as proposed: full-editor's way was a dockview layout as the shell's main region, VS Code's windows and the previews its panels, but the previews are `app-window`s now, so that's a second kind of window. Instead: (1) VS Code's Move Editor into New Window opens in an `app-window` in the shell, as the previews do, through the component's `openAuxiliaryWindow` hook, still there and unused (its place kept, closing it as VS Code closes a window: a clean editor closes, a dirty one goes back); (2) a preview's window shown as an editor tab, full-editor's hosted-editor.ts with what it found (an inactive pane is taken out of the page, so the preview is laid over its pane, hidden but loaded); and (3) docking proper, a window snapped to the shell's edges or tabbed with another, in `app-window` itself if it's wanted, decided by use.
 - **Tests inside the editor's real extension host** (2026-11-02): an extension's tests run where it does — the
