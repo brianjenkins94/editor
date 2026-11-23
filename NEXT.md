@@ -27,7 +27,8 @@ How it's kept:
      a shared buffer, which has no tables, writes them in 3.3 s against 0.74, stats each in 95 µs against 13, reads them
      all in 1.0 s against 0.16 — the walk still costs 5–7×. What's ours to do: a path's inode kept per thread, dropped
      when a shared counter beside the buffer says another moved or removed one (the design in #329's thread), on the
-     StoreFS instance the workspace mounts, not in zen-fs; or the numbers taken back upstream. Since
+     StoreFS instance the workspace mounts, not in zen-fs; or the numbers taken back upstream. Neither yet (the user,
+     2026-11-22: not ready to). Since
      2026-11-20 the provider's `stat`, `readFile` and `readdir` ask once (a path found 3 lookups → 1: zen-fs's
      `existsSync` is two), and its stats are kept until a change says otherwise (workbench/stat-cache.ts: 32,490 of a
      reload's first 39,718 stats answered so, this repository with TypeScript loading it); then the file store's work in
