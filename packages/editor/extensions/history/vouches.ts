@@ -3,6 +3,18 @@ import type { Vouch } from "@brianjenkins94/util/silo/select";
 import { digest } from "@brianjenkins94/util/silo/graph";
 import { testId } from "@brianjenkins94/util/silo/select";
 
+export function heldAs(file: string): string {
+	const at = file.lastIndexOf("node_modules/");
+
+	if (at === -1) {
+		return file;
+	}
+
+	const [first = "", second = ""] = file.slice(at + "node_modules/".length).split("/");
+
+	return `${file.slice(0, at)}node_modules/${first.startsWith("@") ? `${first}/${second}` : first}/package.json`;
+}
+
 export function reachedBy(files: readonly string[], blob: (file: string) => string | undefined): Record<string, string> | undefined {
 	const reached: Record<string, string> = {};
 

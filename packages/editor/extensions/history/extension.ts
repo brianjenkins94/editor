@@ -15,7 +15,7 @@ import * as vscode from "vscode";
 import { ledgerView } from "./ledger";
 import { reachView } from "./reach";
 import { exerciseOf } from "./runs-say";
-import { vouchesOf } from "./vouches";
+import { heldAs, vouchesOf } from "./vouches";
 
 const IDLE_MS = 1500;
 const RETRY_MS = 2000;
@@ -190,11 +190,13 @@ export function activate(context: vscode.ExtensionContext): void {
 			return;
 		}
 
-		const ranOf = (test: TestsEvent["tests"][number]): string[] => test.files.flatMap((ran) => {
+		const ranFiles = (test: TestsEvent["tests"][number]): string[] => test.files.flatMap((ran) => {
 			const path = relative(vscode.Uri.file(ran.file));
 
-			return path === undefined || path.includes("node_modules/") ? [] : [path];
+			return path === undefined ? [] : [heldAs(path)];
 		});
+		const packages = (event.packages ?? []).map((ran) => relative(vscode.Uri.file(`${ran.dir}/package.json`)) ?? `${ran.dir}/package.json`);
+		const ranOf = (test: TestsEvent["tests"][number]): string[] => [...ranFiles(test), ...packages];
 		const paths = new Set([file, ...event.tests.flatMap(ranOf)]);
 		const unsaved = vscode.workspace.textDocuments.filter((document) => document.isDirty && paths.has(relative(document.uri) ?? "")).map((document) => relative(document.uri));
 

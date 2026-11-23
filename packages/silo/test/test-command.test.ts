@@ -54,16 +54,42 @@ test("another runtime's vouch counts for a test CI passed after it was made (dec
 test("a vouch's file outside the graph is held to its contents' git id as the checkout has it", async () => {
 	const { filesNamedIn } = await import("../src/test.ts");
 	const { execFileSync } = await import("node:child_process");
-	const { mkdtempSync, writeFileSync } = await import("node:fs");
+	const { mkdirSync, mkdtempSync, writeFileSync } = await import("node:fs");
 	const { tmpdir } = await import("node:os");
 	const path = await import("node:path");
 	const repo = mkdtempSync(path.join(tmpdir(), "silo-vouch-"));
 
 	execFileSync("git", ["init", "-q"], { "cwd": repo });
 	writeFileSync(path.join(repo, "a.test.mjs"), "test('adds', () => {});\n");
+	// (a dependency it ran, installed and ignored: held by its package.json, which changes with its version)
+	writeFileSync(path.join(repo, ".gitignore"), "node_modules/\n");
+	mkdirSync(path.join(repo, "node_modules", "twice"), { "recursive": true });
+	writeFileSync(path.join(repo, "node_modules", "twice", "package.json"), "{ \"name\": \"twice\", \"version\": \"1.0.0\" }\n");
 
-	const reached = { "a.test.mjs": "x", "a.mjs#a": "f1", "gone.mjs": "y" };
+	const reached = { "a.test.mjs": "x", "a.mjs#a": "f1", "gone.mjs": "y", "node_modules/twice/package.json": "z" };
 	const named = filesNamedIn(repo, [{ "test": "a.test.mjs › adds", "outcome": "pass", "by": "brian", "at": "2026-11-22T11:00:00Z", "runtime": "tsval", "reached": reached }]);
 
-	assert.deepEqual([...named], [["a.test.mjs", execFileSync("git", ["hash-object", "a.test.mjs"], { "cwd": repo, "encoding": "utf8" }).trim()]]);
+	const oid = (file: string): string => execFileSync("git", ["hash-object", file], { "cwd": repo, "encoding": "utf8" }).trim();
+
+	assert.deepEqual([...named], [["a.test.mjs", oid("a.test.mjs")], ["node_modules/twice/package.json", oid("node_modules/twice/package.json")]]);
+});
+
+test("silo vouch holds a test to the lockfiles over it, so a dependency's upgrade lapses it", async () => {
+	const { lockfilesOver } = await import("../src/test.ts");
+	const { digest } = await import("@brianjenkins94/util/silo/graph");
+	const { execFileSync } = await import("node:child_process");
+	const { mkdirSync, mkdtempSync, writeFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const path = await import("node:path");
+	const repo = mkdtempSync(path.join(tmpdir(), "silo-locks-"));
+
+	execFileSync("git", ["init", "-q"], { "cwd": repo });
+	mkdirSync(path.join(repo, "packages", "a", "test"), { "recursive": true });
+	writeFileSync(path.join(repo, "package-lock.json"), "{}\n");
+	writeFileSync(path.join(repo, "packages", "a", "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+
+	const oid = (file: string): string => digest(execFileSync("git", ["hash-object", file], { "cwd": repo, "encoding": "utf8" }).trim());
+
+	assert.deepEqual(lockfilesOver(repo, "packages/a/test/a.test.mjs"), { "packages/a/pnpm-lock.yaml": oid("packages/a/pnpm-lock.yaml"), "package-lock.json": oid("package-lock.json") });
+	assert.deepEqual(lockfilesOver(repo, "b.test.mjs"), { "package-lock.json": oid("package-lock.json") });
 });

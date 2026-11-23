@@ -1,4 +1,4 @@
-import type { CoverageEvent, Effect, LiveBatch, TestReport, RulePlace } from "@brianjenkins94/editor-api";
+import type { CoverageEvent, Effect, LiveBatch, LoadedPackage, TestReport, RulePlace } from "@brianjenkins94/editor-api";
 import type { Replay } from "@brianjenkins94/editor-api/recorded";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 
@@ -49,7 +49,7 @@ export type WorkerEvent =
 	| { "type": "coverage"; "coverage": CoverageEvent }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" | "console" }
 	| { "type": "values"; "batch": LiveBatch; "file"?: string; "source"?: string }
-	| { "type": "tests"; "tests": TestReport[] }
+	| { "type": "tests"; "tests": TestReport[]; "packages"?: LoadedPackage[] }
 	| { "type": "valueSet"; "ok": boolean; "value"?: string; "error"?: string; "snapshot"?: Snapshot }
 	| { "type": "listening"; "port": number }
 	| { "type": "serving"; "ports": number[] }

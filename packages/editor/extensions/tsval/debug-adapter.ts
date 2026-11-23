@@ -470,7 +470,7 @@ class TsvalDebugSession implements vscode.DebugAdapter {
 				break;
 
 			case "tests":
-				this.tell("tests", { "file": this.program, "tests": message.tests });
+				this.tell("tests", { "file": this.program, "tests": message.tests, ...message.packages === undefined ? {} : { "packages": message.packages } });
 				break;
 
 			case "terminated":

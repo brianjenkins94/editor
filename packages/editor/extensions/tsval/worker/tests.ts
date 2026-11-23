@@ -2,6 +2,7 @@ import type { CoverageEvent, Effect, TestReport } from "@brianjenkins94/editor-a
 import type ts from "typescript";
 import type { Vm } from "./state";
 import { siteObservations } from "../site-sums";
+import { packagesRan } from "./package-calls";
 import { held, readsStdin } from "./process";
 import { EDITOR_SOURCES } from "./runtime";
 import { post, state } from "./state";
@@ -171,7 +172,7 @@ export function testsOver(vm: Vm): boolean {
 
 export function tellTests(exitCode: number): number {
 	if (state.testsRan.length > 0) {
-		post({ "type": "tests", "tests": state.testsRan });
+		post({ "type": "tests", "tests": state.testsRan, "packages": [...packagesRan.values()] });
 	}
 
 	return exitCode === 0 && state.testsFailed > 0

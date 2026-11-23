@@ -152,7 +152,7 @@ export interface TestReport {
 
 /** The `tests` event, sent as a test file's run ends (before `coverage`): its tests in the order they ran — `file` the
  *  test file. */
-export interface TestsEvent { "file": string; "tests": TestReport[] }
+export interface TestsEvent { "file": string; "tests": TestReport[]; "packages"?: LoadedPackage[] }
 
 /** A package whose code a run ran: its package.json's name and version, and its folder. */
 export interface LoadedPackage { "name": string; "version"?: string; "dir": string }

@@ -737,7 +737,7 @@ export const app = subcommands({
 				"runtime": { "format": String, "default": "node", "doc": "What the runner runs tests on." }
 			}),
 			"handler": async (config) => {
-				const { graphAt, runWithReporter, vouchesFor } = await import("./test.ts");
+				const { graphAt, lockfilesOver, runWithReporter, vouchesFor } = await import("./test.ts");
 				const { gitUser } = await import("@brianjenkins94/util/silo/runs");
 				const { parseVouches, vouchesText } = await import("@brianjenkins94/util/silo/select");
 				const { vouchesPath } = await import("@brianjenkins94/util/silo/layout");
@@ -755,7 +755,7 @@ export const app = subcommands({
 				}
 
 				const user = gitUser(repo) ?? "local";
-				const made = vouchesFor(ran.outcomes, graph!, { "by": user, "runtime": config.get("runtime") });
+				const made = vouchesFor(ran.outcomes, graph!, { "by": user, "runtime": config.get("runtime"), "held": (file) => lockfilesOver(repo, file) });
 				const kept = path.join(repo, vouchesPath(user));
 				// (a test's latest vouch is the one kept: the file grows by what changed, not by every run)
 				const before = fs.existsSync(kept) ? parseVouches(fs.readFileSync(kept)) : [];

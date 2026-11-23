@@ -15,7 +15,7 @@ import type { Selected, Vouch } from "@brianjenkins94/util/silo/select";
 import { spawnSync } from "node:child_process";
 import * as path from "node:path";
 import * as fs from "@brianjenkins94/util/fs";
-import { changedDeclarations } from "@brianjenkins94/util/silo/graph";
+import { changedDeclarations, digest } from "@brianjenkins94/util/silo/graph";
 import { includeByDefault } from "@brianjenkins94/util/silo/history";
 import { VOUCHES_DIR } from "@brianjenkins94/util/silo/layout";
 import { githubRuns, standings } from "@brianjenkins94/util/silo/outcomes";
@@ -124,6 +124,26 @@ export function filesNamedIn(repo: string, vouches: readonly Vouch[]): Map<strin
 	return new Map(files.flatMap((file, index) => oids[index] === undefined || oids[index] === "" ? [] : [[file, oids[index]] as const]));
 }
 
+const LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock"];
+
+/** The lockfiles over `file` (from the repository's top), each held by its contents' git id kept as its digest: a
+ *  vouch holding them lapses when a dependency's version changes, as `filesNamedIn` reads them back. */
+export function lockfilesOver(repo: string, file: string): Record<string, string> {
+	const found: string[] = [];
+
+	for (let dir = path.posix.dirname(file); ; dir = path.posix.dirname(dir)) {
+		found.push(...LOCKFILES.map((name) => (dir === "." ? name : `${dir}/${name}`)).filter((each) => fs.existsSync(path.join(repo, each))));
+
+		if (dir === "." || dir === "/") {
+			break;
+		}
+	}
+
+	const oids = found.length === 0 ? [] : (git(repo, ["hash-object", "--", ...found]) ?? "").trim().split("\n");
+
+	return Object.fromEntries(found.flatMap((each, index) => (oids[index] === undefined || oids[index] === "" ? [] : [[each, digest(oids[index])]])));
+}
+
 export interface TestOptions {
 	"repo": string;
 	/** The test files the runner would run, from the repository's top. */
@@ -179,14 +199,15 @@ export async function selectFor(options: TestOptions): Promise<Selected[]> {
 }
 
 /** Vouches for the tests that passed in `outcomes` (silo's reporter's, read back: `reportedIn`), each with the fingerprints
- *  of what its file reaches in `graph`, the code as it is now. A failure vouches for nothing. */
-export function vouchesFor(outcomes: readonly TestOutcome[], graph: DeclarationGraph, options: { "by": string; "runtime": string; "commit"?: string; "at"?: string }): Vouch[] {
+ *  of what its file reaches in `graph`, the code as it is now, and what `held` adds (its lockfiles, `lockfilesOver`). A
+ *  failure vouches for nothing. */
+export function vouchesFor(outcomes: readonly TestOutcome[], graph: DeclarationGraph, options: { "by": string; "runtime": string; "commit"?: string; "at"?: string; "held"?: (file: string) => Record<string, string> }): Vouch[] {
 	const at = options.at ?? new Date().toISOString();
 
 	return outcomes.filter((outcome) => outcome.outcome === "pass").map((outcome) => {
 		const [file, ...titles] = outcome.titles;
 
-		return { "test": testId(file!, titles), "outcome": "pass" as const, "by": options.by, "at": at, "runtime": options.runtime, ...options.commit === undefined ? {} : { "commit": options.commit }, "reached": fingerprintsOf(graph, staticReach(graph, file!)) };
+		return { "test": testId(file!, titles), "outcome": "pass" as const, "by": options.by, "at": at, "runtime": options.runtime, ...options.commit === undefined ? {} : { "commit": options.commit }, "reached": { ...fingerprintsOf(graph, staticReach(graph, file!)), ...options.held?.(file!) } };
 	});
 }
 
