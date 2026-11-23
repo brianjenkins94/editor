@@ -55,9 +55,10 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
 4. **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
    reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), agent-tools.mjs
    (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the
-   API stood in for) and performance.mjs (budgets, from outside). The unit tests, counted again 2026-11-23 (every one
-   in a throwaway instance's debugger, `runs_tests`, a package at a time: packages/tsval/vendor aside, 163 files):
-   104 green, 1,550 tests passing and 43 failing in the files that load. What held the rest out was judged test by test
+   API stood in for) and performance.mjs (budgets, from outside). The unit tests, counted again 2026-11-23 in an editor
+   cloned from main (e283640d; every one in its debugger, `runs_tests`, a package at a time: packages/tsval/vendor
+   aside, 176 files): 138 green, 1,707 tests passing and 20 failing in the files that load; 34 of the rest stay outside
+   as RUNNING.md, *Tests*, has it, and 4 are below. (That morning: 104 of 163.) What held the rest out was judged test by test
    — does the test need it to test what it's meant to? (the user, 2026-11-16 and again 2026-11-23: not blindly
    implemented, as before) — and done as judged (the user's word, 2026-11-23): what stays outside, the host its subject,
    is in RUNNING.md, *Tests*; the tests that only lacked scaffolding changed (06ca07e0, 697b25d1, 769d881a); what a
@@ -69,16 +70,26 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    backpressure test needs its loader: `runs_tests` with `imports`, or `npm test` in the terminal). tsval's own tests
    that hold it to V8 pass here too since 2026-11-23 (30bd7a2c, e283640d): its promise jobs are its own, so the tsval
    under test orders as V8 whoever hosts it, and its event loop takes only a promise a host call returns as external. Left, each **done when** as it says:
-   - **Count the changed files again** in a fresh instance (a clone of main now: the throwaway one can't pull without
-     signing in). Done when RUNNING.md's count is that run's. Counted 2026-11-23, the 32 changed files: api's, bablr's,
-     cdp-memory-realms, silo's test-command, hub's, rtc, probes, metrics, runtime-vfs and debug-mcp's agent green;
-     mailbox failing in under a second, its Worker saying so. Settling them found and fixed two more gaps a program
-     would hit: an ES module's own top-level `exports` (unenv's net.mjs builds one) took the CommonJS emit's name, and a
-     run's console had only seven of Node's methods.
-   - **Too slow to interpret, so far** (RUNNING.md, *A second world*: tsval faster is the answer): hub/model (1,000
-     seeds of routing in one test) and debug-mcp's page-tools, tabs and outdated (wall-clock waits on interpreted
-     debug-mcp). Not measured: done when a run says whether a fewer-seed or longer-wait run passes, and they wait on
-     tsval's speed, said so in RUNNING.md, or the test's own limit is the gap.
+   - **debug-mcp's page-tools, tabs and outdated** stop at a capability prompt: their debug-mcp looks for a browser
+     at 127.0.0.1:9222 (cdp-memory.ts `connect`), a real port on the machine the editor's in — not approved. None of
+     the three needs a browser to test what it tests (in Node, nothing listens there, and the look fails quietly).
+     Done when the user decides whether a run's policy denies that port (as nothing answering does), or the test's
+     debug-mcp is made not to look, and they're run.
+   - **promise-order's two subclass tests, two tsvals deep**: `class P extends Promise` made by the tsval under test
+     comes back with its `then` "called on incompatible receiver" (reproduced in Node, an outer tsval evaluating
+     tsval's sources: scratch harness); one level deep all of promise-order matches Node. Done when they pass in the
+     editor.
+   - **A program that changes the built-ins it shares stalls its debugger**: test262's tests poison prototypes (an
+     array iterator yielding 42), and the debug worker's own `Object.fromEntries` (state.ts `linkCallsSince`) threw
+     on it as the run ended, the run stopping after 145 s with runs_tests failing (`reading 'replace'`). A run's
+     intrinsics are the worker's (run-global.ts says so); test262 stays outside for its fresh realms anyway. Done when
+     the user decides whether the worker guards its own code from a program's changes to them.
+   - **Too slow to interpret, so far** (RUNNING.md, *A second world*: tsval faster is the answer): hub/model passes now
+     in 196 s (1,000 seeds of routing in one test; tsval's step in 92 s and editor-api's exchanges in 63 s, also green),
+     and debug-mcp's page-tools, tabs and outdated (wall-clock waits on interpreted debug-mcp, unmeasured: the prompt
+     above). Done when those three have run: passing, or waiting on tsval's speed (said so in RUNNING.md), or the
+     test's own limit the gap.
+
 ## Watching
 
 How each architecture test has gone in CI lately, failing and flaky first: `node test/outcomes.mjs` in

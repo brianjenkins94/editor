@@ -167,13 +167,14 @@ copy's destination asked about, a timer native code sets — not for a test's sc
 Worker, a module loaded that the test doesn't use. Where it's the test, its logic moves out of its wiring to be tested
 directly (history's ledger-checks.ts, cosmetic's verdicts.ts).
 
-**The repository's other tests**, judged the same way test by test (2026-11-23, after every one was run here: 104 of
-163 files green). These stay outside, the host being what they test: packages/api's suite (the Worker in workerd —
+**The repository's other tests**, judged the same way test by test (2026-11-23, after every one was run here: 138 of
+176 files green in an editor cloned from main, e283640d; 104 of 163 that morning). These stay outside, the host being what they test: packages/api's suite (the Worker in workerd —
 Durable Objects, D1, R2, the rate limiters, the crons — its tests of pure functions apart); almostnode's builtins
 floor test and vm.test (Node's own modules are the reference they're held to); playwright's engine and request tests
 and debug-mcp cdp-memory's endpoint test (Playwright in a launched Chromium is the reference); tsval's
 vm/handler-modules (a fresh Node loader for each module) and differential/test262 (Node's fresh realms as the
-control); silo's cli tests and test-command's git ones (checked against real git); editor-api's mailbox (a second
+control); silo's cli tests and test-command's git ones, and the editor's git-push (checked against real git); the
+editor's node-test (Node's own node:test, spawned, is the reference); editor-api's mailbox (a second
 thread blocked in `Atomics.wait` while this one answers); debug-mcp's sessions (two processes contending for one
 port).
 
