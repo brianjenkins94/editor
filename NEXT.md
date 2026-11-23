@@ -39,10 +39,11 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    a dispatched architecture run (2026-11-20, 41 specs, a median of 17%, `activate` and what every editor runs left
    out); Features and tests says which of a feature's files other features' tests run (2026-11-21); the known case,
    packages/admin/src/views.tsx, split 2026-11-22. Decided: several owners if and only if real coverage shows it
-   (*Decisions*, *Several owners*). Written 2026-11-22, not yet in lib: the ownership check reading
-   `.silo/sharing.json` and `silo observed --share` writing it. **Done when** `silo check` holds a file several
-   features own to that record, and each file `silo observed` shows other features' tests running most of is split
-   or shared on it.
+   (*Decisions*, *Several owners*), built 2026-11-22: `silo observed <reach>` keeps what each test ran in
+   `.silo/last-run/reach.json`, and the ownership check (`silo check`, the editor's Problems) lets a file be several
+   features' only when it shows each one's tests running it. **Done when** that record is from a full coverage run
+   (dispatched 2026-11-22, 45111162082), and each file `silo observed` shows other features' tests running most of is
+   split or shared on it.
 4. **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
    reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), agent-tools.mjs
    (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the
@@ -172,7 +173,7 @@ packages/editor (`--all`, `--runs N`, `--json`).
   without its comments, is the same code before and after (TypeScript's printer, 244 files). Not seen before today.
 
 - **live-runs.spec misses in slow full runs** (here: "F5 just after a save" without its Debug Console output, 2026-11-19
-  in 237 s against ~175, 2026-11-20 in 282 s, and 2026-11-22 twice, once in 239 s; "a rule gives it a value" without its value, 2026-11-20 in
+  in 237 s against ~175, 2026-11-20 in 282 s, and 2026-11-22 twice, once in 239 s; "a rule gives it a value" without its value, 2026-11-23 once, 2026-11-20 in
   253 s).
   Each passes alone (15 of 15 for the spec, 2026-11-20) and in the next full run. On CI once (0e885fc4's `specs-2`):
   "Pin…", its F5 run given "seen" at its stop and the margin showing a live run's `skipped = exec ls` instead — a live
@@ -207,8 +208,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
   everything. Suggested: under 10, the rest of what's left being package.json and the workflows, which run everything
   by design.
 - **Several owners** (queue item 3). Decided 2026-11-22: a file may be several features' if and only if real coverage
-  shows it — each owner's tests running it, recorded from runs (`silo observed <reach> --share`, `.silo/sharing.json`),
-  not from static reach; otherwise it's split, or one feature's.
+  shows it — each owner's tests running it, as the last run's reach has it (`.silo/last-run/reach.json`, kept by
+  `silo observed`), not static reach; otherwise it's split, or one feature's.
 - **Tests by feature**, silo's for any repository, the editor's rewrite first (packages/silo/README.md, *Tests by
   feature, in your face*). Decided 2026-10-29: the list view; touched tests run in the background, and before the
   commit what hasn't; declared tests only in the rewrite, best-effort attribution meanwhile; rest after 20 green runs,

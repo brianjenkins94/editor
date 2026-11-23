@@ -1085,8 +1085,11 @@ From *Tests by feature* (above), for the rewrite:
     that names one owner is checked against what runs show. Everything: once a repository's ledger declares a feature,
     every code file is held to an owner, tests, scripts and vendored code among them (2026-11-03: `.silo/owned.json`,
     which rolled this out a folder at a time, went when the editor's files were all attributed). One owner per file is
-    where it starts, not a rule (user, 2026-11-03): `owned twice` holds it until silo can ingest coverage from runs and
-    traces, and how to handle sharing is reassessed from what they show. No allowance for code not yet declared: the editor's
+    where it starts, not a rule (user, 2026-11-03), and several owners are allowed if and only if real coverage shows
+    them (user, 2026-11-22): a file in several features' `paths` is `owned twice` unless the last run's reach shows each
+    one's tests running it. `silo observed <reach>` keeps what it reads in `.silo/last-run/reach.json` (each test, and
+    each file with the tests that ran any of it), committed, which `silo check` and the editor's Problems hold the ledger
+    to; reach from static analysis doesn't count. No allowance for code not yet declared: the editor's
     rebuild reduces to a declared core first and reintroduces features one at a time (packages/editor/ARCHITECTURE.md,
     *The rewrite, in place*), so the check holds from the start. The grain, decided 2026-11-02: by file, through a
     feature's `paths`; runs, tests and traces give continuous coverage beside it — what each feature's code is seen

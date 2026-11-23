@@ -50,13 +50,13 @@ import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianje
 import { priceOf, priceText } from "@brianjenkins94/util/silo/cost";
 import { coverageMarkdown, coverageReplay } from "@brianjenkins94/util/silo/coverage";
 import { installCommand, packageManagerOf, pinOfRequest, workspacePins } from "@brianjenkins94/util/silo/install";
-import { observedAgainstDeclared, observedText, parseReach } from "@brianjenkins94/util/silo/observed";
+import { observedAgainstDeclared, observedText, parseReach, ranByFile, reachRecord } from "@brianjenkins94/util/silo/observed";
 import { byFile, byFolder, byReach, byTests, codeOwners, linkedBySubjects, scoreGrouping, testsFromRecords } from "@brianjenkins94/util/silo/derive";
 import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
-import { ledgerPath } from "@brianjenkins94/util/silo/layout";
+import { lastRunReachPath, ledgerPath } from "@brianjenkins94/util/silo/layout";
 import { CI_RECORDS, declaredDrift, declaredFeatures, dormantWays, drift, isOwnedCode, ledgerText, ownersOf, parseLedger, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
@@ -183,7 +183,8 @@ export async function ledgerDrift(repo: string, today = new Date().toISOString()
 		"docs": files.filter((file) => file.endsWith(".md")).map(read),
 		"code": code.map(read),
 		// (every code file a feature's, tests and vendored code among them: decision 22; a repository declaring none isn't held)
-		...declaredFeatures(ledger).length === 0 ? {} : { "owned": { "files": files.filter(isOwnedCode) } }
+		// (and a file several own held to what the last run's reach shows of it: real coverage, nothing else)
+		...declaredFeatures(ledger).length === 0 ? {} : { "owned": { "files": files.filter(isOwnedCode), "ran": ranByFile(fs.existsSync(path.join(repo, lastRunReachPath())) ? fs.readFileSync(path.join(repo, lastRunReachPath())) : undefined) } }
 	}), ...declaredDrift(ledger, { "ways": ways, "exists": exists })];
 }
 
@@ -769,7 +770,7 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "observed",
-			"description": "Each test against the features its file declares, by the statements few tests ran: where what runs shows disagrees with what the ledger says, and what sharing there is to reassess. Reads a folder of each test file's reach: the editor's (`.silo/local/reach/`, each at its test file's path, `<path>.json`, as its runs keep them), or `<suite>.json`, as COVERAGE=1 writes them and a dispatched architecture run uploads them.",
+			"description": "Each test against the features its file declares, by the statements few tests ran: where what runs shows disagrees with what the ledger says, and what sharing there is to reassess. Reads a folder of each test file's reach: the editor's (`.silo/local/reach/`, each at its test file's path, `<path>.json`, as its runs keep them), or `<suite>.json`, as COVERAGE=1 writes them and a dispatched architecture run uploads them. What each test ran is kept in .silo/last-run/reach.json, by file, to commit: `silo check` lets a file be several features' only when it shows each one's tests running it.",
 			"config": juvy({
 				"reach": { "format": String, "default": "", "positional": true, "doc": "The folder of each test file's reach." },
 				"repo": { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." },
@@ -812,8 +813,12 @@ export const app = subcommands({
 					});
 				});
 				const observed = observedAgainstDeclared(ledgerOf(repo), tests);
+				const record = path.join(repo, lastRunReachPath());
 
-				process.stdout.write(config.get("json") ? JSON.stringify(observed, undefined, "\t") + "\n" : observedText(observed));
+				// (what it read, kept for `silo check`: a file several features own is held to it)
+				fs.mkdirSync(path.dirname(record), { "recursive": true });
+				fs.writeFileSync(record, JSON.stringify(reachRecord(tests, new Date().toISOString().slice(0, 10))) + "\n");
+				process.stdout.write(config.get("json") ? JSON.stringify(observed, undefined, "\t") + "\n" : observedText(observed) + `\nWhat each test ran is kept in ${lastRunReachPath()}, for \`silo check\`: commit it.\n`);
 			}
 		}),
 		command({

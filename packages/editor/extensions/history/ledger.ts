@@ -1,5 +1,5 @@
 import type { Feature } from "@brianjenkins94/util/silo/features";
-import { ledgerPath } from "@brianjenkins94/util/silo/layout";
+import { lastRunReachPath, ledgerPath } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
 
 import { decisionsFor, driftOf } from "./ledger-checks";
@@ -86,7 +86,7 @@ export function ledgerView(context: vscode.ExtensionContext, root: vscode.Uri): 
 		"ledgerText": ledgerNow,
 		"check": async (features) => {
 			const there = await load();
-			const placed = Map.groupBy(driftOf(texts.get(ledgerPath()) ?? await textOf(ledgerUri), there, texts, features, today()), (each) => each.path);
+			const placed = Map.groupBy(driftOf(texts.get(ledgerPath()) ?? await textOf(ledgerUri), there, texts, features, today(), await textOf(vscode.Uri.joinPath(root, lastRunReachPath()))), (each) => each.path);
 
 			problems.clear();
 			problems.set(ledgerUri, []);

@@ -92,3 +92,17 @@ test("a code file no feature owns, tests and scripts among them, is a problem on
 test("a repository whose ledger declares no feature isn't held to owners", () => {
 	assert.equal(problems(workspace("# Next\n", { "src/stray.ts": "export const stray = 1;\n" })).get("src/stray.ts"), undefined);
 });
+
+test("a file two features own is theirs when the last run's reach shows each one's tests running it, and otherwise owned twice", () => {
+	const ledger = {
+		"Loading": { ...LEDGER.Loading, "what": "Loads.", "paths": ["src/load.ts", "src/shared.ts"], "tests": ["test/load.test.mjs"] },
+		"Saving": { "status": "active", "why": "it saves", "since": "2026-11-02", "what": "Saves.", "paths": ["src/shared.ts"], "tests": ["test/save.test.mjs"] }
+	};
+	const texts = workspace("", { "src/shared.ts": "export const shared = 1;\n", "test/load.test.mjs": "", "test/save.test.mjs": "" }, ledger);
+	const record = (ran) => JSON.stringify({ "version": 2, "at": TODAY, "tests": [{ "file": "test/load.test.mjs", "name": "loads" }, { "file": "test/save.test.mjs", "name": "saves" }], "files": { "src/shared.ts": ran } });
+	const twice = (reach) => driftOf(texts.get(".silo/features.json"), new Set(texts.keys()), texts, new Map(), TODAY, reach).filter((each) => each.check === "owned twice").map((each) => each.message.split(" — ")[0]);
+
+	assert.deepEqual(twice(record([0, 1])), []);
+	assert.deepEqual(twice(record([0])), ["owned twice: src/shared.ts is owned by \"Loading\" and \"Saving\", and no test of \"Saving\" ran it"]);
+	assert.deepEqual(twice(undefined), ["owned twice: src/shared.ts is owned by \"Loading\" and \"Saving\", and no test's coverage shows it run"]);
+});

@@ -2,6 +2,7 @@ import type { Feature } from "@brianjenkins94/util/silo/features";
 import { includeByDefault } from "@brianjenkins94/util/silo/history";
 import { ledgerPath } from "@brianjenkins94/util/silo/layout";
 import { declaredFeatures, drift, isOwnedCode, parseLedger } from "@brianjenkins94/util/silo/ledger";
+import { ranByFile } from "@brianjenkins94/util/silo/observed";
 
 const DOC_LINES = 60;
 
@@ -64,7 +65,7 @@ export interface Placed {
 	"message": string;
 }
 
-export function driftOf(ledgerText: string | undefined, files: ReadonlySet<string>, texts: ReadonlyMap<string, string>, features: ReadonlyMap<string, Feature>, today: string): Placed[] {
+export function driftOf(ledgerText: string | undefined, files: ReadonlySet<string>, texts: ReadonlyMap<string, string>, features: ReadonlyMap<string, Feature>, today: string, reachText?: string): Placed[] {
 	const ledger = parseLedger(ledgerText);
 	const found = drift(ledger, {
 		"today": today,
@@ -83,7 +84,8 @@ export function driftOf(ledgerText: string | undefined, files: ReadonlySet<strin
 			? {}
 			: {
 					"owned": {
-						"files": [...files].filter(isOwnedCode)
+						"files": [...files].filter(isOwnedCode),
+						"ran": ranByFile(reachText)
 					}
 				}
 	});
