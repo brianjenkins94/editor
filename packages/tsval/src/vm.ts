@@ -1109,9 +1109,10 @@ export class Machine implements VM {
 			// Event loop: a promise a host call returns is external — when it settles isn't the program's to say. The
 			// program gets one of its own instead, settled when the result's arrival is delivered as an event (event-loop.ts),
 			// so nothing — not even Promise.race — sees it before. (Not a promise the program makes itself — `new Promise`,
-			// a promise's methods and statics: that's the program chaining what it has.)
-			// (and not one this machine made: an async generator's request, say — promises.ts)
-			if (this.loop !== undefined && this.steppedHere && !promising && (callee as unknown) !== this.realm.Promise && !isPromiseStatic(this.realm.Promise, callee) && isThenable(value) && !this.scheduler.promises.knows(value)) {
+			// a promise's methods and statics, one this machine made (promises.ts): that's the program chaining what it has.
+			// And only a promise: any other thenable a built-in hands back — the program's own, through `pop` or
+			// `Reflect.apply`; a package's query builder — is a value, as it is, its `then` not called until it's awaited.)
+			if (this.loop !== undefined && this.steppedHere && !promising && (callee as unknown) !== this.realm.Promise && !isPromiseStatic(this.realm.Promise, callee) && (value instanceof this.realm.Promise || value instanceof Promise) && !this.scheduler.promises.knows(value)) {
 				return this.awaitResult(value, this.callLabel(site, callee, args));
 			}
 

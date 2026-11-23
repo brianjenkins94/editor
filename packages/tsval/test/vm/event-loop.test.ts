@@ -194,3 +194,20 @@ test("a then forwarded by call, apply or Reflect.apply keeps its place among the
 	await toEnd(vm);
 	assert.deepStrictEqual(lines, ["sync", 1, 2, 3, 4, 5]);
 });
+
+test("a thenable a built-in hands back is the value itself, not an external result: only a promise is (a package's query builder isn't run by being returned)", async () => {
+	const { lines, globals } = logged();
+	const calls: string[] = [];
+	const src = [
+		"const t = { then(r) { r(1); } };",
+		"log([[t].pop() === t, Object.defineProperty(t, 'x', { value: 1 }) === t, Reflect.apply((v) => v, null, [t]) === t]);",
+		"const query = builder();",
+		"log(typeof query.then);",
+		"query.then((rows) => log(rows));"
+	].join("\n");
+	const builder = (): object => ({ "then": (resolve: (rows: string[]) => void) => { calls.push("then"); resolve(["row"]); } });
+	const { vm } = createVM(src, { "globals": { ...globals, "builder": builder }, "eventLoop": { "pace": "fast" } });
+
+	await toEnd(vm);
+	assert.deepStrictEqual([lines, calls], [[[true, true, true], "function", ["row"]], ["then"]]);
+});
