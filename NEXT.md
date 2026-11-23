@@ -120,13 +120,6 @@ packages/editor (`--all`, `--runs N`, `--json`).
   NotAllowedError still happens after e86501b is unknown: read the next reports, which carry their stack. Also seen
   once: `[almostnode] worker_threads.Worker is not implemented` (synckit's `createSyncFn`, e4e927b).
 
-- **A repository load the browser closed on is kept half-written** (2026-10-31): a load's files are written back to
-  IndexedDB in debounced batches (workspace-fs.ts `flush`), and a browser closed in the middle keeps what landed — here
-  `.git/HEAD`, `.git/config` and acquired types, no working tree. The shell's note of what it loaded (`shell:githubRepo`
-  in localStorage) outlives it, so an `env/` address finds "already loaded" and opens an empty workspace. Fixed by
-  hand (the note cleared, the repo cloned again). If it comes back: mark a load complete only once its files are all
-  written back (the origin alone can't tell: `.git/config` is among the first written).
-
 - **packages/api's "an email account without a password is told to use a code" test failed** in CI once ("a code was
   sent to someone-…@example.com", bc7a208, a workflow-only change; passed on rerun). The send's answer wasn't looked at,
   only the outbox after it: since 2026-11-22 the helper checks it (test/helpers.ts `byEmail`), so if it comes back it

@@ -361,7 +361,7 @@ function maybeBoot(): void {
 
 				installGitHistory(api as typeof import("vscode"), workbenchHub, remote);
 				installGitRefs(api as typeof import("vscode"), workbenchHub, paneLog, bablr, remote);
-				serveOrigin(workbenchHub);
+				serveOrigin(workbenchHub, paneLog);
 				serveFiles(api as typeof import("vscode"), workbenchHub, workspaceFolder ?? "/workspace", paneLog);
 				serveUnpushed(workbenchHub);
 				installDecisions(api as typeof import("vscode"), workbenchHub);

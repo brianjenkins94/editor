@@ -17,6 +17,10 @@ export const REFS_DIR = ".refs";
  *  extension writes them, the next commit carries them in its author's `.silo/vouches/<user>.jsonl` (workbench/git-engine.ts). */
 export const PENDING_VOUCHES = `${LOCAL_DIR}/vouches.jsonl`;
 
+/** There while a load replaces the workspace: written before its files and removed after the last, so one the browser
+ *  closed on is still there when the workspace is restored, and the workspace isn't taken for the repository it began. */
+export const LOADING = `${LOCAL_DIR}/loading`;
+
 /** The latest of each test's vouches in `lists`, by test: what a vouches file keeps. */
 export function latestVouches(...lists: readonly Vouch[][]): Vouch[] {
 	const latest = new Map<string, Vouch>();

@@ -4,6 +4,7 @@ import type * as vscodeApi from "vscode";
 import type { SharedWorkspace } from "../shared/playground-link";
 import type { WorkspaceFs } from "./workspace-fs";
 import { failureText } from "@brianjenkins94/editor-api/failures";
+import { LOADING } from "@brianjenkins94/editor-api/git";
 import { serve } from "@brianjenkins94/hub";
 import { fs as store } from "@zenfs/core";
 import { callerFs } from "../shared/fs-caller";
@@ -56,6 +57,8 @@ export async function openProject(vscode: typeof vscodeApi, root: string, log: L
 
 		await vscode.workspace.fs.delete(vscode.Uri.file(root + "/.git"), { "recursive": true, "useTrash": false }).then(undefined, () => { /* none yet */ });
 		await vscode.workspace.fs.delete(vscode.Uri.file(root + "/.silo/local"), { "recursive": true, "useTrash": false }).then(undefined, () => { /* none yet */ });
+		workspaceStore.mkdirSync(`${root}/${LOADING.slice(0, LOADING.lastIndexOf("/"))}`, { "recursive": true });
+		workspaceStore.writeFileSync(`${root}/${LOADING}`, encoder.encode(""));
 	}
 
 	for (const file of files) {
@@ -97,6 +100,8 @@ export async function openProject(vscode: typeof vscodeApi, root: string, log: L
 				await dropWritable(name);
 			}
 		}
+
+		workspaceStore.unlinkSync(`${root}/${LOADING}`);
 	}
 
 	for (const path of openEditors) {
@@ -173,8 +178,14 @@ export function serveFiles(vscode: typeof vscodeApi, hub: Hub, root: string, log
 	}));
 }
 
-export function serveOrigin(hub: Hub): void {
+export function serveOrigin(hub: Hub, log: Logger, root = "/workspace"): void {
 	serve(hub, "git.origin", async () => {
+		if (workspaceStore.existsSync(`${root}/${LOADING}`)) {
+			log.warn("the workspace's last load didn't finish writing its files: it's no repository's until loaded again");
+
+			return null;
+		}
+
 		const [owner, repo] = /github\.com\/(.+)\.git$/u.exec(await gitEngine.githubRemote() ?? "")?.[1].split("/") ?? [];
 
 		return owner === undefined || repo === undefined ? null : { "owner": owner, "repo": repo, "branch": (await gitEngine.branches()).current ?? "main" };
