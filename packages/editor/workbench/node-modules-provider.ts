@@ -19,32 +19,15 @@ interface UnpkgMeta {
 	"files"?: { "path": string; "type"?: string; "size"?: number }[];
 }
 
-function childEntries(meta: UnpkgMeta): [string, FileType][] {
-	if (meta.type === "directory") {
-		return (meta.files ?? []).map((entry) => [
-			entry.path.split("/").filter(Boolean).pop() ?? "",
-			entry.type === "directory" ? FileType.Directory : FileType.File
-		]);
-	}
-
-	const children = new Map<string, FileType>();
-
-	for (const entry of meta.files ?? []) {
-		const [name, ...deeper] = entry.path.slice((meta.prefix ?? "/").length).split("/").filter(Boolean);
-
-		if (name !== undefined) {
-			children.set(name, deeper.length > 0 ? FileType.Directory : FileType.File);
-		}
-	}
-
-	return [...children];
-}
-
 function isTsSourceProbe(rel: string): boolean {
 	return (/\.(?:tsx?|mts|cts)$/u).test(rel) && !(/\.d\.(?:ts|mts|cts)$/u).test(rel);
 }
 
 const PREFETCH_DEPTH = 3;
+
+const DECLARATION = /\.d\.[cm]?ts$/u;
+
+const DECLARATIONS_AT_ONCE = 200;
 
 const IMPORT_TRIES = ["", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", "/index.js"];
 
@@ -73,6 +56,7 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 	};
 
 	const toRel = relUnder(prefix);
+
 
 	const served = (rel: string): boolean => versions[splitPackage(rel).pkg] !== undefined;
 
@@ -114,11 +98,50 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 	};
 
 	const fetchMeta = (rel: string): Promise<UnpkgMeta | undefined> => memoFetch(rel, "?meta", (res) => res.json() as Promise<UnpkgMeta>);
+	const listings = new Map<string, Map<string, number>>();
+	const listingOf = async (pkg: string): Promise<Map<string, number> | undefined> => {
+		const key = `${pkg}@${versions[pkg] ?? ""}`;
+		const known = listings.get(key);
+
+		if (known !== undefined) {
+			return known;
+		}
+
+		const meta = await fetchMeta(pkg);
+
+		if (meta === undefined) {
+			return undefined;
+		}
+
+		const listed = new Map((meta.files ?? []).filter((entry) => entry.type !== "directory").map((entry) => [`${pkg}/${entry.path.replace(/^\/+/u, "")}`, entry.size ?? 0]));
+
+		listings.set(key, listed);
+
+		return listed;
+	};
+	const kindIn = (listed: Map<string, number>, rel: string): FileType | undefined => {
+		if (listed.has(rel)) {
+			return FileType.File;
+		}
+
+		return [...listed.keys()].some((path) => path.startsWith(`${rel}/`)) ? FileType.Directory : undefined;
+	};
+	const childrenIn = (listed: Map<string, number>, rel: string): [string, FileType][] => {
+		const children = new Map<string, FileType>();
+
+		for (const path of listed.keys()) {
+			if (path.startsWith(`${rel}/`)) {
+				const [name, ...deeper] = path.slice(rel.length + 1).split("/");
+
+				children.set(name!, deeper.length > 0 ? FileType.Directory : FileType.File);
+			}
+		}
+
+		return [...children];
+	};
 	const fetchFile = (rel: string): Promise<Uint8Array | undefined> => memoFetch(rel, "", async (res) => new Uint8Array(await res.arrayBuffer()));
 
-	const metaResults = new Map<string, UnpkgMeta | undefined>();
 	const fileResults = new Map<string, Uint8Array | undefined>();
-	const metaInflight = new Set<string>();
 	const fileInflight = new Set<string>();
 	const whole = new Set<string>();
 	const folders = new Map<string, Map<string, FileType>>();
@@ -210,22 +233,6 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 		return [...named].filter((name) => !failed.includes(name));
 	});
 
-	const ensureMeta = (rel: string, resource: Parameters<IFileSystemProviderWithFileReadWriteCapability["stat"]>[0]): void => {
-		if (metaInflight.has(rel)) {
-			return;
-		}
-
-		metaInflight.add(rel);
-		void fetchMeta(rel).then((meta) => {
-			metaResults.set(rel, meta);
-			metaInflight.delete(rel);
-
-			if (meta !== undefined) {
-				announce(resource, { "resource": resource, "type": FileChangeType.ADDED });
-			}
-		});
-	};
-
 	const ensureFile = (rel: string, resource: Parameters<IFileSystemProviderWithFileReadWriteCapability["readFile"]>[0]): void => {
 		if (fileInflight.has(rel)) {
 			return;
@@ -276,8 +283,32 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				return Promise.reject(notFound());
 			}
 
+			if (served(rel) && !whole.has(splitPackage(rel).pkg) && !fileResults.has(rel)) {
+				const { pkg } = splitPackage(rel);
+
+				return listingOf(pkg).then(async (listed) => {
+					if (listed !== undefined && rel === pkg) {
+						await Promise.all([...listed.keys()].filter((path) => !fileResults.has(path) && (path === `${pkg}/package.json` || DECLARATION.test(path))).slice(0, DECLARATIONS_AT_ONCE).map(async (path) => {
+							fileResults.set(path, await fetchFile(path));
+						}));
+					}
+
+					if (listed !== undefined && (rel === pkg || kindIn(listed, rel) === FileType.Directory)) {
+						return { "type": FileType.Directory, "ctime": 0, "mtime": 0, "size": 0 };
+					}
+
+					if (rel !== pkg) {
+						ensureFile(rel, resource);
+					}
+
+					throw notFound();
+				});
+			}
+
 			if (!fileResults.has(rel)) {
-				ensureFile(rel, resource);
+				if (served(rel)) {
+					ensureFile(rel, resource);
+				}
 
 				return Promise.reject(notFound());
 			}
@@ -303,7 +334,9 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 			}
 
 			if (!fileResults.has(rel)) {
-				ensureFile(rel, resource);
+				if (served(rel)) {
+					ensureFile(rel, resource);
+				}
 
 				return Promise.reject(notFound());
 			}
@@ -338,20 +371,15 @@ export function createNodeModulesProvider(workspaceFolder: string, versions: Rec
 				return Promise.reject(notFound());
 			}
 
-			if (!metaResults.has(rel)) {
-				ensureMeta(rel, resource);
+			return listingOf(splitPackage(rel).pkg).then((known) => {
+				const children = known === undefined ? [] : childrenIn(known, rel);
 
-				return Promise.reject(notFound());
-			}
+				if (children.length === 0) {
+					throw notFound();
+				}
 
-			const meta = metaResults.get(rel);
-			const children = meta === undefined ? [] : childEntries(meta);
-
-			if (children.length === 0) {
-				return Promise.reject(notFound());
-			}
-
-			return Promise.resolve(children);
+				return children;
+			});
 		},
 
 		"writeFile": () => Promise.reject(readOnly()),

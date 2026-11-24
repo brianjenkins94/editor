@@ -20,8 +20,9 @@ const FOLDER = new URL("in-editor/", import.meta.url);
 /** IN_EDITOR_SHARD=<i>/<n>: every n-th spec from the i-th, for CI's shards, each on a runner of its own — one at a time,
  *  all of them took 32 min there on 2026-11-19 (96bb5b36), past the job's limit. */
 const [SHARD, SHARDS] = (process.env.IN_EDITOR_SHARD || "1/1").split("/").map(Number);
-/** IN_EDITOR_ONLY=<part of a name>: only the specs it names, while writing one. */
-const SPECS = fs.readdirSync(FOLDER).filter((file) => file.endsWith(".spec.mjs") && file.includes(process.env.IN_EDITOR_ONLY ?? "")).filter((_, index) => index % SHARDS === SHARD - 1);
+/** IN_EDITOR_ONLY=<part of a name>[,<another>]: only the specs they name, while writing one, or one after another to see
+ *  what one leaves the next (IN_EDITOR_SESSIONS=1). */
+const SPECS = fs.readdirSync(FOLDER).filter((file) => file.endsWith(".spec.mjs") && (process.env.IN_EDITOR_ONLY ?? "").split(",").some((part) => file.includes(part))).filter((_, index) => index % SHARDS === SHARD - 1);
 
 /** A session with every spec written into its workspace. */
 async function sessionWithSpecs() {

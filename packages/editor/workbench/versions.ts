@@ -4,9 +4,23 @@ import { keptAt, REFS_DIR } from "@brianjenkins94/editor-api/git";
 import { tarballUrl } from "@brianjenkins94/editor-api/runtime";
 import { SILO_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
 import semver from "semver";
+import { splitPackage } from "./node-modules-prefetch";
+import { logger } from "@brianjenkins94/util/logger";
 import { markReady } from "./readiness";
 
 export const MIN_AGE_DAYS = 7;
+
+const CANNOT_FIND_MODULE = "2307";
+
+const MODULE_NAMED = /module '([^']+)'/u;
+
+const STALE_SETTLE_MS = 1000;
+
+const STALE_SPACING_MS = 10_000;
+
+const STALE_RELOADS = 3;
+
+const log = logger({ "source": "workbench" });
 
 
 export interface Resolved { "version": string; "range": string; "young"?: true; "tarball"?: string; "dependencies"?: string[]; "platform"?: true; "link"?: string; "alias"?: string; "nested"?: Record<string, string> }
@@ -330,10 +344,43 @@ export function watchVersions(vscode: typeof vscodeApi): vscodeApi.Disposable {
 		}
 	};
 
-	const listeners = [watcher.onDidCreate(changed), watcher.onDidChange(changed), watcher.onDidDelete(changed)];
+	const reloads = new Map<string, number>();
+	let lastReload = 0;
+	let pending: ReturnType<typeof setTimeout> | undefined;
+	const stale = (): void => {
+		const missing = [...new Set(vscode.languages.getDiagnostics().flatMap(([, diagnostics]) => diagnostics).filter((diagnostic) => diagnostic.source === "ts" && String(typeof diagnostic.code === "object" ? diagnostic.code.value : diagnostic.code) === CANNOT_FIND_MODULE).map((diagnostic) => splitPackage(MODULE_NAMED.exec(diagnostic.message)?.[1] ?? "").pkg))].filter((name) => pinned[name] !== undefined && (reloads.get(name) ?? 0) < STALE_RELOADS);
+
+		if (missing.length === 0) {
+			return;
+		}
+
+		const wait = lastReload + STALE_SPACING_MS - performance.now();
+
+		if (wait > 0) {
+			clearTimeout(pending);
+			pending = setTimeout(stale, wait);
+
+			return;
+		}
+
+		for (const name of missing) {
+			reloads.set(name, (reloads.get(name) ?? 0) + 1);
+		}
+
+		lastReload = performance.now();
+		log.info("TypeScript can't find packages that are pinned: its projects reloaded", { "packages": missing.join(","), "tries": Math.max(...missing.map((name) => reloads.get(name) ?? 0)) });
+		void vscode.commands.executeCommand("typescript.reloadProjects");
+		clearTimeout(pending);
+		pending = setTimeout(stale, STALE_SPACING_MS);
+	};
+	const listeners = [watcher.onDidCreate(changed), watcher.onDidChange(changed), watcher.onDidDelete(changed), vscode.languages.onDidChangeDiagnostics(() => {
+		clearTimeout(pending);
+		pending = setTimeout(stale, STALE_SETTLE_MS);
+	})];
 
 	void syncVersions(vscode).then(() => {
 		markReady("versions");
+		stale();
 	});
 
 	return new vscode.Disposable(() => {
