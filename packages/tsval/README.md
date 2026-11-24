@@ -85,6 +85,7 @@ interpret(code, {
   onAsyncFiber: (promise) => {},                // every async function / async-generator invocation
   steppedAsync: true,                           // async code on the main stack, steppable (below)
   eventLoop: { now, seed, pace: "real" },       // …with a deterministic event loop of its own: timers, clock, random (below)
+  builtins: new SharedBuiltins(),               // the program's changes to the built-ins in place only while its code runs (below)
 });
 
 const { vm } = createVM(code);                  // { vm, sourceFile } — the typed layer returns the same shape plus the checker
@@ -133,6 +134,13 @@ that calls them (a fork's guest code reaches the fork's), ahead of `hostGuard`.
 const { vm } = createVM(code, { eventLoop: { now: 0, seed: 42, pace: "fast" } });
 // setTimeout(() => log(Date.now()), 50) logs 50 — every run
 ```
+
+A program's values are its host's, built-ins included, so what it does to them (`Array.prototype[Symbol.iterator]`
+replaced) its host's code runs on too. With `builtins` (`src/shared-builtins.ts`) they're held apart: the program's
+changes are in place while its code runs — an outermost step or run, a host's call into one of its functions — and the
+host's own built-ins are back between, the program's recorded to be made again (`changed()` names them). The host's code
+a step itself runs (tsval's, a package's) still sees them, and what can't be undone (a built-in frozen) stays
+(`lasting`).
 
 A promise a host call returns (a fetch, a file read) is **external**: the guest gets one of its own, settled only when
 the result's arrival is delivered as an event between tasks — so nothing, not even `Promise.race`, sees it early. Where

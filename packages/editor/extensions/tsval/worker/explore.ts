@@ -1,7 +1,7 @@
 import type { Control, Explored, Ordering, Printed } from "../debug-protocol";
 import type { Vm } from "./state";
 import { asyncContext } from "@brianjenkins94/almostnode/async-context";
-import { createVM, explore, runToEnd } from "@brianjenkins94/tsval";
+import { createVM, explore, runToEnd, SharedBuiltins } from "@brianjenkins94/tsval";
 import { capabilitySurface, functionsIn } from "./gate";
 import { programModules, runtimeReady } from "./runtime";
 import { formatLogArg } from "./session";
@@ -67,7 +67,8 @@ export async function exploreOrderings(message: Extract<Control, { "type": "expl
 				"modules": programModules(loaded),
 				"eventLoop": { ...message.eventLoop, "schedule": schedule, "pace": "fast" },
 				"asyncContext": asyncContext,
-				"sharedGlobals": state.runGlobal?.own
+				"sharedGlobals": state.runGlobal?.own,
+				"builtins": new SharedBuiltins()
 			}));
 			state.evaluating = vm;
 

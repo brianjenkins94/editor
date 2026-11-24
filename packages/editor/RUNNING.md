@@ -59,6 +59,14 @@ launch configuration's `runtimeArgs`; `runs_tests`' `imports`): the module loads
 registers with `module.registerHooks` — Node's in-thread resolve and load hooks — every require and import after it
 goes through, the program's and its packages'. `module.register`'s hooks, off-thread, aren't (tsx's).
 
+**A program's changes to the built-ins are its own** (the user, 2026-11-23): the language's built-ins are the debug
+worker's too — one realm — so what a program does to them (`Array.prototype[Symbol.iterator]` replaced, `Object.prototype.then`
+added, as test262's tests do) is held apart (tsval's shared-builtins.ts): in place while the program steps, the worker's
+own between, so the worker's code never runs on them. The debugger's own code a step runs (tsval's, TypeScript's) still
+does — Node keeps its own with primordials, and tsval has none — so a program that replaces a built-in that code uses can
+fail where Node doesn't; a run that fails having changed built-ins says which, and that the failure may be the
+debugger's. What can't be undone (a built-in frozen) stays, until the session's worker ends.
+
 **Output goes where it was started.** A run from the terminal prints there, reads its stdin there, and has the args, cwd
 and env the command line gave; one from F5 uses the Debug Console. **What's running** is one registry (workbench/runs.ts):
 each run as it starts and ends, a run that listens on a port a service, `ps` and `kill` in the terminal and `runs_list`

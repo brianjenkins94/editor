@@ -18,6 +18,7 @@ import type { Capability, JobHost, JobInput, Settlers } from "./promises.ts";
 import { isOwnResolve, OwnPromises } from "./promises.ts";
 import { giveStack, hasProgramStack } from "./stacks.ts";
 import { ownedBy } from "./values.ts";
+import type { SharedBuiltins } from "./shared-builtins.ts";
 
 // TypeScript's exports object is in dictionary mode (thousands of members), so each `ts.x` read is a hash lookup: the
 // functions and kinds used here are read off it once.
@@ -179,6 +180,9 @@ export interface VMOptions {
 	 *  This is how a sandbox stays closed — real intrinsics leak the real `Function` via
 	 *  `.constructor.constructor`, and only the interpreter sees every read and every call. */
 	"hostGuard"?: HostGuard;
+	/** The built-ins the program shares with its host, held apart (shared-builtins.ts): the program's changes to them in
+	 *  place only while its code runs, the host's own between. A fork shares its machine's. */
+	"builtins"?: SharedBuiltins;
 	/** Notified with the Promise of every async guest function invoked, so a driver can track
 	 *  outstanding async work (a host that must observe every effect awaits it). */
 	"onAsyncFiber"?: (promise: Promise<unknown>) => void;
@@ -484,6 +488,8 @@ export class Machine implements VM {
 	 *  `apply`/`construct`. */
 	public callSite: ts.CallExpression | ts.NewExpression | ts.TaggedTemplateExpression | undefined;
 	public hostGuard: HostGuard | undefined;
+	/** VMOptions.builtins. */
+	public builtins: SharedBuiltins | undefined;
 	public onAsyncFiber: ((promise: Promise<unknown>) => void) | undefined;
 	/** VMOptions.asyncContext. */
 	public asyncContext: AsyncContext | undefined;
@@ -620,6 +626,7 @@ export class Machine implements VM {
 		this.rootScope.sharedGlobals = options.sharedGlobals;
 		this.resolveModule = options.resolveModule;
 		this.hostGuard = options.hostGuard;
+		this.builtins = options.builtins;
 		this.onAsyncFiber = options.onAsyncFiber;
 		this.asyncContext = options.asyncContext;
 		this.onBreakpoint = options.onBreakpoint;
@@ -1297,7 +1304,21 @@ export class Machine implements VM {
 
 	/** Do exactly one unit of work. */
 	public step(): void {
-		this.advance(false);
+		const { builtins } = this;
+
+		if (builtins === undefined) {
+			this.advance(false);
+
+			return;
+		}
+
+		builtins.enter();
+
+		try {
+			this.advance(false);
+		} finally {
+			builtins.leave();
+		}
 	}
 
 	/**
@@ -1451,8 +1472,14 @@ export class Machine implements VM {
 
 	/** Run to completion, synchronously. A top-level `await` needs a driver — use `runAsync`. */
 	public run(): unknown {
-		while (!this.finished && !this.paused) {
-			this.step();
+		this.builtins?.enter();
+
+		try {
+			while (!this.finished && !this.paused) {
+				this.step();
+			}
+		} finally {
+			this.builtins?.leave();
 		}
 
 		if (this.paused) {
@@ -1470,9 +1497,14 @@ export class Machine implements VM {
 	public async runAsync(): Promise<unknown> {
 		while (!this.finished) {
 			this.idle = false;
+			this.builtins?.enter();
 
-			while (!this.finished && !this.paused && !this.idle) {
-				this.step();
+			try {
+				while (!this.finished && !this.paused && !this.idle) {
+					this.step();
+				}
+			} finally {
+				this.builtins?.leave();
 			}
 
 			// Stepped async: work pending, none ready — let it settle.
@@ -1508,17 +1540,28 @@ export class Machine implements VM {
 	/** Step until the given predicate holds, the machine suspends (`paused`), or it finishes. */
 	public runUntil(predicate: (vm: Machine) => boolean): void {
 		this.idle = false;
+		this.builtins?.enter();
 
-		while (!this.finished && !this.paused && !this.idle && !predicate(this)) {
-			this.step();
+		try {
+			while (!this.finished && !this.paused && !this.idle && !predicate(this)) {
+				this.step();
+			}
+		} finally {
+			this.builtins?.leave();
 		}
 	}
 
 	/** Step until control reaches the next statement boundary (or the machine finishes). */
 	public stepStatement(): void {
 		// Advance at least one step, then run until the *next* fresh statement frame.
-		this.step();
-		this.runUntil((vm) => vm.atStatementBoundary());
+		this.builtins?.enter();
+
+		try {
+			this.step();
+			this.runUntil((vm) => vm.atStatementBoundary());
+		} finally {
+			this.builtins?.leave();
+		}
 	}
 
 	/** True when the top frame is about to begin evaluating a statement node (fresh, phase 0). */
@@ -1781,13 +1824,19 @@ export class Machine implements VM {
 
 	/** Run until the next breakpoint (or completion). Advances at least one step. */
 	public runToBreakpoint(): void {
-		this.step();
-		this.idle = false;
+		this.builtins?.enter();
 
-		// (runUntil with atBreakpoint, written out — this loop is the whole of a run to its end — and the test made by
-		// `advance` on the frame it reads anyway)
-		while (!this.finished && !this.paused && !this.idle && !this.advance(true)) {
-			// (advance stepped)
+		try {
+			this.step();
+			this.idle = false;
+
+			// (runUntil with atBreakpoint, written out — this loop is the whole of a run to its end — and the test made by
+			// `advance` on the frame it reads anyway)
+			while (!this.finished && !this.paused && !this.idle && !this.advance(true)) {
+				// (advance stepped)
+			}
+		} finally {
+			this.builtins?.leave();
 		}
 	}
 
@@ -1990,6 +2039,7 @@ export class Machine implements VM {
 		forked.sourceFile = this.sourceFile;
 		forked.resolveModule = this.resolveModule;
 		forked.hostGuard = this.hostGuard;
+		forked.builtins = this.builtins;
 		forked.onAsyncFiber = this.onAsyncFiber;
 		forked.onBreakpoint = this.onBreakpoint;
 		forked.statements = this.statements;
@@ -3541,6 +3591,8 @@ export class Machine implements VM {
 	private drainSub(ctx: ExecContext): unknown {
 		const { subFrames, subValues } = ctx;
 
+		this.builtins?.enter();
+
 		try {
 			while (!this.finished) {
 				// Regain debugger control inside a host-invoked guest call: a fresh statement on a breakpoint
@@ -3569,6 +3621,8 @@ export class Machine implements VM {
 
 			return subValues.pop();
 		} finally {
+			this.builtins?.leave();
+
 			// (left mid-run by a throw: empty them for the next sub-run here)
 			if (subFrames.length !== 0) {
 				subFrames.length = 0;
@@ -3658,6 +3712,7 @@ export class Machine implements VM {
 		}
 
 		fiber.started = true;
+		this.builtins?.enter();
 
 		try {
 			while (!this.finished && !this.paused) {
@@ -3670,6 +3725,7 @@ export class Machine implements VM {
 
 			return { "paused": false, "value": this.values.pop() };
 		} finally {
+			this.builtins?.leave();
 			fiber.frames = this.frames;
 			fiber.values = this.values;
 			fiber.signal = this.signal;

@@ -6,6 +6,7 @@ export type { Explored, Run } from "./explore.ts";
 export { parse, ProgramSyntaxError, syntaxErrorIn, syntaxKindName, ts } from "./frontend.ts";
 export { standardGlobals } from "./globals.ts";
 export { createVM, interpret, interpretAsync } from "./interpret.ts";
+export { SharedBuiltins } from "./shared-builtins.ts";
 export type { InterpretOptions, LoadedVM } from "./interpret.ts";
 export type { Binding, Scope } from "./scope.ts";
 export { isGuestFunction, typeTag } from "./values.ts";

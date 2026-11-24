@@ -72,12 +72,10 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    that hold it to V8 pass here too since 2026-11-23 (30bd7a2c, e283640d): its promise jobs are its own, so the tsval
    under test orders as V8 whoever hosts it, and its event loop takes as external only a promise a host API returns,
    not one the language's own functions do (87508749: promise-order's 30, its subclasses too, pass in an editor cloned
-   from main). Left, **done when** as it says:
-   - **A program that changes the built-ins it shares stalls its debugger**: test262's tests poison prototypes (an
-     array iterator yielding 42), and the debug worker's own `Object.fromEntries` (state.ts `linkCallsSince`) threw
-     on it as the run ended, the run stopping after 145 s with runs_tests failing (`reading 'replace'`). A run's
-     intrinsics are the worker's (run-global.ts says so); test262 stays outside for its fresh realms anyway. Done when
-     the user decides whether the worker guards its own code from a program's changes to them.
+   from main). And a program's changes to the built-ins it shares are its own, the worker's held apart (the user,
+   2026-11-23; RUNNING.md, *A program's changes to the built-ins are its own*): test262's file, which stalled its
+   debugger for 145 s, ends in under 30 s with its results — stopping, as tsval's own code can't run past it, at the test
+   that replaces the array iterator; it stays outside for its fresh realms.
 
 ## Watching
 

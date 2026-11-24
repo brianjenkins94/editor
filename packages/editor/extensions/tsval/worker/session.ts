@@ -8,7 +8,7 @@ import type { Action, ForwardAction, Place, TraceContext, Vm } from "./state";
 import { asyncContext } from "@brianjenkins94/almostnode/async-context";
 import { revive } from "@brianjenkins94/editor-api/recorded";
 import { layered } from "@brianjenkins94/editor-api/runtime";
-import { createVM, ProgramSyntaxError, TsvalInternalError } from "@brianjenkins94/tsval";
+import { createVM, ProgramSyntaxError, SharedBuiltins, TsvalInternalError } from "@brianjenkins94/tsval";
 import ts from "typescript";
 import { replayGuard, replayProgram } from "../replay-run";
 import { copySums } from "../site-sums";
@@ -568,6 +568,11 @@ function finish(exitCode = 0, crash?: Crash): void {
 	tellCoverage();
 
 	const told = tellTests(exitCode);
+	const changed = state.current?.builtins?.changed() ?? [];
+
+	if (told !== 0 && changed.length > 0) {
+		post({ "type": "output", "text": `The program changed built-ins it shares with the debugger (${changed.join(", ")}), and the debugger's own code runs on them while the program steps: this failure may be the debugger's, not the program's.\n`, "stream": "stderr" });
+	}
 
 	endRun({ "exitCode": told, ...crash === undefined ? {} : { "crashed": true } });
 	post({
@@ -1009,6 +1014,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 			"eventLoop": eventLoop,
 			"asyncContext": asyncContext,
 			"sharedGlobals": state.runGlobal?.own,
+			"builtins": new SharedBuiltins(),
 			"globals": {
 				...state.nodeGlobals,
 				"BroadcastChannel": runBroadcastChannel(),
@@ -1110,6 +1116,7 @@ async function launchReplay(message: Extract<Control, { "type": "launch" }>, rep
 			"eventLoop": eventLoop,
 			"asyncContext": asyncContext,
 			"sharedGlobals": state.runGlobal?.own,
+			"builtins": new SharedBuiltins(),
 			"hostGuard": hostGuard,
 			"globals": {
 				...state.nodeGlobals,
