@@ -66,7 +66,8 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      playground-links and bablr. The harness gave each realm 2 s to hand over its counts after a test, and a spec's
      editor is a frame of the same page, busy as it ends; fixed 2026-11-24 (frames get 30 s, and say when they don't
      answer), locally the five preview specs all have theirs. preview-session.ts and pane-views.ts only looked unrun by
-     their own tests for it, so they stay. **Next:** a dispatched coverage run, and the list read again from it.
+     their own tests for it, so they stay. **Next:** the list read again from coverage run 45418212617 (dispatched
+     2026-11-24 on 66b4a865: every spec's workbench reach, the agent suites split; preview-prompts fails in it, fixed after).
    - **preview-prompts failed under COVERAGE=1** (CI's `specs-2` in 45111162082): fixed 2026-11-24. Two causes, each
      needed: the socket gate goes into a preview's page as its source text, so instrumented it named the service
      worker's counters and threw there (build/coverage.ts leaves it out); and a spec's windows were kept open for the
