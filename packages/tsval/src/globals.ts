@@ -129,7 +129,8 @@ export function languageFunctions(global: Record<string, unknown>): WeakSet<obje
 
 		take(value);
 
-		for (const inner of [value, ...typeof value === "object" && value !== null ? Object.values(value) : []]) {
+		// (by descriptor: a namespace's members aren't enumerable — Intl's constructors)
+		for (const inner of [value, ...typeof value === "object" && value !== null ? Reflect.ownKeys(value).map((key) => Reflect.getOwnPropertyDescriptor(value, key)?.value) : []]) {
 			for (let proto = typeof inner === "function" ? (inner as { "prototype"?: unknown }).prototype : undefined; typeof proto === "object" && proto !== null && proto !== Object.prototype; proto = Object.getPrototypeOf(proto)) {
 				take(proto);
 			}

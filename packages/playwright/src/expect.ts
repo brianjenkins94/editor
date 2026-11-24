@@ -13,22 +13,39 @@ const normalized = (text: string): string => text.replaceAll(/\s+/gu, " ").trim(
 
 /** Deep equality for toEqual: the same primitives, arrays of equal items, objects with equal own enumerable entries,
  *  dates and RegExps by value. (Not node:util's, so the package runs where Node's modules aren't.) */
-function deepEqual(one: unknown, other: unknown): boolean {
+function deepEqual(one: unknown, other: unknown, strict = false): boolean {
 	if (Object.is(one, other)) {
 		return true;
 	}
 
-	if (typeof one !== "object" || typeof other !== "object" || one === null || other === null || Object.getPrototypeOf(one) !== Object.getPrototypeOf(other)) {
+	if (typeof one !== "object" || typeof other !== "object" || one === null || other === null || (strict && Object.getPrototypeOf(one) !== Object.getPrototypeOf(other))) {
 		return false;
 	}
 
-	if (one instanceof Date || one instanceof RegExp) {
-		return String(one) === String(other);
+	if (one instanceof Date || other instanceof Date) {
+		return one instanceof Date && other instanceof Date && Object.is(one.getTime(), other.getTime());
 	}
 
-	const keys = Object.keys(one);
+	if (one instanceof RegExp || other instanceof RegExp) {
+		return one instanceof RegExp && other instanceof RegExp && String(one) === String(other);
+	}
 
-	return keys.length === Object.keys(other).length && keys.every((key) => deepEqual((one as Record<string, unknown>)[key], (other as Record<string, unknown>)[key]));
+	if (one instanceof Map || other instanceof Map) {
+		return one instanceof Map && other instanceof Map && one.size === other.size && [...one].every(([key, value]) => other.has(key) && deepEqual(value, other.get(key), strict));
+	}
+
+	if (one instanceof Set || other instanceof Set) {
+		return one instanceof Set && other instanceof Set && one.size === other.size && [...one].every((value) => other.has(value) || [...other].some((each) => deepEqual(value, each, strict)));
+	}
+
+	if (Array.isArray(one) !== Array.isArray(other)) {
+		return false;
+	}
+
+	const keysOf = (value: object): string[] => Object.keys(value).filter((key) => strict || (value as Record<string, unknown>)[key] !== undefined);
+	const keys = keysOf(one);
+
+	return keys.length === keysOf(other).length && keys.every((key) => Object.hasOwn(other, key) && deepEqual((one as Record<string, unknown>)[key], (other as Record<string, unknown>)[key], strict));
 }
 
 /** `text` as an assertion matches it: a RegExp tests it; a string is it (or with `contains`, is in it), whitespace collapsed. */
@@ -205,7 +222,7 @@ class ValueAssertions {
 	}
 
 	public toStrictEqual(expected: unknown): void {
-		this.check(deepEqual(this.actual, expected), "toStrictEqual", expected);
+		this.check(deepEqual(this.actual, expected, true), "toStrictEqual", expected);
 	}
 
 	public toBeTruthy(): void {

@@ -62,3 +62,19 @@ test("a function another machine made is a host function to this one: it runs on
 	assert.equal(vm.run(), "theirs mine");
 	assert.deepEqual(seen.filter((site) => site === "return"), ["return"], "only its own function's return");
 });
+
+test("the language's own functions: each standard built-in, the functions on it and up its prototypes, getters and setters too — not a host's, a program's, or Atomics.waitAsync", async () => {
+	const { languageFunctions } = await import("../../src/globals.ts");
+	const own = languageFunctions(globalThis as unknown as Record<string, unknown>);
+	const getter = (holder: object, key: PropertyKey): unknown => Reflect.getOwnPropertyDescriptor(holder, key)?.get;
+
+	for (const each of [Promise, Promise.resolve, Promise.prototype.then, Array.prototype.pop, Array.fromAsync, Reflect.apply, Object.defineProperty, Object.prototype.hasOwnProperty, Function.prototype.call, getter(Map.prototype, "size"), getter(Symbol.prototype, "description"), getter(Intl.DateTimeFormat.prototype, "format")]) {
+		assert.ok(own.has(each as object), String((each as { "name"?: string }).name));
+	}
+
+	for (const each of [setTimeout, queueMicrotask, structuredClone, (globalThis as { "Atomics": { "waitAsync"?: object } }).Atomics.waitAsync, function program() {}, () => undefined]) {
+		if (each !== undefined) {
+			assert.equal(own.has(each), false, String((each as { "name"?: string }).name));
+		}
+	}
+});
