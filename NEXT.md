@@ -59,9 +59,14 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    - **Kept where they are, their owners' tests missing them** (a test to write each): features-view.tsx,
      worker/gate.ts, worker/values.ts, worker/stops.ts, evidence.ts, node-modules-provider.ts, editor-api's policy.ts,
      rules.ts and evidence.ts, history/extension.ts, coi-serviceworker.js, terminal/index.ts, capabilities/baseline.ts.
-   - **Three specs' reach has no workbench files** in 45111162082 (preview-session, pane-views, performance-monitor):
-     preview-session.ts and pane-views.ts only look unrun by their own tests for it, so they stay; why the workbench
-     realm's coverage went missing for them is to find.
+   - **10 of 51 specs lost workbench reach** in 45111162082: none for preview-session, pane-views and
+     performance-monitor, one editor's of two for features-view, recorded-stops, source-control, your-edits, past-runs,
+     playground-links and bablr. The harness gave each realm 2 s to hand over its counts after a test, and a spec's
+     editor is a frame of the same page, busy as it ends; fixed 2026-11-24 (frames get 30 s, and say when they don't
+     answer), locally the five preview specs all have theirs. preview-session.ts and pane-views.ts only looked unrun by
+     their own tests for it, so they stay. **Next:** a dispatched coverage run, and the list read again from it.
+   - **preview-prompts fails under COVERAGE=1** (CI's `specs-2` in 45111162082; here its renderer crashes, "Target
+     crashed", or its WebSocket question never shows), with or without the fix above; it passes without coverage.
 4. **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
    reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), agent-tools.mjs
    (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the

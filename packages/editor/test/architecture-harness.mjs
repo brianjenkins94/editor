@@ -58,8 +58,17 @@ if (process.env.COVERAGE === "1" && process.env.NODE_TEST_CONTEXT !== undefined)
 
 				const id = String(realmIds.get(realm));
 				const known = [...statementsOf.keys()].filter((key) => key.startsWith(`${id}\0`)).map((key) => key.slice(id.length + 1));
-				// (not forever: a worker blocked on the shared workspace, or going away, answers nothing; it's read again next time)
-				const modules = await Promise.race([realm.evaluate((told) => (globalThis.__evidence?.evidence() ?? []).map(({ file, version, statements }) => ({ "file": file, "version": version, "counts": statements.map(({ count }) => count), ...told.includes(`${file}\0${version}`) ? {} : { "statements": statements.map(({ start, end }) => [...start, ...end]) } })), known).catch(() => []), new Promise((resolve) => { setTimeout(() => { resolve([]); }, 2000); })]).catch(() => []);
+				// (not forever: a worker blocked on the shared workspace, or going away, answers nothing; it's read again next time.
+				// A frame is given longer: a spec's editor is a frame of the same page, busy as the spec ends, and the first read of
+				// one sends all its statements — at 2 s, CI's run 45111162082 lost one or both workbenches' reach for 10 of 51 specs)
+				const frame = typeof realm.parentFrame === "function";
+				const unread = Symbol("unread");
+				const answer = await Promise.race([realm.evaluate((told) => (globalThis.__evidence?.evidence() ?? []).map(({ file, version, statements }) => ({ "file": file, "version": version, "counts": statements.map(({ count }) => count), ...told.includes(`${file}\0${version}`) ? {} : { "statements": statements.map(({ start, end }) => [...start, ...end]) } })), known).catch(() => []), new Promise((resolve) => { setTimeout(() => { resolve(unread); }, frame ? 30_000 : 2000); })]).catch(() => []);
+				const modules = answer === unread ? [] : answer;
+
+				if (answer === unread && frame) {
+					console.log(`[coverage] a frame's counts weren't read in 30 s, so this test's reach leaves it out: ${realm.url().slice(0, 160)}`);
+				}
 
 				for (const { file, version, counts: each, statements } of modules) {
 					const key = `${id}\0${file}\0${version}`;
