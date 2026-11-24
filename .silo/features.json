@@ -722,7 +722,8 @@
       "packages/editor-api/test/gate.test.mjs",
       "packages/editor-api/test/rules.test.mjs",
       "packages/editor-api/test/policy.test.mjs",
-      "packages/editor/test/workbench/gated-eval.mjs"
+      "packages/editor/test/workbench/gated-eval.mjs",
+      "packages/editor-api/test/vscode-stand-in.mjs"
     ]
   },
   "Editor API: run contract for debuggers": {

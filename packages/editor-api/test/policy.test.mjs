@@ -51,7 +51,7 @@ globalThis.__vscodeStandIn = {
 };
 
 registerHooks({
-	"resolve": (specifier, context, next) => (specifier === "vscode" ? { "url": "data:text/javascript,export const { Uri, workspace } = globalThis.__vscodeStandIn;", "shortCircuit": true } : next(specifier, context))
+	"resolve": (specifier, context, next) => (specifier === "vscode" ? { "url": new URL("vscode-stand-in.mjs", import.meta.url).href, "shortCircuit": true } : next(specifier, context))
 });
 
 put("/workspace/.git/config", "[user]\n\tname = Ann Example\n\temail = ann@example.com\n");
