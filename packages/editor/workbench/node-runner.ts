@@ -1,4 +1,5 @@
 import type { Hub } from "@brianjenkins94/hub";
+import type { Skip } from "@brianjenkins94/editor-api";
 import type { RunRegistry } from "./runs";
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { createRpcClient, portTransport, serve } from "@brianjenkins94/hub";
@@ -15,6 +16,7 @@ export interface NodeRunHooks {
 	"onListening"?: (port: number) => void;
 	"noDebug"?: boolean;
 	"runtimeArgs"?: string[];
+	"skip"?: Skip;
 }
 
 export interface NodeRunner {
@@ -111,7 +113,7 @@ export function createNodeRunner(hub: Hub, workspaceBuffer?: SharedArrayBuffer):
 				return;
 			}
 
-			hub.publish("debug.launch", { "runId": runId, "file": file, "cwd": cwd, "env": env, ...hooks.args === undefined ? {} : { "args": hooks.args }, ...hooks.runtimeArgs === undefined || hooks.runtimeArgs.length === 0 ? {} : { "runtimeArgs": hooks.runtimeArgs }, ...hooks.noDebug === true ? { "noDebug": true } : {} });
+			hub.publish("debug.launch", { "runId": runId, "file": file, "cwd": cwd, "env": env, ...hooks.args === undefined ? {} : { "args": hooks.args }, ...hooks.runtimeArgs === undefined || hooks.runtimeArgs.length === 0 ? {} : { "runtimeArgs": hooks.runtimeArgs }, ...hooks.noDebug === true ? { "noDebug": true } : {}, ...hooks.skip === undefined ? {} : { "skip": hooks.skip } });
 		});
 	});
 

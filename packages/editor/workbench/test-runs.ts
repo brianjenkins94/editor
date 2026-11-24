@@ -1,8 +1,9 @@
-import type { CoverageEvent, Effect, TestReport, TestsEvent } from "@brianjenkins94/editor-api";
+import type { CoverageEvent, Effect, Skip, TestReport, TestsEvent } from "@brianjenkins94/editor-api";
 import type { Hub } from "@brianjenkins94/hub";
 import type * as vscodeApi from "vscode";
 import type { GitService } from "./git-service";
 import type { NodeRunner } from "./node-runner";
+import type { RunFile } from "./test-notice";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { alignedRows, hunksOf } from "../shared/git-hunks";
 import { waitFor } from "./readiness";
@@ -77,6 +78,8 @@ export interface RunRecord {
 	"effects": Effect[];
 	"output"?: string;
 }
+
+export interface FileRun { "exitCode": number; "ms": number; "tests": TestReport[]; "effects": Effect[]; "output": string; "attached": boolean; "statements"?: Record<string, Statements>; "asked"?: Asked; "stalled"?: string; "skipped"?: number }
 
 export interface Slower { "by": number; "measure": "statements" | "time"; "typical": number }
 
@@ -330,7 +333,7 @@ export function ranFirst(ran: readonly Ran[], asking: readonly string[], left: r
 	].join(" ");
 }
 
-export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitService, runner: NodeRunner): void {
+export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitService, runner: NodeRunner): { "runFile": RunFile } {
 	const rpc = createRpcClient(hub);
 	const decoder = new TextDecoder();
 	const read = async (path: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(`${ROOT}/${path}`))).then((bytes) => decoder.decode(bytes), () => undefined);
@@ -450,7 +453,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitServ
 
 	serve(hub, "tests.coverage", async () => ({ "coverage": Object.fromEntries(coverageOf(await keptIn(COVERAGE) as CoverageKept[])) }));
 
-	const runFile = async (file: string, signal: AbortSignal, approved: string[], stopAll: () => void, imports: string[] = []): Promise<{ "exitCode": number; "ms": number; "tests": TestReport[]; "effects": Effect[]; "output": string; "attached": boolean; "statements"?: Record<string, Statements>; "asked"?: Asked; "stalled"?: string }> => {
+	const runFile = async (file: string, signal: AbortSignal, approved: string[], stopAll: () => void, imports: string[] = [], skip?: Skip): Promise<FileRun> => {
 		const controller = new AbortController();
 		const stop = (): void => {
 			controller.abort();
@@ -458,8 +461,8 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitServ
 
 		signal.addEventListener("abort", stop, { "once": true });
 
-		const run = runner.runs.start({ "title": `node --test ${file}`, "kind": "task", "cwd": ROOT, "origin": { "other": "an agent (runs_tests)" }, "entry": `${ROOT}/${file}`, "runtime": "tsval" }, stopAll);
-		let reported: TestsEvent | undefined;
+		const run = runner.runs.start({ "title": skip === undefined ? `node --test ${file}` : `node --test ${file} (${skip.file.replace(/^\/workspace\//u, "")}:${String(skip.line + 1)} skipped)`, "kind": "task", "cwd": ROOT, "origin": { "other": "an agent (runs_tests)" }, "entry": `${ROOT}/${file}`, "runtime": "tsval" }, stopAll);
+		let reported: (TestsEvent & { "skipped"?: number }) | undefined;
 		let covered: CoverageEvent | undefined;
 		let effects: Effect[] = [];
 		let asked: Asked | undefined;
@@ -533,6 +536,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitServ
 				"runId": run.id,
 				"noDebug": true,
 				"runtimeArgs": imports.flatMap((each) => ["--import", each]),
+				...skip === undefined ? {} : { "skip": skip },
 				"signal": controller.signal,
 				"onOutput": (_stream, text) => {
 					output = (output + text).slice(-OUTPUT);
@@ -546,7 +550,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitServ
 
 			effects = [...effects, ...kept];
 
-			return { "exitCode": debugged.attached && stalled === undefined ? debugged.exitCode : 1, "ms": Math.round(performance.now() - started), "effects": effects, "tests": reported?.tests ?? [], "output": output, "attached": debugged.attached, ...covered === undefined ? {} : { "statements": statementsOf(covered) }, ...asked === undefined ? {} : { "asked": asked }, ...stalled === undefined ? {} : { "stalled": stalled } };
+			return { "exitCode": debugged.attached && stalled === undefined ? debugged.exitCode : 1, "ms": Math.round(performance.now() - started), "effects": effects, "tests": reported?.tests ?? [], "output": output, "attached": debugged.attached, ...reported?.skipped === undefined ? {} : { "skipped": reported.skipped }, ...covered === undefined ? {} : { "statements": statementsOf(covered) }, ...asked === undefined ? {} : { "asked": asked }, ...stalled === undefined ? {} : { "stalled": stalled } };
 		} finally {
 			clearInterval(watching);
 			starting.dispose();
@@ -768,4 +772,6 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitServ
 
 		return { "run": batch.id, ...batch.result };
 	});
+
+	return { "runFile": runFile };
 }

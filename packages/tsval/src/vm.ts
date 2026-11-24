@@ -183,6 +183,10 @@ export interface VMOptions {
 	/** The built-ins the program shares with its host, held apart (shared-builtins.ts): the program's changes to them in
 	 *  place only while its code runs, the host's own between. A fork shares its machine's. */
 	"builtins"?: SharedBuiltins;
+	/** A mutant: the statement starting here (its file's name, a 0-based line and character, where its first token
+	 *  starts) is skipped wherever it would run, as if deleted — what a test that notices it broken would fail on.
+	 *  `skipped` counts the times it was. */
+	"skip"?: { "file": string; "line": number; "character": number };
 	/** Notified with the Promise of every async guest function invoked, so a driver can track
 	 *  outstanding async work (a host that must observe every effect awaits it). */
 	"onAsyncFiber"?: (promise: Promise<unknown>) => void;
@@ -490,6 +494,10 @@ export class Machine implements VM {
 	public hostGuard: HostGuard | undefined;
 	/** VMOptions.builtins. */
 	public builtins: SharedBuiltins | undefined;
+	/** VMOptions.skip, and the times it was skipped. */
+	public skip: VMOptions["skip"];
+	public skipped = 0;
+	private readonly skipping = new WeakMap<ts.Node, boolean>();
 	public onAsyncFiber: ((promise: Promise<unknown>) => void) | undefined;
 	/** VMOptions.asyncContext. */
 	public asyncContext: AsyncContext | undefined;
@@ -627,6 +635,7 @@ export class Machine implements VM {
 		this.resolveModule = options.resolveModule;
 		this.hostGuard = options.hostGuard;
 		this.builtins = options.builtins;
+		this.skip = options.skip;
 		this.onAsyncFiber = options.onAsyncFiber;
 		this.asyncContext = options.asyncContext;
 		this.onBreakpoint = options.onBreakpoint;
@@ -640,6 +649,28 @@ export class Machine implements VM {
 		this.escapes = options.escapes;
 		this.watches = options.watches;
 		this.called = options.called;
+	}
+
+	/** Whether `node` is VMOptions.skip's statement (found once a node). */
+	private skips(node: ts.Node): boolean {
+		let is = this.skipping.get(node);
+
+		if (is === undefined) {
+			const { file, line, character } = this.skip!;
+			const source = node.getSourceFile();
+
+			if (source.fileName === file) {
+				const start = source.getLineAndCharacterOfPosition(node.getStart(source));
+
+				is = start.line === line && start.character === character;
+			} else {
+				is = false;
+			}
+
+			this.skipping.set(node, is);
+		}
+
+		return is;
 	}
 
 	/** A statement started (`node`), to its file's coverage: its counts found once per change of file. */
@@ -1401,6 +1432,13 @@ export class Machine implements VM {
 		// (with any time waited before it) — as it does a declaration's step (a function's or class's: not a statement
 		// kind, but the step that puts its card in order) and a concise arrow body's entry, for the statement it stands
 		// for (`() => f(x)`'s `return f(x)`: otherwise its work and its waits would be no one's).
+		if (statementStart && this.skip !== undefined && this.skips(node!)) {
+			this.skipped += 1;
+			this.frames.pop();
+
+			return false;
+		}
+
 		if (statementStart) {
 			this.statements += 1;
 
@@ -2040,6 +2078,8 @@ export class Machine implements VM {
 		forked.resolveModule = this.resolveModule;
 		forked.hostGuard = this.hostGuard;
 		forked.builtins = this.builtins;
+		forked.skip = this.skip;
+		(forked as unknown as { "skipping": WeakMap<ts.Node, boolean> }).skipping = this.skipping;
 		forked.onAsyncFiber = this.onAsyncFiber;
 		forked.onBreakpoint = this.onBreakpoint;
 		forked.statements = this.statements;

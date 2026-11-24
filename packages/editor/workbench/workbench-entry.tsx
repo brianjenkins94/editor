@@ -65,6 +65,7 @@ import { installScriptRun } from "./script-run";
 import { installTarballs } from "./tarballs";
 import { installTasks } from "./tasks";
 import { createBashProcess, serveTerminalState } from "./terminal";
+import { installTestNotice } from "./test-notice";
 import { installTestRuns } from "./test-runs";
 import { followSystemTheme, showVsCodeTheme } from "./theme-follow";
 import { serveUnpushed } from "./unpushed";
@@ -366,7 +367,7 @@ function maybeBoot(): void {
 				serveUnpushed(workbenchHub);
 				installDecisions(api as typeof import("vscode"), workbenchHub);
 				installCodeReach(api as typeof import("vscode"), workbenchHub);
-				installTestRuns(api as typeof import("vscode"), workbenchHub, git, nodeRunner);
+				installTestNotice(api as typeof import("vscode"), workbenchHub, paneLog, installTestRuns(api as typeof import("vscode"), workbenchHub, git, nodeRunner).runFile);
 				installCiOutcomes(api as typeof import("vscode"), workbenchHub, paneLog);
 				installFeaturesView(api as typeof import("vscode"), workbenchHub, paneLog);
 				installCapabilityConfirm(api as typeof import("vscode"), workbenchHub, paneLog);

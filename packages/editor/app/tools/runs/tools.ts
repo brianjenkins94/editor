@@ -58,6 +58,17 @@ const runs: ToolFamily = ({ request }) => [
 				return ok(ran);
 			}
 		})
+	},
+	{
+		"timeoutMs": 120000,
+		"tool": defineTool({
+			"name": "runs_notice",
+			"config": {
+				"description": "What a test file's tests notice broken (Tests: What This File's Tests Notice Broken): its tests run once, then once with each statement they ran, outside test files, skipped in turn — their own feature's code first — and a test that fails with one skipped noticed it. Results are kept (.silo/local/notice/) until the code changes, so each call tries more, for about 90 s: `left` says how many statements are still to try. A test that noticed none of those tried is in `none` and in Problems, a drop candidate for a person to decide, never dropped. Only a passing file is checked (`failing` otherwise). Returns { file, statements, tried, left, tests: [{ id, tried, noticed, missed (statements as path:line:column) }], none }.",
+				"inputSchema": { "file": z.string().describe("The test file (relative to the workspace).") }
+			},
+			"handler": async ({ file }, { signal }) => ok(request("tests.notice", { "file": file }, signal))
+		})
 	}
 ];
 

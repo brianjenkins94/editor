@@ -149,6 +149,15 @@ What's there: `test`/`it`, `describe`/`suite`, `.skip`, `.todo`, the four hooks,
 context (`diagnostic`, `skip`, `todo`, `test`, `after`, `assert`, `mock` — node's `fn`, `method` and `timers`) and
 callback tests. Not yet: snapshots, `only` filtering, concurrency.
 
+**What a file's tests notice broken** (*Tests: What This File's Tests Notice Broken*, `runs_notice`; the user,
+2026-11-23: "is running a test that always succeeds even useful?"). The file runs once, then once for each statement its
+tests ran outside test files, that statement skipped wherever it would run (tsval's `skip`: the mutant needs no file
+written) — its own feature's code first, about 90 s a time, what's tried kept in `.silo/local/notice/` until the code
+changes, so each go tries more. A test that fails with one skipped noticed it. A declaration isn't skipped (its name
+unbound, any test that runs the code throws, which says the code ran, not that the test looked). A test that noticed
+none of those tried is in Problems, a drop candidate for a person to decide, as `silo remove` is; it's never dropped.
+Only a passing file is checked.
+
 **For agents** (2026-10-29; workbench/test-runs.ts): `runs_tests` runs test files as `node --test` does and answers
 each test as data. A failed assertion's sides come as node-test.js shows them; the time is the debug worker's clock,
 since the program's own runs on the deterministic loop; and a test's outcome from before the run is beside it, so a

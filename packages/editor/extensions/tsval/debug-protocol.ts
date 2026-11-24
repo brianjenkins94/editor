@@ -1,4 +1,4 @@
-import type { CoverageEvent, Effect, LiveBatch, LoadedPackage, TestReport, RulePlace } from "@brianjenkins94/editor-api";
+import type { CoverageEvent, Effect, LiveBatch, LoadedPackage, Skip, TestReport, RulePlace } from "@brianjenkins94/editor-api";
 import type { Replay } from "@brianjenkins94/editor-api/recorded";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
 
@@ -13,7 +13,7 @@ export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack"
 export interface Crash { "line": number; "at": [number, number]; "message": string; "file"?: string; "stopped"?: true }
 
 export type Control =
-	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "imports"?: string[]; "places"?: Record<string, RulePlace[]>; "live"?: boolean; "recorded"?: Record<string, unknown>; "program"?: string; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string>; "replay"?: Replay }
+	| { "type": "launch"; "source": string; "fileName": string; "lines": number[]; "control"?: SharedArrayBuffer; "policy"?: Policy; "args"?: string[]; "imports"?: string[]; "places"?: Record<string, RulePlace[]>; "live"?: boolean; "recorded"?: Record<string, unknown>; "program"?: string; "eventLoop"?: LoopStart; "files"?: Record<string, number[]>; "workspace"?: SharedArrayBuffer; "cwd"?: string; "env"?: Record<string, string>; "replay"?: Replay; "skip"?: Skip }
 	| { "type": "explore"; "source": string; "fileName": string; "policy"?: Policy; "args"?: string[]; "eventLoop": LoopStart; "maxRuns"?: number; "workspace"?: SharedArrayBuffer }
 	| { "type": "setBreakpoints"; "lines": number[]; "file"?: string }
 	| { "type": "decide"; "deny"?: boolean; "skip"?: boolean; "policy"?: Policy; "give"?: unknown; "decided"?: "once" | "always" | "refused" }
@@ -49,7 +49,7 @@ export type WorkerEvent =
 	| { "type": "coverage"; "coverage": CoverageEvent }
 	| { "type": "output"; "text": string; "stream"?: "stdout" | "stderr" | "console" }
 	| { "type": "values"; "batch": LiveBatch; "file"?: string; "source"?: string }
-	| { "type": "tests"; "tests": TestReport[]; "packages"?: LoadedPackage[]; "loaded"?: string[] }
+	| { "type": "tests"; "tests": TestReport[]; "packages"?: LoadedPackage[]; "loaded"?: string[]; "skipped"?: number }
 	| { "type": "valueSet"; "ok": boolean; "value"?: string; "error"?: string; "snapshot"?: Snapshot }
 	| { "type": "listening"; "port": number }
 	| { "type": "serving"; "ports": number[] }

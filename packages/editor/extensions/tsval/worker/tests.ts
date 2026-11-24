@@ -176,7 +176,7 @@ export function testsOver(vm: Vm): boolean {
 
 export function tellTests(exitCode: number): number {
 	if (state.testsRan.length > 0) {
-		post({ "type": "tests", "tests": state.testsRan, "packages": [...packagesRan.values()], "loaded": loadedFirst ?? [] });
+		post({ "type": "tests", "tests": state.testsRan, "packages": [...packagesRan.values()], "loaded": loadedFirst ?? [], ...state.current?.skip === undefined ? {} : { "skipped": state.current.skipped } });
 	}
 
 	return exitCode === 0 && state.testsFailed > 0

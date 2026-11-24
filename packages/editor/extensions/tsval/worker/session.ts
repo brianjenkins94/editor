@@ -1015,6 +1015,7 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 			"asyncContext": asyncContext,
 			"sharedGlobals": state.runGlobal?.own,
 			"builtins": new SharedBuiltins(),
+			...message.skip === undefined ? {} : { "skip": message.skip },
 			"globals": {
 				...state.nodeGlobals,
 				"BroadcastChannel": runBroadcastChannel(),

@@ -152,7 +152,11 @@ export interface TestReport {
 
 /** The `tests` event, sent as a test file's run ends (before `coverage`): its tests in the order they ran — `file` the
  *  test file. */
-export interface TestsEvent { "file": string; "tests": TestReport[]; "packages"?: LoadedPackage[]; "loaded"?: string[] }
+export interface TestsEvent { "file": string; "tests": TestReport[]; "packages"?: LoadedPackage[]; "loaded"?: string[]; "skipped"?: number }
+
+/** A mutant: the statement starting at a 0-based line and character of a file, skipped wherever it would run, as if
+ *  deleted (tsval's VMOptions.skip). A run given one says how many times it skipped it (TestsEvent's `skipped`). */
+export interface Skip { "file": string; "line": number; "character": number }
 
 /** A package whose code a run ran: its package.json's name and version, and its folder. */
 export interface LoadedPackage { "name": string; "version"?: string; "dir": string }

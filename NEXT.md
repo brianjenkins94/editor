@@ -31,16 +31,10 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    last 80 commits (2026-11-16), 34 would run everything: code nothing here reaches, package.json, the workflow. CI's
    specs aren't selected by reach — each boots the whole workbench, so every change to the editor's code reaches every
    one (2026-11-22, silo README, *Built*); the architecture workflow runs only for a change to what its suites are made
-   of. **Done when** the same replay, over the 80 commits before it's run, runs everything for no more than the
-   target, which waits on a decision (*Decisions*, *How few tests is enough*).
-   - **Would it fail if its subject broke** (the user, 2026-11-23: "is running a test that always succeeds even
-     useful?"). A run whose test reaches nothing that changed says nothing: resting skips it. A test that stays green
-     across changes to what it reaches may be guarding, or may not look: break that code a change at a time (mutation,
-     over the statements its reach kept, its own feature's first) and see whether it fails. One that survives every
-     change to its feature's code is a drop candidate, said and decided as `silo remove` is, never dropped on its own;
-     and a test green on CI may have failed before a commit, so local runs' outcomes (`runs_tests`' history) count
-     too. **Done when** silo says, for a test, which of its reach's statements broken it notices, and the tests that
-     notice none are listed for a person to decide.
+   of. And what a file's tests notice broken, a statement skipped at a time, the tests that notice none in Problems
+   for a person to decide (2026-11-23; RUNNING.md, *What a file's tests notice broken*). **Done when** the same
+   replay, over the 80 commits before it's run, runs everything for no more than the target, which waits on a
+   decision (*Decisions*, *How few tests is enough*).
 3. **Where code is shared between features** (*Silo, firmed up*: one owner a file is where it starts, reassessed from
    what runs show). What's there: `silo observed .silo/local/reach` compares each test's reach with the ledger
    (2026-11-17: 149 tests, a median of 100% in their own features' code, 26 under half, mostly a dependency); CI's, from

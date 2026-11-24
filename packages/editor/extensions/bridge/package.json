@@ -81,6 +81,11 @@
         "category": "BABLR"
       },
       {
+        "command": "editor.tests.notice",
+        "title": "What This File's Tests Notice Broken",
+        "category": "Tests"
+      },
+      {
         "command": "editor.workspace.checkpoint",
         "title": "Save Checkpoint",
         "category": "Workspace"

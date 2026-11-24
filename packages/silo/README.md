@@ -538,6 +538,12 @@ changes by file as well as by declaration. Code a test didn't run can't change h
 changes, and then it's touched; a vouch that didn't hold at the base says nothing, and static reach stands in. The run
 was tsval's, so a path only Node takes isn't in it: the weekly full run is what catches that.
 
+**Would it fail if its subject broke** (built 2026-11-23, the editor's front end: RUNNING.md, *What a file's tests notice
+broken*). A test that stays green may be guarding or may not look. The editor breaks what a file's tests ran, a
+statement at a time (skipped, as if deleted, by tsval: no file is written), and keeps, per statement, which tests failed
+for it; a test that noticed none of those tried is listed as a drop candidate, decided as `silo remove` is. The command
+line has none yet: a mutant there is a file rewritten under the runner.
+
 The editor's in-editor specs aren't selected by reach (measured 2026-11-22, the specs' reach from a dispatched
 coverage run at eef840c4, replayed over the 52 commits after it): every spec boots the whole workbench, so each has run
 the top of every module it loads, and a change to the editor's code reaches all of them — by file, 33 of the 52 commits

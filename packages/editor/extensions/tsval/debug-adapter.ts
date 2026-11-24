@@ -4,7 +4,7 @@ import type { WorkspaceRuntime } from "@brianjenkins94/editor-api/runtime";
 
 import type { Span } from "@brianjenkins94/util/logger";
 import type { Policy } from "@brianjenkins94/util/silo/policy";
-import type { RulePlace } from "@brianjenkins94/editor-api";
+import type { RulePlace, Skip } from "@brianjenkins94/editor-api";
 import type { CapabilityAsk, Control, LoopStart, RunEnd, Snapshot, StepAction, ToWorker, WorkerEvent } from "./debug-protocol";
 import { watchWorker } from "@brianjenkins94/editor-api/failures";
 import { logger } from "@brianjenkins94/util/logger";
@@ -38,6 +38,7 @@ class TsvalDebugSession extends vscode.Disposable implements vscode.DebugAdapter
 	private program = "";
 	private args: string[] = [];
 	private imports: string[] = [];
+	private skip: Skip | undefined;
 	private places: Record<string, RulePlace[]> = {};
 	private where: { "cwd"?: string; "env"?: Record<string, string> } = {};
 	private eventLoop: LoopStart | undefined;
@@ -143,6 +144,7 @@ class TsvalDebugSession extends vscode.Disposable implements vscode.DebugAdapter
 		this.program = (args["program"] as string | undefined) ?? "";
 		this.args = Array.isArray(args["args"]) ? (args["args"] as unknown[]).map(String) : [];
 		this.imports = importsOf(Array.isArray(args["runtimeArgs"]) ? (args["runtimeArgs"] as unknown[]).map(String) : []);
+		this.skip = skipOf(args["__skip"]);
 		this.where = { ...typeof args["cwd"] === "string" ? { "cwd": args["cwd"] } : {}, ...typeof args["env"] === "object" && args["env"] !== null ? { "env": args["env"] as Record<string, string> } : {} };
 		this.eventLoop = loopStartOf(args["eventLoop"]);
 		this.noDebug = args["noDebug"] === true;
@@ -401,7 +403,7 @@ class TsvalDebugSession extends vscode.Disposable implements vscode.DebugAdapter
 
 		const trace = this.startAction("launch");
 
-		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "places": this.places, ...this.live ? { "live": true, "recorded": this.recorded } : {}, "args": this.args, ...this.imports.length === 0 ? {} : { "imports": this.imports }, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop }, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } } }, trace);
+		this.control({ "type": "launch", "source": this.source, "fileName": this.program, "lines": this.lines, "control": this.sharedControl?.buffer, "policy": this.policy, "places": this.places, ...this.live ? { "live": true, "recorded": this.recorded } : {}, "args": this.args, ...this.imports.length === 0 ? {} : { "imports": this.imports }, ...this.skip === undefined ? {} : { "skip": this.skip }, "program": vscode.workspace.asRelativePath(vscode.Uri.file(this.program), false), "files": this.otherFileLines(), ...this.where, ...this.worker.buffer === undefined ? {} : { "workspace": this.worker.buffer }, ...this.eventLoop === undefined ? {} : { "eventLoop": this.eventLoop }, ...this.replay === undefined ? {} : { "replay": { "fn": this.replay.fn, "free": this.replay.free, "self": this.replay.self, "args": this.replay.args, "calls": this.replay.calls } } }, trace);
 	}
 
 	private control(message: Control, trace?: { "traceId": string; "parentSpanId": string }): void {
@@ -473,7 +475,7 @@ class TsvalDebugSession extends vscode.Disposable implements vscode.DebugAdapter
 				break;
 
 			case "tests":
-				this.tell("tests", { "file": this.program, "tests": message.tests, ...message.packages === undefined ? {} : { "packages": message.packages }, ...message.loaded === undefined ? {} : { "loaded": message.loaded } });
+				this.tell("tests", { "file": this.program, "tests": message.tests, ...message.packages === undefined ? {} : { "packages": message.packages }, ...message.loaded === undefined ? {} : { "loaded": message.loaded }, ...message.skipped === undefined ? {} : { "skipped": message.skipped } });
 				break;
 
 			case "terminated":
@@ -567,6 +569,12 @@ function messageOf(error: unknown): string {
 	const thrown = error as string | number | boolean | null | undefined;
 
 	return String(thrown);
+}
+
+function skipOf(value: unknown): Skip | undefined {
+	const { file, line, character } = (typeof value === "object" && value !== null ? value : {}) as Partial<Skip>;
+
+	return typeof file === "string" && typeof line === "number" && typeof character === "number" ? { "file": file, "line": line, "character": character } : undefined;
 }
 
 function importsOf(runtimeArgs: string[]): string[] {

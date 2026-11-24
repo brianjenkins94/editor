@@ -2518,19 +2518,26 @@
     "docs": "packages/editor/RUNNING.md, *Tests*",
     "ways": [
       "agent tool|runs_affected",
+      "agent tool|runs_notice",
       "agent tool|runs_tests",
+      "command|editor.tests.notice",
+      "core module|installTestNotice",
+      "diagnostic collection|tests-notice",
       "core module|installTestRuns",
       "hub request|tests.affected",
+      "hub request|tests.notice",
       "hub request|tests.run"
     ],
     "paths": [
       "packages/editor/app/tools/runs/",
       "packages/editor/extensions/tsval/worker/busy.ts",
       "packages/editor/workbench/readiness.ts",
+      "packages/editor/workbench/test-notice.ts",
       "packages/editor/workbench/test-runs.ts"
     ],
     "tests": [
       "packages/editor/test/agent-tools.mjs",
+      "packages/editor/test/test-notice.test.mjs",
       "packages/editor/test/test-runs.test.mjs"
     ]
   },
@@ -3193,6 +3200,7 @@
       "packages/tsval/test/vm/fork.test.ts",
       "packages/tsval/test/vm/promise-order.test.ts",
       "packages/tsval/test/vm/shared-builtins.test.ts",
+      "packages/tsval/test/vm/skip.test.ts",
       "packages/tsval/test/vm/step.test.ts",
       "packages/tsval/test/vm/stepped-async.test.ts",
       "packages/tsval/test/vm/stepped-patterns.test.ts",
