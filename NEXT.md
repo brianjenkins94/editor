@@ -70,11 +70,9 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    memory, a vm context has the language's built-ins, and a run takes `--import` and `module.registerHooks` (modules'
    backpressure test needs its loader: `runs_tests` with `imports`, or `npm test` in the terminal). tsval's own tests
    that hold it to V8 pass here too since 2026-11-23 (30bd7a2c, e283640d): its promise jobs are its own, so the tsval
-   under test orders as V8 whoever hosts it, and its event loop takes only a promise a host call returns as external. Left, each **done when** as it says:
-   - **promise-order's two subclass tests, two tsvals deep**: `class P extends Promise` made by the tsval under test
-     comes back with its `then` "called on incompatible receiver" (reproduced in Node, an outer tsval evaluating
-     tsval's sources: scratch harness); one level deep all of promise-order matches Node. Done when they pass in the
-     editor.
+   under test orders as V8 whoever hosts it, and its event loop takes as external only a promise a host API returns,
+   not one the language's own functions do (87508749: promise-order's 30, its subclasses too, pass in an editor cloned
+   from main). Left, **done when** as it says:
    - **A program that changes the built-ins it shares stalls its debugger**: test262's tests poison prototypes (an
      array iterator yielding 42), and the debug worker's own `Object.fromEntries` (state.ts `linkCallsSince`) threw
      on it as the run ended, the run stopping after 145 s with runs_tests failing (`reading 'replace'`). A run's
