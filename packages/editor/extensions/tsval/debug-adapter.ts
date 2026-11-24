@@ -587,6 +587,8 @@ function loopStartOf(value: unknown): LoopStart | undefined {
 	return typeof now === "number" && typeof seed === "number" ? { "now": now, "seed": seed, ...Array.isArray(schedule) ? { "schedule": schedule.map(Number) } : {} } : undefined;
 }
 
+const PUBLISH_GRACE_MS = 1000;
+
 export function startWorker(runtime: WorkspaceRuntime, session: string | undefined, onEvent: (event: WorkerEvent) => void, onError: (message: string, loaded: boolean) => void): { "buffer": SharedArrayBuffer | undefined; "send": (control: Control, trace?: { "traceId": string; "parentSpanId": string }) => void; "close": () => void } {
 	const url = new URL("./lsp/debug-worker.js", location.href);
 
@@ -612,10 +614,19 @@ export function startWorker(runtime: WorkspaceRuntime, session: string | undefin
 			post({ "kind": "control", "control": control, ...trace === undefined ? {} : { "trace": trace } });
 		},
 		"close": () => {
-			worker.terminate();
-			setTimeout(() => {
-				link.dispose();
-			}, LINK_GRACE_MS);
+			const end = (): void => {
+				worker.terminate();
+				setTimeout(() => {
+					link.dispose();
+				}, LINK_GRACE_MS);
+			};
+
+			if ("__evidence" in globalThis) {
+				post({ "kind": "publish" });
+				setTimeout(end, PUBLISH_GRACE_MS);
+			} else {
+				end();
+			}
 		}
 	};
 }

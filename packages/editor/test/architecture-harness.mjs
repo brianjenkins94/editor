@@ -38,9 +38,6 @@ export const REACH_DIR = path.join(fs.tmpdir(), "architecture-reach");
 // global setup's.
 if (process.env.COVERAGE === "1" && process.env.NODE_TEST_CONTEXT !== undefined) {
 	const { after, afterEach, beforeEach } = await import("node:test");
-	/** Each realm's id, by the realm (a frame, a worker), so its modules' counts are told apart before and after. */
-	const realmIds = new WeakMap();
-	let realms = 0;
 	/** Each module's statements, by `<realm>\0<file>\0<version>`: read once, its counts each time. */
 	const statementsOf = new Map();
 	const reach = {};
@@ -49,33 +46,54 @@ if (process.env.COVERAGE === "1" && process.env.NODE_TEST_CONTEXT !== undefined)
 	 *  goes, so what its realms ran is kept once they're gone. */
 	let seen = new Map();
 
-	/** Every instrumented module's statement counts now, in every realm of every session. */
+	/** Every instrumented module's statement counts now, in every realm of every session: asked on the coverage runtime's
+	 *  channel (build/coverage.ts), which every realm of the page's origin hears — a worker a worker started too, which
+	 *  Playwright doesn't list (the debug worker, the extension host's: its reach was missing from every test that ran the
+	 *  debugger). Answers are taken until none has come for 2 s, or 60 s in all: a realm blocked on the shared workspace
+	 *  answers nothing, and is read again next time. */
 	const countsNow = async () => {
 		const counts = new Map();
 
-		for (const { page, context } of globalThis.__coverageSessions ?? []) {
-			for (const realm of [...page.frames(), ...page.workers(), ...context.serviceWorkers()]) {
-				if (!realmIds.has(realm)) {
-					realms += 1;
-					realmIds.set(realm, realms);
+		for (const { page } of globalThis.__coverageSessions ?? []) {
+			const answers = await page.evaluate(async (known) => {
+				const channel = new BroadcastChannel("editor.coverage");
+				const nonce = Math.random().toString(36).slice(2);
+				const found = new Map();
+
+				await new Promise((resolve) => {
+					let quiet;
+					const settle = () => {
+						clearTimeout(quiet);
+						quiet = setTimeout(resolve, 2000);
+					};
+
+					channel.onmessage = ({ data }) => {
+						if (data?.answer === nonce && Array.isArray(data.modules)) {
+							found.set(data.realm, data.modules);
+							settle();
+						}
+					};
+					channel.postMessage({ "ask": "evidence", "nonce": nonce, "known": known });
+					settle();
+					setTimeout(resolve, 60_000);
+				});
+				channel.close();
+
+				// (a realm gone since it published: its last counts)
+				for (const [realm, modules] of globalThis.__coverageKept ?? []) {
+					if (!found.has(realm)) {
+						found.set(realm, modules);
+					}
+
+					globalThis.__coverageKept.delete(realm);
 				}
 
-				const id = String(realmIds.get(realm));
-				const known = [...statementsOf.keys()].filter((key) => key.startsWith(`${id}\0`)).map((key) => key.slice(id.length + 1));
-				// (not forever: a worker blocked on the shared workspace, or going away, answers nothing; it's read again next time.
-				// A frame is given longer: a spec's editor is a frame of the same page, busy as the spec ends, and the first read of
-				// one sends all its statements — at 2 s, CI's run 45111162082 lost one or both workbenches' reach for 10 of 51 specs)
-				const frame = typeof realm.parentFrame === "function";
-				const unread = Symbol("unread");
-				const answer = await Promise.race([realm.evaluate((told) => (globalThis.__evidence?.evidence() ?? []).map(({ file, version, statements }) => ({ "file": file, "version": version, "counts": statements.map(({ count }) => count), ...told.includes(`${file}\0${version}`) ? {} : { "statements": statements.map(({ start, end }) => [...start, ...end]) } })), known).catch(() => []), new Promise((resolve) => { setTimeout(() => { resolve(unread); }, frame ? 30_000 : 2000); })]).catch(() => []);
-				const modules = answer === unread ? [] : answer;
+				return [...found].map(([realm, modules]) => ({ "realm": realm, "modules": modules }));
+			}, [...statementsOf.keys()]).catch(() => []);
 
-				if (answer === unread && frame) {
-					console.log(`[coverage] a frame's counts weren't read in 30 s, so this test's reach leaves it out: ${realm.url().slice(0, 160)}`);
-				}
-
+			for (const { realm, modules } of answers) {
 				for (const { file, version, counts: each, statements } of modules) {
-					const key = `${id}\0${file}\0${version}`;
+					const key = `${realm}\0${file}\0${version}`;
 
 					if (statements !== undefined) {
 						statementsOf.set(key, statements);
@@ -287,6 +305,21 @@ export async function startSession(options = {}) {
 	// kept open, a spec's windows were each a whole editor, and preview-prompts' three crashed the renderer.
 	if (process.env.COVERAGE === "1") {
 		(globalThis.__coverageSessions ??= new Set()).add({ "page": page, "context": context });
+		// (what a realm publishes as it ends — the debug worker, before the adapter terminates it — kept in the page's top
+		// frame, for the next read)
+		await page.addInitScript(() => {
+			if (globalThis === globalThis.top) {
+				const kept = new Map();
+				const channel = new BroadcastChannel("editor.coverage");
+
+				globalThis.__coverageKept = kept;
+				channel.onmessage = ({ data }) => {
+					if (data?.answer === "published" && Array.isArray(data.modules)) {
+						kept.set(data.realm, data.modules);
+					}
+				};
+			}
+		});
 		await page.exposeBinding("__countedBeforeClosing", async () => {
 			await globalThis.__coverageReadNow?.();
 		});

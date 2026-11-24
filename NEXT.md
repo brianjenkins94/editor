@@ -53,26 +53,25 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    to Connected tabs. Shared: cdp-memory.ts with debug-mcp server, preview-windows.tsx with the in-browser dev server,
    playwright's engine.ts with Live runs. tsval's handlers stay the interpreter's, which now counts the conformance
    suites among its tests. Left:
-   - **7 files reached through agent-tools.mjs and workbench.mjs** (ata.ts, code-refactor.ts, gated-eval.ts,
-     fs-trace.ts, script-run.ts, runtime-fs.ts, margin/values.ts): each suite was in about five features' `tests`, so
-     every test in it counted for all of them. Split 2026-11-24 (the user's choice over test-level ledger entries) into
-     a file per feature, each its own editor: test/agent-tools/ (15) and test/workbench/ (3). To read again from the
-     next coverage run.
-   - **Kept where they are, their owners' tests missing them** (a test to write each): features-view.tsx,
-     worker/gate.ts, worker/values.ts, worker/stops.ts, evidence.ts, node-modules-provider.ts, editor-api's policy.ts,
-     rules.ts and evidence.ts, history/extension.ts, coi-serviceworker.js, terminal/index.ts, capabilities/baseline.ts.
-   - **10 of 51 specs lost workbench reach** in 45111162082: none for preview-session, pane-views and
-     performance-monitor, one editor's of two for features-view, recorded-stops, source-control, your-edits, past-runs,
-     playground-links and bablr. The harness gave each realm 2 s to hand over its counts after a test, and a spec's
-     editor is a frame of the same page, busy as it ends; fixed 2026-11-24 (frames get 30 s, and say when they don't
-     answer), locally the five preview specs all have theirs. preview-session.ts and pane-views.ts only looked unrun by
-     their own tests for it, so they stay. **Next:** the list read again from coverage run 45418212617 (dispatched
-     2026-11-24 on 66b4a865: every spec's workbench reach, the agent suites split; preview-prompts fails in it, fixed after).
-   - **preview-prompts failed under COVERAGE=1** (CI's `specs-2` in 45111162082): fixed 2026-11-24. Two causes, each
-     needed: the socket gate goes into a preview's page as its source text, so instrumented it named the service
-     worker's counters and threw there (build/coverage.ts leaves it out); and a spec's windows were kept open for the
-     harness to read, each a whole editor, so three crashed the renderer (now read as the editor lets them go, then
-     closed).
+   - **The record again from 45418212617** (2026-11-24: every spec's workbench reach, the agent suites a file per
+     feature): 16 files, from 39. Settled by it: ata.ts, code-refactor.ts, fs-trace.ts and script-run.ts have one
+     owner's tests now, as do features-view.tsx, evidence.ts, pane-views.ts, terminal/index.ts and baseline.ts.
+   - **No test had the debug worker's reach**: Playwright lists no worker a worker started, and the debug worker is the
+     extension host's; and it ended with its run, before the harness read. Fixed 2026-11-24: the harness asks every
+     realm on the coverage runtime's own channel (build/coverage.ts), and the debug worker publishes its counts there
+     before the adapter ends it, under coverage only. Here debugger-driven's test went from no worker files to 15 and
+     tsval's 26, live-values' spec from 271 files to 324, none lost. That is what left worker/gate.ts, values.ts,
+     stops.ts and tsval's globals.ts unrun by their owners' tests. **Next:** a coverage run with it, the list read
+     again, then a test for each file whose owner's tests still don't run it — of 45418212617's: worker/gate.ts,
+     values.ts, stops.ts, editor-api's policy.ts, rules.ts, gated-eval.ts and evidence.ts, tsval's globals.ts,
+     node-modules-provider.ts, bridge/runtime-fs.ts, history/extension.ts (the user, 2026-11-24: to be completed).
+   - **10 of 51 specs lost workbench reach** in 45111162082 (fixed 2026-11-24: frames get 30 s, and say when they
+     don't answer; in 45418212617 every spec has 60–65 workbench files).
+   - **preview-prompts failed under COVERAGE=1** (CI's `specs-2` in 45111162082 and 45418212617): fixed 2026-11-24.
+     Two causes, each needed: the socket gate goes into a preview's page as its source text, so instrumented it named
+     the service worker's counters and threw there (build/coverage.ts leaves it out); and a spec's windows were kept
+     open for the harness to read, each a whole editor, so three crashed the renderer (now read as the editor lets
+     them go, then closed).
 4. **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
    reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), test/agent-tools/
    (the agents' requests, no UI), test/workbench/ (the system's colour scheme, the architecture plane, sign-in with the

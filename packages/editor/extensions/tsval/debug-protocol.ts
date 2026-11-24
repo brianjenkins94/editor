@@ -6,6 +6,7 @@ export type { RunEnd } from "@brianjenkins94/editor-api";
 
 export type ToWorker =
 	| { "kind": "runtime"; "port": MessagePort }
+	| { "kind": "publish" }
 	| { "kind": "control"; "control": Control; "trace"?: { "traceId": string; "parentSpanId": string } };
 
 export type StepAction = "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue";

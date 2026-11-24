@@ -13,6 +13,12 @@ globalThis.addEventListener("message", (event: MessageEvent<ToWorker>): void => 
 		return;
 	}
 
+	if (event.data.kind === "publish") {
+		(globalThis as { "__evidence"?: { "publish"?: () => void } }).__evidence?.publish?.();
+
+		return;
+	}
+
 	const message = event.data.control;
 	const { trace } = event.data;
 
