@@ -96,3 +96,48 @@ export function standardGlobals(): Record<string, unknown> {
 
 	return table;
 }
+
+/** The language's own functions among `global`'s standard built-ins (STANDARD_GLOBAL_NAMES): each, the functions on it,
+ *  and on its prototypes up their chain — what hands back what the program gave it (`pop`, `Reflect.apply`,
+ *  `Object.defineProperty`) or makes a promise the program settles (`Promise`'s, `Array.fromAsync`'s), never one that
+ *  settles outside it. Left out: `Atomics.waitAsync`, which waits on another thread. */
+export function languageFunctions(global: Record<string, unknown>): WeakSet<object> {
+	const found = new WeakSet<object>();
+	const take = (holder: unknown): void => {
+		if ((typeof holder !== "object" && typeof holder !== "function") || holder === null) {
+			return;
+		}
+
+		for (const key of Reflect.ownKeys(holder)) {
+			const descriptor = Reflect.getOwnPropertyDescriptor(holder, key);
+
+			for (const each of [descriptor?.value, descriptor?.get, descriptor?.set]) {
+				if (typeof each === "function" && each !== (global["Atomics"] as { "waitAsync"?: unknown } | undefined)?.waitAsync) {
+					found.add(each);
+				}
+			}
+		}
+	};
+
+	// (not `globalThis`: the global object itself holds the host's functions too)
+	for (const name of STANDARD_GLOBAL_NAMES.filter((each) => each !== "globalThis")) {
+		const value = global[name];
+
+		if (typeof value === "function") {
+			found.add(value);
+		}
+
+		take(value);
+
+		for (const inner of [value, ...typeof value === "object" && value !== null ? Object.values(value) : []]) {
+			for (let proto = typeof inner === "function" ? (inner as { "prototype"?: unknown }).prototype : undefined; typeof proto === "object" && proto !== null && proto !== Object.prototype; proto = Object.getPrototypeOf(proto)) {
+				take(proto);
+			}
+		}
+	}
+
+	take(Object.prototype);
+	take(Function.prototype);
+
+	return found;
+}

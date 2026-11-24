@@ -211,3 +211,21 @@ test("a thenable a built-in hands back is the value itself, not an external resu
 	await toEnd(vm);
 	assert.deepStrictEqual([lines, calls], [[[true, true, true], "function", ["row"]], ["then"]]);
 });
+
+test("only a promise a host API makes is external: what the language's own functions hand back is the program's — a promise it constructed, one passed through `pop`, an object made from Promise.prototype", async () => {
+	const { lines, globals } = logged();
+	const src = [
+		"class Sub extends Promise {}",
+		"const made = Reflect.construct(Promise, [(r) => r(1)], Sub);",
+		"log([made instanceof Sub, [made].pop() === made, Reflect.apply((v) => v, null, [made]) === made]);",
+		"const fake = Object.create(Promise.prototype);",
+		"log([fake].pop() === fake);",
+		"const fetched = later();",
+		"log(fetched === hostPromise);"
+	].join("\n");
+	const hostPromise = Promise.resolve("from the host");
+	const { vm } = createVM(src, { "globals": { ...globals, "later": () => hostPromise, "hostPromise": hostPromise }, "eventLoop": { "pace": "fast" } });
+
+	await toEnd(vm);
+	assert.deepStrictEqual(lines, [[true, true, true], true, false]);
+});

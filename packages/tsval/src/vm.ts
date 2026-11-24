@@ -9,7 +9,7 @@ import { isUncatchable, TsvalInternalError } from "./errors.ts";
 import type { Choice, Result } from "./event-loop.ts";
 import { arrived, choose, createLoop, forkLoop, hasRefTimers, hostCalling, INTRINSICS, loopGlobals, nextTimer, takeTimer, timerLabel, waitForTurn } from "./event-loop.ts";
 import { syntaxErrorIn, syntaxKindName } from "./frontend.ts";
-import { STANDARD_GLOBAL_NAMES, standardGlobals } from "./globals.ts";
+import { languageFunctions, STANDARD_GLOBAL_NAMES, standardGlobals } from "./globals.ts";
 import { bindIdentifier, bindingProgram, clonePrivateElements, closeIteration, createGuestFunction, isGuestClass, isSimpleTree, nodeHandlers, pushHostCall, pushPattern, simpleValue, syntheticHandlers } from "./handlers.ts";
 import { defineExports, directoryOf, linkedSpecifiers, makeRequire, moduleOf, requireOf, setModuleOf } from "./modules.ts";
 import { Scope } from "./scope.ts";
@@ -510,6 +510,8 @@ export class Machine implements VM {
 	private scheduler: AsyncScheduler = { "settled": [], "ids": 0, "wakers": [], "promises": new OwnPromises() };
 	/** Stepped async: where in what settled this machine's next job may be — before it, none is pending here. */
 	private settledFrom = 0;
+	/** The language's own functions (languageFunction), found once. */
+	private ownFunctions: WeakSet<object> | undefined;
 	/** How many nested contexts (a host-called guest function's sub-run, a fiber's) the machine is inside: stepped
 	 *  async applies on the main stack only (depth 0); a nested context keeps the fiber drivers' behavior. */
 	private depth = 0;
@@ -1108,11 +1110,15 @@ export class Machine implements VM {
 
 			// Event loop: a promise a host call returns is external — when it settles isn't the program's to say. The
 			// program gets one of its own instead, settled when the result's arrival is delivered as an event (event-loop.ts),
-			// so nothing — not even Promise.race — sees it before. (Not a promise the program makes itself — `new Promise`,
-			// a promise's methods and statics, one this machine made (promises.ts): that's the program chaining what it has.
+			// so nothing — not even Promise.race — sees it before. (Not a promise the program makes itself — `new Promise` or
+			// `Reflect.construct` (a subclass's `super()`), a promise's methods and statics, one this machine made
+			// (promises.ts): that's the program chaining what it has.
 			// And only a promise: any other thenable a built-in hands back — the program's own, through `pop` or
 			// `Reflect.apply`; a package's query builder — is a value, as it is, its `then` not called until it's awaited.)
-			if (this.loop !== undefined && this.steppedHere && !promising && (callee as unknown) !== this.realm.Promise && !isPromiseStatic(this.realm.Promise, callee) && (value instanceof this.realm.Promise || value instanceof Promise) && !this.scheduler.promises.knows(value)) {
+			// (the function it invokes, through a call, an apply or Reflect.apply)
+			const invoked = callee === call || callee === apply ? thisArg : callee === Reflect.apply ? args[0] : callee;
+
+			if (this.loop !== undefined && this.steppedHere && !promising && (value instanceof this.realm.Promise || value instanceof Promise) && !this.returnsOwn(invoked) && !this.scheduler.promises.knows(value)) {
 				return this.awaitResult(value, this.callLabel(site, callee, args));
 			}
 
@@ -2091,20 +2097,25 @@ export class Machine implements VM {
 
 	/** Event loop: a host call's promised `value` as the program gets it — a promise of the machine's realm, settled when
 	 *  the result, once it's in, is delivered as an event (fireEvent). */
-	private awaitResult(value: object, label: string): Promise<unknown> {
+	private awaitResult(value: object, label: string): unknown {
 		const loop = this.loop!;
 		const { scheduler } = this;
 		const { promise, resolve, reject } = scheduler.promises.capability(this);
+		const result: Result = { "id": loop.ids + 1, "label": label };
 
-		loop.ids += 1;
+		// (the host's own `then` is the brand check: what only looks like a promise — an object made from its prototype — it
+		// refuses before anything happens, and that's a value, as it is)
+		try {
+			Reflect.apply(Promise.prototype.then, value, [
+				(settled: unknown) => { result.deliver = () => { resolve(settled); }; wake(scheduler); },
+				(error: unknown) => { result.deliver = () => { reject(error); }; wake(scheduler); }
+			]);
+		} catch {
+			return value;
+		}
 
-		const result: Result = { "id": loop.ids, "label": label };
-
+		loop.ids = result.id;
 		loop.results.set(result.id, result);
-		Promise.resolve(value).then(
-			(settled) => { result.deliver = () => { resolve(settled); }; wake(scheduler); },
-			(error: unknown) => { result.deliver = () => { reject(error); }; wake(scheduler); }
-		);
 
 		return promise;
 	}
@@ -2339,6 +2350,21 @@ export class Machine implements VM {
 
 			settleWith?.(result);
 		});
+	}
+
+	/** Whether what `fn` returns is the program's own, never an external result: `fn` one of the language's own functions
+	 *  (globals.ts languageFunctions, of this machine's built-ins), or the program's (a `Reflect.apply` of it). */
+	private returnsOwn(fn: unknown): boolean {
+		if (ownedBy(fn, this)) {
+			return true;
+		}
+
+		const global = this.rootScope.globalObject as Record<string, unknown>;
+
+		// (with realGlobals, a name the global object hasn't is the host's)
+		this.ownFunctions ??= languageFunctions(Object.fromEntries(STANDARD_GLOBAL_NAMES.map((name) => [name, name in global ? global[name] : (globalThis as Record<string, unknown>)[name]])));
+
+		return (typeof fn === "function" || (typeof fn === "object" && fn !== null)) && this.ownFunctions.has(fn);
 	}
 
 	/** Host work as a job of this machine's: what native code it calls sets this machine's timers. */
@@ -3743,20 +3769,6 @@ type Settlement = JobInput | { "kind": "call"; "args": unknown[]; "resolve": (va
 
 /** Stepped async: what settled, in order, for which pending job; and who waits for the next. Shared by forks. */
 interface AsyncScheduler { "settled": { "id": number; "input": Settlement }[]; "ids": number; "wakers": (() => void)[]; "promises": OwnPromises }
-
-/** What a promise's own statics make (`Promise.resolve`, `Promise.all`, …) is the program's, not external. */
-const PROMISE_STATICS = ["resolve", "reject", "all", "allSettled", "race", "any", "withResolvers"];
-
-/** One of `Promise`'s statics, as they are now (a loop, not a closure: it's asked of every host call). */
-function isPromiseStatic(promise: PromiseConstructor, callee: unknown): boolean {
-	for (const name of PROMISE_STATICS) {
-		if ((promise as unknown as Record<string, unknown>)[name] === callee) {
-			return true;
-		}
-	}
-
-	return false;
-}
 
 /** ownPromiseCall: not a promise call this machine makes its own. */
 const NOT_OWN = Symbol("not own");

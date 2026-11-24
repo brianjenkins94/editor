@@ -191,7 +191,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
   cloning too. A tab that arrives after the load ends but before its files are written back to IndexedDB still finds
   no repository in its copy, and clones: if that's seen, the load wants a signal that its write-back is done.
 
-- **messages.spec's Output not shown** (2026-11-22: twice in full runs, and once in two alone): the Output panel's view
+- **messages.spec's Output not shown** (2026-11-22: twice in full runs, and once in two alone; 2026-11-23 once in a full
+  run, then alone it passed): the Output panel's view
   never had " → " for "the messages between the editor's contexts". Not the notes migration: every migrated file, printed
   without its comments, is the same code before and after (TypeScript's printer, 244 files). Not seen before today.
 
