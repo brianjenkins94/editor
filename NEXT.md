@@ -58,25 +58,25 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      owner's tests now, as do features-view.tsx, evidence.ts, pane-views.ts, terminal/index.ts and baseline.ts.
    - **No test had the debug worker's reach** (Playwright lists no worker a worker started, and it ended with its run):
      fixed 2026-11-24, the harness asks every realm on the coverage runtime's own channel and the debug worker publishes
-     its counts before it's ended. The record is from 45434021349 since, the first with it: 19 files.
-   - **Each owner's tests now run its file** (the user, 2026-11-24: completed), every one checked against what runs show:
-     editor-api's rules.ts, policy.ts and evidence.ts tested in node (policy's through a stand-in `vscode` module);
-     gated-eval.ts in the workbench (test/workbench/gated-eval.mjs); history/extension.ts by ledger-drift.spec;
-     node-modules-provider.ts by package-types.spec; tsval's languageFunctions in globals.test.ts; Playwright's value
-     matchers in expect.test.mjs. Three tests moved to the feature they test: a preview's evidence
-     (agent-tools/preview-evidence.mjs), a package a run imports (packages-in-run.mjs, worker/install.ts), a write the
-     policy asks about (real-effects.mjs, worker/gate.ts and bridge/runtime-fs.ts). coi-serviceworker.js shared with
-     Capability prompts for previews, whose spec runs it. Bugs they found, fixed: a fresh project's import of a
-     dependency never type-checked — the provider took a package's folder for its main file (folders now from the
+     its counts before it's ended.
+   - **Each owner's tests now run its file** (the user, 2026-11-24: completed), confirmed by the record: coverage run
+     45460146486 with the unit tests' reach (the new ones' from an editor cloned from main), 1,834 tests, 11 files run
+     mostly by other features' tests, from 39. Tested: editor-api's rules.ts, policy.ts and evidence.ts in node
+     (policy's through a stand-in `vscode` module), gated-eval.ts in the workbench (test/workbench/gated-eval.mjs),
+     history/extension.ts by ledger-drift.spec, node-modules-provider.ts by package-types.spec, tsval's languageFunctions
+     in globals.test.ts, Playwright's value matchers in expect.test.mjs. Moved to the feature they test: a preview's
+     evidence (agent-tools/preview-evidence.mjs), a package a run imports (packages-in-run.mjs), a write the policy asks
+     about (real-effects.mjs). Shared, each owner's tests running it: coi-serviceworker.js with Capability prompts for
+     previews, workbench/evidence.ts with Evidence from previews. Bugs the tests found, fixed: a fresh project's import of
+     a dependency never type-checked — the provider took a package's folder for its main file (folders now from the
      package's listing, its manifest and declarations with its root), and TypeScript kept a miss from before it could
-     answer (a "Cannot find module" for a package that's pinned reloads the projects, up to three times; found running
-     specs one after another, IN_EDITOR_ONLY taking a list); a place in a rule read
+     answer (a "Cannot find module" for a pinned package reloads its projects, up to three times); a place in a rule read
      `rates [country]`; `languageFunctions` missed Intl's prototypes; `toEqual` took two Maps, Sets, or dates a
-     millisecond apart for equal, and `toStrictEqual` was `toEqual`. Not tests but their measure: request.ts,
-     engine.test.mjs and request.test.mjs run Chromium, so stay outside the editor and outside the record.
-     worker/values.ts, session.ts, calls.ts, engine.ts, preview-windows.tsx and margin/values.ts have their owners'
-     tests running a good part of them (22 to 68 lines), the features built on them running more: bases, left so. **Next:** a coverage run and an editor run of the unit
-     tests, to see the record agree.
+     millisecond apart for equal, and `toStrictEqual` was `toEqual`. Of the 11 left: previews/page-evidence.ts goes into
+     a page as text, as the socket gate does, so its own test's run of it isn't counted; request.ts's tests drive
+     Chromium, outside the editor; history/extension.ts (it registers other features' commands too), worker/values.ts,
+     session.ts, vite-dev-server.ts, calls.ts, engine.ts, preview-windows.tsx and margin/values.ts have their owners'
+     tests running them, the features built on them running more: bases, left so.
    - **10 of 51 specs lost workbench reach** in 45111162082 (fixed 2026-11-24: frames get 30 s, and say when they
      don't answer; in 45418212617 every spec has 60–65 workbench files).
    - **preview-prompts failed under COVERAGE=1** (CI's `specs-2` in 45111162082 and 45418212617): fixed 2026-11-24.

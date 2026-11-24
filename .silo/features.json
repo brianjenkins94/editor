@@ -865,7 +865,8 @@
       "setting|silo.evidence.previews"
     ],
     "paths": [
-      "packages/editor/previews/"
+      "packages/editor/previews/",
+      "packages/editor/workbench/evidence.ts"
     ],
     "tests": [
       "packages/editor/test/agent-tools/preview-evidence.mjs"
