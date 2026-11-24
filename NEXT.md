@@ -46,8 +46,22 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    features' only when it shows each one's tests running it. The record is from a full coverage run since 2026-11-23:
    architecture run 45111162082's 86 and the unit tests' 1,723, run in an editor (143 files), 1,809 tests. The
    unit tests' reach came out of that editor by a download from the page: nothing in the editor writes the record yet.
-   **Done when** each file other features' tests run most of is split or shared on it: 57 files, statements run by
-   more than a tenth of the tests left out (2026-11-23, waiting on the user's decisions).
+   Read per file, with what more than a tenth of either kind of test runs left out, 39 files have most of their own
+   code run only by other features' tests; decided 2026-11-23 (the user: "as proposed"). Moved: the terminal's `git`,
+   `node` and `vite` commands' code (their `command.ts` stay the terminal's) to Git in the browser, Run from the shell
+   and the in-browser dev server; editor-api's recorded.ts to Breakpoints in a page's code; debug-mcp's tools/context.ts
+   to Connected tabs. Shared: cdp-memory.ts with debug-mcp server, preview-windows.tsx with the in-browser dev server,
+   playwright's engine.ts with Live runs. tsval's handlers stay the interpreter's, which now counts the conformance
+   suites among its tests. Left:
+   - **7 files reached through agent-tools.mjs and workbench.mjs** (ata.ts, code-refactor.ts, gated-eval.ts,
+     fs-trace.ts, script-run.ts, runtime-fs.ts, margin/values.ts): each suite is in about five features' `tests`, so
+     every test in it counts for all of them. They need attributing a test at a time before a split means anything.
+   - **Kept where they are, their owners' tests missing them** (a test to write each): features-view.tsx,
+     worker/gate.ts, worker/values.ts, worker/stops.ts, evidence.ts, node-modules-provider.ts, editor-api's policy.ts,
+     rules.ts and evidence.ts, history/extension.ts, coi-serviceworker.js, terminal/index.ts, capabilities/baseline.ts.
+   - **Three specs' reach has no workbench files** in 45111162082 (preview-session, pane-views, performance-monitor):
+     preview-session.ts and pane-views.ts only look unrun by their own tests for it, so they stay; why the workbench
+     realm's coverage went missing for them is to find.
 4. **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
    reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), agent-tools.mjs
    (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the
