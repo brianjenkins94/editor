@@ -219,8 +219,9 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **live-runs.spec misses in slow full runs** (here: "F5 just after a save" without its Debug Console output, 2026-11-19
   in 237 s against ~175, 2026-11-20 in 282 s, and 2026-11-22 twice, once in 239 s; "a rule gives it a value" without its value, 2026-11-23 three times, F5's with it once, 2026-11-20 in
   253 s).
-  Each passes alone (15 of 15 for the spec, 2026-11-20) and in the next full run. On CI twice: F5's without its Debug
-  Console output (6ceed7a3's `specs-2`, 2026-11-23, green on its rerun), and (0e885fc4's `specs-2`):
+  Each passes alone (15 of 15 for the spec, 2026-11-20) and in the next full run. On CI three times: F5's without its
+  Debug Console output (6ceed7a3's `specs-2`, 2026-11-23, green on its rerun), and (0e885fc4's `specs-2`, and
+  66b4a865's, 2026-11-24):
   "Pin…" (and locally 2026-11-23 in a full run, then alone), its F5 run given "seen" at its stop and the margin showing a live run's `skipped = exec ls` instead — a live
   run on its interval landing between. All four came after specs had editors of their own again (f8f3b8db), each
   editor still starting as its test runs.
