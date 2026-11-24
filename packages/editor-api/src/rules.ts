@@ -26,10 +26,16 @@ export function joinCommandLine(args: unknown[]): string {
 	return args.map((arg) => (typeof arg === "string" && arg !== "" && !/[\s"']/u.test(arg) ? arg : JSON.stringify(typeof arg === "string" ? arg : JSON.stringify(arg)))).join(" ");
 }
 
+/** A keyword a bracket after it keeps its space from: `if (`, `return [`. */
+const SPACED = /(?:^|[^\w$])(?:if|for|while|switch|catch|with|return|typeof|await|yield|of|in|case|throw|new|void|delete)$/u;
+
+/** Whether `atom` goes right after `text`, no space: a closing mark, after an opening one, or a call's or index's bracket. */
+const attaches = (text: string, atom: string): boolean => text === "" || /^[;,.)\]}]/u.test(atom) || /[([{.]$/u.test(text) || (/^[([]/u.test(atom) && /[\w$)\]]$/u.test(text) && !SPACED.test(text));
+
 /** A place in the code (a span reference: its file, and its tokens) as words: "tax.js: const rate = rates[country] ?? 0;". */
 export function sayPlace(value: unknown): string {
 	const { file, shape } = (value ?? {}) as { "file"?: string; "shape"?: { "atoms"?: string[] } };
-	const code = (shape?.atoms ?? []).reduce((text, atom) => (text === "" || /^[;,.)\]}]/u.test(atom) || /[([{.]$/u.test(text) ? text + atom : `${text} ${atom}`), "");
+	const code = (shape?.atoms ?? []).reduce((text, atom) => (attaches(text, atom) ? text + atom : `${text} ${atom}`), "");
 
 	return `${file ?? "?"}: ${code.length > 60 ? `${code.slice(0, 59)}…` : code}`;
 }

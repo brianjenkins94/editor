@@ -718,7 +718,9 @@
     ],
     "tests": [
       "packages/editor-api/test/effects.test.mjs",
-      "packages/editor-api/test/gate.test.mjs"
+      "packages/editor-api/test/gate.test.mjs",
+      "packages/editor-api/test/rules.test.mjs",
+      "packages/editor-api/test/policy.test.mjs"
     ]
   },
   "Editor API: run contract for debuggers": {
@@ -758,7 +760,8 @@
     ],
     "tests": [
       "packages/editor-api/test/cpuprofile.test.mjs",
-      "packages/editor-api/test/lifecycle.test.mjs"
+      "packages/editor-api/test/lifecycle.test.mjs",
+      "packages/editor-api/test/evidence.test.mjs"
     ]
   },
   "Editor instances": {
