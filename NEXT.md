@@ -54,8 +54,10 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    playwright's engine.ts with Live runs. tsval's handlers stay the interpreter's, which now counts the conformance
    suites among its tests. Left:
    - **7 files reached through agent-tools.mjs and workbench.mjs** (ata.ts, code-refactor.ts, gated-eval.ts,
-     fs-trace.ts, script-run.ts, runtime-fs.ts, margin/values.ts): each suite is in about five features' `tests`, so
-     every test in it counts for all of them. They need attributing a test at a time before a split means anything.
+     fs-trace.ts, script-run.ts, runtime-fs.ts, margin/values.ts): each suite was in about five features' `tests`, so
+     every test in it counted for all of them. Split 2026-11-24 (the user's choice over test-level ledger entries) into
+     a file per feature, each its own editor: test/agent-tools/ (15) and test/workbench/ (3). To read again from the
+     next coverage run.
    - **Kept where they are, their owners' tests missing them** (a test to write each): features-view.tsx,
      worker/gate.ts, worker/values.ts, worker/stops.ts, evidence.ts, node-modules-provider.ts, editor-api's policy.ts,
      rules.ts and evidence.ts, history/extension.ts, coi-serviceworker.js, terminal/index.ts, capabilities/baseline.ts.
@@ -68,8 +70,8 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    - **preview-prompts fails under COVERAGE=1** (CI's `specs-2` in 45111162082; here its renderer crashes, "Target
      crashed", or its WebSocket question never shows), with or without the fix above; it passes without coverage.
 4. **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
-   reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), agent-tools.mjs
-   (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the
+   reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), test/agent-tools/
+   (the agents' requests, no UI), test/workbench/ (the system's colour scheme, the architecture plane, sign-in with the
    API stood in for) and performance.mjs (budgets, from outside). The unit tests, counted again 2026-11-23 in an editor
    cloned from main (e283640d; every one in its debugger, `runs_tests`, a package at a time: packages/tsval/vendor
    aside, 176 files): 138 green, 1,707 tests passing and 20 failing in the files that load; 34 of the rest stay outside
@@ -96,6 +98,9 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
 
 How each architecture test has gone in CI lately, failing and flaky first: `node test/outcomes.mjs` in
 packages/editor (`--all`, `--runs N`, `--json`).
+
+- **evidence-kept's preview test missed its app's page once** (test/agent-tools/evidence-kept.mjs, "timed out waiting
+  for the app's page", 2026-11-24, the second of three full runs of the split suites here; alone, 3 of 3).
 
 - **A type error shown 4 minutes, once** (2026-10-31): features-map.ts's `wa-card` (ts 2345, L157) resolves, but one
   run showed it after 4 minutes: likely TypeScript checking before type acquisition wrote Web Awesome's types, and never

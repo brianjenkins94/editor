@@ -155,9 +155,9 @@
       "packages/editor/workbench/editor-state.ts"
     ],
     "tests": [
-      "packages/editor/test/agent-tools.mjs",
       "packages/editor/test/page-tools.test.mjs",
-      "packages/editor/test/in-editor/trace.spec.mjs"
+      "packages/editor/test/in-editor/trace.spec.mjs",
+      "packages/editor/test/agent-tools/editor-as-data.mjs"
     ]
   },
   "Agent workspace tools": {
@@ -206,9 +206,9 @@
       "packages/editor/workbench/workspace-tools.ts"
     ],
     "tests": [
-      "packages/editor/test/agent-tools.mjs",
       "packages/editor/test/page-tools.test.mjs",
-      "packages/editor/test/in-editor/blame.spec.mjs"
+      "packages/editor/test/in-editor/blame.spec.mjs",
+      "packages/editor/test/agent-tools/workspace-tools.mjs"
     ]
   },
   "Agents drive the debugger": {
@@ -243,7 +243,7 @@
       "packages/editor/extensions/bridge/debug-control.ts"
     ],
     "tests": [
-      "packages/editor/test/agent-tools.mjs"
+      "packages/editor/test/agent-tools/debugger-driven.mjs"
     ]
   },
   "Annotations that stay on their code": {
@@ -319,7 +319,8 @@
       "packages/editor/test/fs-boundaries.test.mjs",
       "packages/editor-api/test/documents.test.mjs",
       "packages/editor/test/performance.mjs",
-      "packages/editor/test/workbench.mjs"
+      "packages/editor/test/agent-tools/trace-file-calls.mjs",
+      "packages/editor/test/workbench/architecture-plane.mjs"
     ]
   },
   "Architecture suites and performance budgets": {
@@ -684,9 +685,9 @@
       "packages/editor/extensions/eslint/"
     ],
     "tests": [
-      "packages/editor/test/agent-tools.mjs",
       "packages/editor/test/in-editor/eslint.spec.mjs",
-      "packages/editor/test/performance.mjs"
+      "packages/editor/test/performance.mjs",
+      "packages/editor/test/agent-tools/eslint-problems.mjs"
     ]
   },
   "Editor API: annotations": {
@@ -881,7 +882,8 @@
       "packages/editor/workbench/checkpoints.ts"
     ],
     "tests": [
-      "packages/editor/test/in-editor/checkpoints.spec.mjs"
+      "packages/editor/test/in-editor/checkpoints.spec.mjs",
+      "packages/editor/test/agent-tools/checkpoints-undone.mjs"
     ]
   },
   "Explore event-loop schedules": {
@@ -1027,7 +1029,7 @@
       "components/monaco-vscode-api/workspace-search.ts"
     ],
     "tests": [
-      "packages/editor/test/agent-tools.mjs"
+      "packages/editor/test/agent-tools/search.mjs"
     ]
   },
   "Formatting-only changes marked": {
@@ -1445,7 +1447,8 @@
     ],
     "tests": [
       "packages/editor/test/in-editor/notes.spec.mjs",
-      "packages/editor/test/note-comments.test.mjs"
+      "packages/editor/test/note-comments.test.mjs",
+      "packages/editor/test/agent-tools/notes-read.mjs"
     ]
   },
   "Observe an app (opt-in debug link)": {
@@ -1941,7 +1944,8 @@
       "packages/editor/workbench/code-refactor.ts"
     ],
     "tests": [
-      "packages/editor/test/in-editor/file-moves.spec.mjs"
+      "packages/editor/test/in-editor/file-moves.spec.mjs",
+      "packages/editor/test/agent-tools/refactoring.mjs"
     ]
   },
   "Release pipeline": {
@@ -2208,7 +2212,8 @@
       "packages/editor/workbench/evidence.ts"
     ],
     "tests": [
-      "packages/editor/test/site-sums.test.mjs"
+      "packages/editor/test/site-sums.test.mjs",
+      "packages/editor/test/agent-tools/evidence-kept.mjs"
     ]
   },
   "Scripts over the workspace": {
@@ -2227,7 +2232,8 @@
       "packages/editor/workbench/script-run.ts"
     ],
     "tests": [
-      "packages/editor/test/script-run.test.mjs"
+      "packages/editor/test/script-run.test.mjs",
+      "packages/editor/test/agent-tools/workspace-scripts.mjs"
     ]
   },
   "Sign in by email code": {
@@ -2310,7 +2316,7 @@
       "packages/editor/shell/sign-in.tsx"
     ],
     "tests": [
-      "packages/editor/test/workbench.mjs"
+      "packages/editor/test/workbench/sign-in.mjs"
     ]
   },
   "Sites on unusuallygood.dev": {
@@ -2546,9 +2552,9 @@
       "packages/editor/workbench/test-runs.ts"
     ],
     "tests": [
-      "packages/editor/test/agent-tools.mjs",
       "packages/editor/test/test-notice.test.mjs",
-      "packages/editor/test/test-runs.test.mjs"
+      "packages/editor/test/test-runs.test.mjs",
+      "packages/editor/test/agent-tools/runs-tests.mjs"
     ]
   },
   "Tests run in the debugger": {
@@ -2609,7 +2615,7 @@
       "packages/editor/workbench/bridge-link.ts"
     ],
     "tests": [
-      "packages/editor/test/agent-tools.mjs"
+      "packages/editor/test/agent-tools/bridge-links.mjs"
     ]
   },
   "The editor's test harnesses": {
@@ -2621,9 +2627,7 @@
       "packages/editor/test/architecture-harness.mjs",
       "packages/editor/workbench/debug-bridge.ts"
     ],
-    "tests": [
-      "packages/editor/test/workbench.mjs"
-    ]
+    "tests": []
   },
   "The shell": {
     "status": "active",
@@ -2710,7 +2714,7 @@
     ],
     "tests": [
       "packages/editor/test/in-editor/workbench.spec.mjs",
-      "packages/editor/test/workbench.mjs"
+      "packages/editor/test/workbench/theme-follows.mjs"
     ]
   },
   "Traffic and cost guard": {
@@ -2790,8 +2794,8 @@
       "packages/editor/workers/bablr-worker.ts"
     ],
     "tests": [
-      "packages/editor/test/agent-tools.mjs",
-      "packages/editor/test/in-editor/bablr.spec.mjs"
+      "packages/editor/test/in-editor/bablr.spec.mjs",
+      "packages/editor/test/agent-tools/code-parses.mjs"
     ]
   },
   "Unusual sign-ins": {
@@ -2876,7 +2880,8 @@
       "packages/editor/workbench/code-reach.ts"
     ],
     "tests": [
-      "packages/editor/test/in-editor/way-in-reach.spec.mjs"
+      "packages/editor/test/in-editor/way-in-reach.spec.mjs",
+      "packages/editor/test/agent-tools/way-reach.mjs"
     ]
   },
   "What could go, in purple": {

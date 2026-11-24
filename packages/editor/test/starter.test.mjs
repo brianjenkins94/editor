@@ -2,7 +2,7 @@
  * The starter workspace (build/snapshot.ts): `demo/` baked into the build as `editor:workspace` — each text file under
  * /workspace, the root configs the editor manages read-only, nothing else (no node_modules) — and the editor's settings
  * defaults (settings-defaults.jsonc) as `editor:settings-defaults`, the lowest settings layer. What a fresh editor
- * opens on; workbench.mjs sees it opened.
+ * opens on; workbench/theme-follows.mjs sees it opened.
  *
  *   node --import tsx --test test/starter.test.mjs
  */

@@ -1,7 +1,7 @@
 /**
  * Which files BABLR parses (workbench/bablr.ts), as a person finds out: the command, what it says (of the files and their
  * lines), and the warning in Problems, gone once the file's fixed. What an agent asks of it, and its answers kept, have no
- * UI: test/agent-tools.mjs. Runs in the editor: test/in-editor.mjs.
+ * UI: test/agent-tools/code-parses.mjs. Runs in the editor: test/in-editor.mjs.
  */
 import { expect, test } from "@playwright/test";
 

@@ -2,7 +2,7 @@
  * What a static host serves beside the editor (build/static-host.ts `staticHostPlugin`): the editor's page again as
  * 404.html (Pages: a deep link opens the editor), `_headers` — cross-origin isolation from the first load, the frame
  * ancestors, no sniffing — `_redirects`, the editor's page at every env/<owner>/<repo>, `.assetsignore` and robots.txt.
- * workbench.mjs sees the service worker the site runs with.
+ * workbench/architecture-plane.mjs sees the service worker the site runs with.
  *
  *   node --import tsx --test test/static-host.test.mjs
  */

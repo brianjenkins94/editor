@@ -4,7 +4,7 @@
  * its defaults, an extension loaded by its address (`?extension=`, workbench/extensions.ts), and a package's file served
  * by the service worker from the CDN, same-origin and isolated (coi-serviceworker.js, as a client hears it). What has no
  * UI — the theme following the system's, every context's report, signing in with the API stood in for — is
- * test/workbench.mjs's. Runs in the editor: test/in-editor.mjs.
+ * test/workbench/'s. Runs in the editor: test/in-editor.mjs.
  */
 import { expect, test } from "@playwright/test";
 

@@ -81,9 +81,9 @@
   },
   # The editor's browser suites, in headless Chromium against its dev server (packages/editor/test/architecture-harness.mjs):
   # `realms` loads every module the editor starts in a realm of its own there (test/worker-realms.mjs; the debugger's runs
-  # are in-editor/debugger.spec.mjs and, as agents run them, test/agent-tools.mjs); `workbench` asks the workbench what an agent's tools ask it (test/agent-tools.mjs), and drives the
+  # are in-editor/debugger.spec.mjs and, as agents run them, test/agent-tools/); `workbench` asks the workbench what an agent's tools ask it (test/agent-tools/, a file per feature, each its own editor), and drives the
   # editor's own surfaces with no UI — the theme following the system's, the reports, signing in
-  # (test/workbench.mjs; the rest in-editor/workbench.spec.mjs), lints in the editor with ESLint (in-editor/eslint.spec.mjs; what an agent reads of it, test/agent-tools.mjs), says which files BABLR parses (in-editor/bablr.spec.mjs; what an agent asks of it, test/agent-tools.mjs), draws extensions' views beside the code (in-editor/pane-views.spec.mjs), serves a project from the in-browser dev server (in-editor/dev-server.spec.mjs), opens windows onto it (in-editor/preview-windows.spec.mjs), drives one from a Playwright test in the debugger (in-editor/playwright-in-editor.spec.mjs), keeps instances of the editor apart (in-editor/instances.spec.mjs), and runs the tests that run in the editor (test/in-editor.mjs: the review panel's and Source Control's commits among them); `performance`
+  # (test/workbench/; the rest in-editor/workbench.spec.mjs), lints in the editor with ESLint (in-editor/eslint.spec.mjs; what an agent reads of it, test/agent-tools/eslint-problems.mjs), says which files BABLR parses (in-editor/bablr.spec.mjs; what an agent asks of it, test/agent-tools/code-parses.mjs), draws extensions' views beside the code (in-editor/pane-views.spec.mjs), serves a project from the in-browser dev server (in-editor/dev-server.spec.mjs), opens windows onto it (in-editor/preview-windows.spec.mjs), drives one from a Playwright test in the debugger (in-editor/playwright-in-editor.spec.mjs), keeps instances of the editor apart (in-editor/instances.spec.mjs), and runs the tests that run in the editor (test/in-editor.mjs: the review panel's and Source Control's commits among them); `performance`
   # holds boot, a typed hover, a 1000-file load and memory by realm to performance-budgets.json, and warns on a rise
   # since the last green run here — whose `performance` artifact is its baseline. Each on a runner of its own, so
   # nothing shares the CPU while performance measures. They catch a wiring regression or an upstream monaco-vscode-api
@@ -106,7 +106,7 @@
         "matrix": {
           "include": [
             { "shard": "realms", "files": "test/worker-realms.mjs" },
-            { "shard": "workbench", "files": "test/agent-tools.mjs test/workbench.mjs" },
+            { "shard": "workbench", "files": "test/agent-tools/*.mjs test/workbench/*.mjs" },
             # (two halves, each on a runner of its own: one at a time, every spec took 32 min on 2026-11-19, past the limit)
             { "shard": "specs-1", "files": "test/in-editor.mjs", "part": "1/2" },
             { "shard": "specs-2", "files": "test/in-editor.mjs", "part": "2/2" },

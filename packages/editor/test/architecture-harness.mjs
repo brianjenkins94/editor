@@ -10,6 +10,7 @@
  */
 import { spawn } from "node:child_process";
 import * as path from "node:path";
+import { after, before } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import * as fs from "@brianjenkins94/util/fs";
 import { launchChromium } from "@brianjenkins94/util/playwright/chromium";
@@ -560,4 +561,48 @@ export async function startSession(options = {}) {
 			await shutdown();
 		}
 	};
+}
+
+/**
+ * The editor a suite file's tests share: started before them, closed after them, `name` its diagnostics' (`startSession`'s
+ * `options`). What's returned stands for the session as its tests use it — `session.request(…)`, `session.page` — once
+ * it's started, with `ask` (a request, 30 s) and `runTests` (test files run as runs_tests runs them) beside it.
+ */
+export function sharedSession(name, options) {
+	let session;
+
+	before(async () => {
+		session = await startSession(options);
+	});
+
+	after(async () => {
+		await session?.close(name);
+	});
+
+	const ask = async (subject, data) => session.request(subject, data, 30_000);
+
+	/** Test files run as runs_tests runs them, to their end (a call answers within a minute: then the run, asked again), or
+	 *  to what it asks; `approved`, what runs_tests was told it may. */
+	const runTests = async (files, approved) => {
+		let answer = await session.request("tests.run", { "files": files, ...approved === undefined ? {} : { "approved": approved } }, 120_000);
+
+		for (let asked = 1; answer.running !== undefined && answer.ask === undefined && asked < 10; asked++) {
+			answer = await session.request("tests.run", { "run": answer.run }, 120_000);
+		}
+
+		return answer;
+	};
+	const helpers = { "ask": ask, "runTests": runTests };
+
+	return new Proxy(helpers, {
+		get(target, key) {
+			if (Object.hasOwn(target, key)) {
+				return target[key];
+			}
+
+			const value = session[key];
+
+			return typeof value === "function" ? value.bind(session) : value;
+		}
+	});
 }

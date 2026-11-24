@@ -4,7 +4,7 @@
  * a package loaded; a program's capability calls stopped and answered in the margin — allowed, skipped, denied — as the
  * program and the disk then have them; a breakpoint, a step and a step back; and what's typed at a terminal's run reaching
  * the program. What only an agent has of it (runs_tests' approvals, a run at a commit by its path, a run's spans, the
- * bridge's links) is test/agent-tools.mjs's. Runs in the editor: test/in-editor.mjs.
+ * bridge's links) is test/agent-tools/debugger-driven.mjs' and bridge-links.mjs'. Runs in the editor: test/in-editor.mjs.
  */
 import { expect, test } from "@playwright/test";
 
