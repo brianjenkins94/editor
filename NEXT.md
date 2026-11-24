@@ -43,9 +43,11 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    packages/admin/src/views.tsx, split 2026-11-22. Decided: several owners if and only if real coverage shows it
    (*Decisions*, *Several owners*), built 2026-11-22: `silo observed <reach>` keeps what each test ran in
    `.silo/last-run/reach.json`, and the ownership check (`silo check`, the editor's Problems) lets a file be several
-   features' only when it shows each one's tests running it. **Done when** that record is from a full coverage run
-   (dispatched 2026-11-22, 45111162082), and each file `silo observed` shows other features' tests running most of is
-   split or shared on it.
+   features' only when it shows each one's tests running it. The record is from a full coverage run since 2026-11-23:
+   architecture run 45111162082's 86 and the unit tests' 1,723, run in an editor (143 files), 1,809 tests. The
+   unit tests' reach came out of that editor by a download from the page: nothing in the editor writes the record yet.
+   **Done when** each file other features' tests run most of is split or shared on it: 57 files, statements run by
+   more than a tenth of the tests left out (2026-11-23, waiting on the user's decisions).
 4. **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
    reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), agent-tools.mjs
    (the agents' requests, no UI), workbench.mjs (the system's colour scheme, the architecture plane, sign-in with the
@@ -189,7 +191,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **live-runs.spec misses in slow full runs** (here: "F5 just after a save" without its Debug Console output, 2026-11-19
   in 237 s against ~175, 2026-11-20 in 282 s, and 2026-11-22 twice, once in 239 s; "a rule gives it a value" without its value, 2026-11-23 three times, F5's with it once, 2026-11-20 in
   253 s).
-  Each passes alone (15 of 15 for the spec, 2026-11-20) and in the next full run. On CI once (0e885fc4's `specs-2`):
+  Each passes alone (15 of 15 for the spec, 2026-11-20) and in the next full run. On CI twice: F5's without its Debug
+  Console output (6ceed7a3's `specs-2`, 2026-11-23, green on its rerun), and (0e885fc4's `specs-2`):
   "Pin…" (and locally 2026-11-23 in a full run, then alone), its F5 run given "seen" at its stop and the margin showing a live run's `skipped = exec ls` instead — a live
   run on its interval landing between. All four came after specs had editors of their own again (f8f3b8db), each
   editor still starting as its test runs.

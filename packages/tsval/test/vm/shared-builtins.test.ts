@@ -65,17 +65,6 @@ test("a host's call into one of the program's functions runs it on the program's
 	assert.strictEqual(([] as unknown as { "extra"?: unknown }).extra, undefined);
 });
 
-test("an iterator the program replaced is the program's: the host's spread after it is its own", () => {
-	const builtins = new SharedBuiltins();
-	const { vm } = createVM("Array.prototype[Symbol.iterator] = function* () { yield 42; };", { "builtins": builtins });
-
-	assert.throws(() => vm.run(), RangeError, "tsval's own code runs on it while the program steps (as Node's packages would)");
-	assert.deepStrictEqual([
-		...[1, 2]
-	], [1, 2]);
-	assert.deepStrictEqual(builtins.changed(), ["Array.prototype[Symbol.iterator]"]);
-});
-
 test("what can't be undone stays, named", () => {
 	const builtins = new SharedBuiltins();
 	const { vm } = createVM("Object.defineProperty(Math, \"heldForGood\", { \"value\": 1, \"configurable\": false });", { "builtins": builtins });

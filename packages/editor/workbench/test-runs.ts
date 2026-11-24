@@ -612,7 +612,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitServ
 	const runBatch = async (batch: Batch): Promise<Record<string, unknown>> => {
 		const { files, "affected": onlyAffected, approved, imports } = batch.args as { "files"?: unknown; "affected"?: unknown; "approved"?: unknown; "imports"?: unknown };
 		const approvals = Array.isArray(approved) ? approved.filter((key): key is string => typeof key === "string") : [];
-		const preloads = Array.isArray(imports) ? imports.filter((each): each is string => typeof each === "string") : [];
+		const preloads = await Promise.all((Array.isArray(imports) ? imports.filter((each): each is string => typeof each === "string") : []).map(async (each) => (/^(?:\.{1,2}\/|\/|[a-z]+:)/u.test(each) || !await Promise.resolve(vscode.workspace.fs.stat(vscode.Uri.file(`${ROOT}/${each}`))).then(() => true, () => false) ? each : `./${each}`)));
 		const { signal } = batch.controller;
 
 		batch.now = { "doing": "waiting for the editor to be up (its workspace, its debugger and its packages' versions)", "since": performance.now() };
