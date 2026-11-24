@@ -45,6 +45,9 @@ if (process.env.COVERAGE === "1" && process.env.NODE_TEST_CONTEXT !== undefined)
 	const statementsOf = new Map();
 	const reach = {};
 	let before = new Map();
+	/** Each realm's counts as last read in this test: a window let go mid-test (shell/preview-windows.tsx) is read as it
+	 *  goes, so what its realms ran is kept once they're gone. */
+	let seen = new Map();
 
 	/** Every instrumented module's statement counts now, in every realm of every session. */
 	const countsNow = async () => {
@@ -86,13 +89,24 @@ if (process.env.COVERAGE === "1" && process.env.NODE_TEST_CONTEXT !== undefined)
 		return counts;
 	};
 
+	/** Every realm's counts now, kept in `seen`. */
+	const readNow = async () => {
+		for (const [key, value] of await countsNow()) {
+			seen.set(key, value);
+		}
+	};
+
+	globalThis.__coverageReadNow = readNow;
 	beforeEach(async () => {
 		before = await countsNow();
+		seen = new Map();
 	});
 	afterEach(async (test) => {
 		const ran = {};
 
-		for (const [key, { file, counts }] of await countsNow()) {
+		await readNow();
+
+		for (const [key, { file, counts }] of seen) {
 			const was = before.get(key)?.counts;
 			const statements = statementsOf.get(key) ?? [];
 
@@ -268,13 +282,13 @@ export async function startSession(options = {}) {
 		await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { "rate": Number(process.env.ARCH_CPU_THROTTLE) });
 	}
 
-	// COVERAGE=1: the session's realms, where each test's coverage is read (build/coverage.ts instruments them) — a test's
-	// preview windows kept open as it ends for theirs to be read (shell/preview-windows.tsx: the editor itself, counting,
-	// takes a window's reach as the test lets it go, and closes it).
+	// COVERAGE=1: the session's realms, where each test's coverage is read (build/coverage.ts instruments them) — and a
+	// window the editor lets go as a test ends (shell/preview-windows.tsx) read first, then closed, as without coverage:
+	// kept open, a spec's windows were each a whole editor, and preview-prompts' three crashed the renderer.
 	if (process.env.COVERAGE === "1") {
 		(globalThis.__coverageSessions ??= new Set()).add({ "page": page, "context": context });
-		await page.addInitScript(() => {
-			globalThis.__countedFromOutside = true;
+		await page.exposeBinding("__countedBeforeClosing", async () => {
+			await globalThis.__coverageReadNow?.();
 		});
 	}
 	// What went wrong in the page, kept to say why when the editor doesn't boot (and printed as it happens in CI).

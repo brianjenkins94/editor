@@ -67,8 +67,11 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      editor is a frame of the same page, busy as it ends; fixed 2026-11-24 (frames get 30 s, and say when they don't
      answer), locally the five preview specs all have theirs. preview-session.ts and pane-views.ts only looked unrun by
      their own tests for it, so they stay. **Next:** a dispatched coverage run, and the list read again from it.
-   - **preview-prompts fails under COVERAGE=1** (CI's `specs-2` in 45111162082; here its renderer crashes, "Target
-     crashed", or its WebSocket question never shows), with or without the fix above; it passes without coverage.
+   - **preview-prompts failed under COVERAGE=1** (CI's `specs-2` in 45111162082): fixed 2026-11-24. Two causes, each
+     needed: the socket gate goes into a preview's page as its source text, so instrumented it named the service
+     worker's counters and threw there (build/coverage.ts leaves it out); and a spec's windows were kept open for the
+     harness to read, each a whole editor, so three crashed the renderer (now read as the editor lets them go, then
+     closed).
 4. **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
    reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), test/agent-tools/
    (the agents' requests, no UI), test/workbench/ (the system's colour scheme, the architecture plane, sign-in with the

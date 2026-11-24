@@ -18,7 +18,7 @@ function ours(id: string): string | undefined {
 	const relative = file.slice(REPO.length + 1);
 	const linked = /^.*node_modules\/(?:@brianjenkins94\/)?((?:almostnode|account|bablr|bablr-language-ts|editor-api|hub|observability|theme|tsval)\/.*)$/u.exec(relative);
 
-	if ((relative.includes("node_modules/") && linked === null) || /\/(?:dist|test|fixtures)\//u.test(relative) || /\.test\.[mc]?[jt]sx?$/u.test(relative) || relative.endsWith("frameworks/instrument.ts")) {
+	if ((relative.includes("node_modules/") && linked === null) || /\/(?:dist|test|fixtures)\//u.test(relative) || /\.test\.[mc]?[jt]sx?$/u.test(relative) || relative.endsWith("frameworks/instrument.ts") || relative === "packages/editor/shared/socket-gate.ts") {
 		return undefined;
 	}
 
