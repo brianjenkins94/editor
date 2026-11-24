@@ -13,19 +13,6 @@ import { sharedSession } from "../architecture-harness.mjs";
 const session = sharedSession("runs-tests");
 const { ask, runTests } = session;
 
-test("a package the program imports loads in the run", async () => {
-	await session.request("files.write", { "path": "debugger-package.test.mjs", "content": `import assert from "node:assert/strict";
-import { test } from "node:test";
-import React from "react";
-
-test("react", () => { assert.equal(typeof React.createElement, "function"); });
-` }, 30_000);
-
-	const answer = await runTests(["debugger-package.test.mjs"]);
-
-	assert.deepEqual(answer.counts, { "files": 1, "pass": 1, "fail": 0, "skip": 0 }, JSON.stringify(answer).slice(0, 1500));
-});
-
 test("a test file at a commit opened beside the work runs from there: its own modules as that commit has them", async () => {
 	await session.request("files.write", { "path": "refs-run/value.mjs", "content": "export const value = \"as committed\";\n" }, 30_000);
 	await session.request("files.write", { "path": "refs-run/value.test.mjs", "content": `import assert from "node:assert/strict";
@@ -45,31 +32,6 @@ test("imports its neighbour", () => {
 	const answer = await runTests([`${path}/refs-run/value.test.mjs`]);
 
 	assert.deepEqual(answer.counts, { "files": 1, "pass": 1, "fail": 0, "skip": 0 }, JSON.stringify(answer).slice(0, 2000));
-});
-
-test("a write the policy doesn't decide stops the run and asks; approved, it's made, the run going on from there", async () => {
-	await session.request("files.write", { "path": "debugger-first.test.mjs", "content": "import { test } from \"node:test\";\n\ntest(\"first\", () => {});\n" }, 30_000);
-	await session.request("files.write", { "path": "debugger-writes.test.mjs", "content": `import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
-import { test } from "node:test";
-
-test("writes", () => {
-	writeFileSync("/workspace/debugger-wrote.txt", "written");
-	assert.equal(readFileSync("/workspace/debugger-wrote.txt", "utf8"), "written");
-});
-` }, 30_000);
-
-	const files = ["debugger-first.test.mjs", "debugger-writes.test.mjs"];
-	const asked = await runTests(files);
-
-	assert.match(asked.ask?.key ?? "", /^runs_tests:fs:write/u, JSON.stringify(asked).slice(0, 1500));
-
-	// (made again with the approval, as a tool's call is: the same run, on from the file that asked, the first kept)
-	const approved = await runTests(files, [asked.ask.key]);
-
-	assert.equal(approved.run, asked.run, JSON.stringify(approved).slice(0, 1500));
-	assert.deepEqual(approved.files.map((each) => each.file), files);
-	assert.deepEqual(approved.counts, { "files": 2, "pass": 2, "fail": 0, "skip": 0 }, JSON.stringify(approved).slice(0, 1500));
 });
 
 test("a run of test files stopped from outside (runs_stop) stops whole, as Ctrl+C stops node --test: the files after it not run", async () => {

@@ -56,15 +56,27 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    - **The record again from 45418212617** (2026-11-24: every spec's workbench reach, the agent suites a file per
      feature): 16 files, from 39. Settled by it: ata.ts, code-refactor.ts, fs-trace.ts and script-run.ts have one
      owner's tests now, as do features-view.tsx, evidence.ts, pane-views.ts, terminal/index.ts and baseline.ts.
-   - **No test had the debug worker's reach**: Playwright lists no worker a worker started, and the debug worker is the
-     extension host's; and it ended with its run, before the harness read. Fixed 2026-11-24: the harness asks every
-     realm on the coverage runtime's own channel (build/coverage.ts), and the debug worker publishes its counts there
-     before the adapter ends it, under coverage only. Here debugger-driven's test went from no worker files to 15 and
-     tsval's 26, live-values' spec from 271 files to 324, none lost. That is what left worker/gate.ts, values.ts,
-     stops.ts and tsval's globals.ts unrun by their owners' tests. **Next:** a coverage run with it, the list read
-     again, then a test for each file whose owner's tests still don't run it — of 45418212617's: worker/gate.ts,
-     values.ts, stops.ts, editor-api's policy.ts, rules.ts, gated-eval.ts and evidence.ts, tsval's globals.ts,
-     node-modules-provider.ts, bridge/runtime-fs.ts, history/extension.ts (the user, 2026-11-24: to be completed).
+   - **No test had the debug worker's reach** (Playwright lists no worker a worker started, and it ended with its run):
+     fixed 2026-11-24, the harness asks every realm on the coverage runtime's own channel and the debug worker publishes
+     its counts before it's ended. The record is from 45434021349 since, the first with it: 19 files.
+   - **Each owner's tests now run its file** (the user, 2026-11-24: completed), every one checked against what runs show:
+     editor-api's rules.ts, policy.ts and evidence.ts tested in node (policy's through a stand-in `vscode` module);
+     gated-eval.ts in the workbench (test/workbench/gated-eval.mjs); history/extension.ts by ledger-drift.spec;
+     node-modules-provider.ts by package-types.spec; tsval's languageFunctions in globals.test.ts; Playwright's value
+     matchers in expect.test.mjs. Three tests moved to the feature they test: a preview's evidence
+     (agent-tools/preview-evidence.mjs), a package a run imports (packages-in-run.mjs, worker/install.ts), a write the
+     policy asks about (real-effects.mjs, worker/gate.ts and bridge/runtime-fs.ts). coi-serviceworker.js shared with
+     Capability prompts for previews, whose spec runs it. Bugs they found, fixed: a fresh project's import of a
+     dependency never type-checked — the provider took a package's folder for its main file (folders now from the
+     package's listing, its manifest and declarations with its root), and TypeScript kept a miss from before it could
+     answer (a "Cannot find module" for a package that's pinned reloads the projects, up to three times; found running
+     specs one after another, IN_EDITOR_ONLY taking a list); a place in a rule read
+     `rates [country]`; `languageFunctions` missed Intl's prototypes; `toEqual` took two Maps, Sets, or dates a
+     millisecond apart for equal, and `toStrictEqual` was `toEqual`. Not tests but their measure: request.ts,
+     engine.test.mjs and request.test.mjs run Chromium, so stay outside the editor and outside the record.
+     worker/values.ts, session.ts, calls.ts, engine.ts, preview-windows.tsx and margin/values.ts have their owners'
+     tests running a good part of them (22 to 68 lines), the features built on them running more: bases, left so. **Next:** a coverage run and an editor run of the unit
+     tests, to see the record agree.
    - **10 of 51 specs lost workbench reach** in 45111162082 (fixed 2026-11-24: frames get 30 s, and say when they
      don't answer; in 45418212617 every spec has 60–65 workbench files).
    - **preview-prompts failed under COVERAGE=1** (CI's `specs-2` in 45111162082 and 45418212617): fixed 2026-11-24.
@@ -102,6 +114,8 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
 How each architecture test has gone in CI lately, failing and flaky first: `node test/outcomes.mjs` in
 packages/editor (`--all`, `--runs N`, `--json`).
 
+- **vouches.spec's commit found a run's evidence files after it** ("nothing to commit" expected, `.silo/evidence/…` and
+  `.silo/runs/…` untracked: 2026-11-24, one of three full runs here; alone, 2 of 2).
 - **evidence-kept's preview test missed its app's page once** (test/agent-tools/evidence-kept.mjs, "timed out waiting
   for the app's page", 2026-11-24, the second of three full runs of the split suites here; alone, 3 of 3).
 
