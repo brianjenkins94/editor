@@ -107,16 +107,17 @@ export function longFrameGauge(win: { "PerformanceObserver"?: typeof Performance
 	};
 }
 
-interface MemoryMeasurement { "bytes": number; "breakdown": { "bytes": number; "attribution": { "url"?: string; "scope"?: string }[] }[] }
+/** What `performance.measureUserAgentSpecificMemory` resolves with: the agent's bytes, and each realm's share. */
+export interface MemoryMeasurement { "bytes": number; "breakdown": { "bytes": number; "attribution": { "url"?: string; "scope"?: string }[] }[] }
 
 /**
  * Memory (MB) for this page's whole agent — every frame and worker it runs — as `total` plus one entry per realm, named by
  * `name(url, scope)` (realms that share a name add up). It's `performance.measureUserAgentSpecificMemory`, which needs
  * cross-origin isolation and resolves only at the next garbage collection — up to ~20 s — so it's refreshed in the
  * background, `everyMs` after each measurement lands, and each read reports the latest. Undefined until the first
- * measurement, or where it isn't supported.
+ * measurement, or where it isn't supported. `measured`: each measurement as it lands, whole (each realm's URL and scope).
  */
-export function memoryGauge({ everyMs = 20000, name = (url: string) => url }: { "everyMs"?: number; "name"?: (url: string, scope: string) => string } = {}): Gauge {
+export function memoryGauge({ everyMs = 20000, name = (url: string) => url, measured }: { "everyMs"?: number; "name"?: (url: string, scope: string) => string; "measured"?: (measurement: MemoryMeasurement) => void } = {}): Gauge {
 	const measure = (performance as Performance & { "measureUserAgentSpecificMemory"?: () => Promise<MemoryMeasurement> }).measureUserAgentSpecificMemory?.bind(performance);
 	let latest: Record<string, number> | undefined;
 
@@ -126,6 +127,8 @@ export function memoryGauge({ everyMs = 20000, name = (url: string) => url }: { 
 
 	const refresh = (): void => {
 		measure().then((result) => {
+			measured?.(result);
+
 			const byName: Record<string, number> = { "total": result.bytes / 1048576 };
 
 			for (const entry of result.breakdown) {

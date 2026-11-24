@@ -391,7 +391,7 @@ function gated(standins: ReturnType<typeof capabilityStandins>, real?: Runtime, 
 
 			made = key === "fetch"
 				? function(this: unknown, ...args: unknown[]): unknown {
-					const local = state.local === undefined ? undefined : answerLocally(args[0], args[1] as RequestInit | undefined, state.local);
+					const local = state.local === undefined || state.probing !== undefined ? undefined : answerLocally(args[0], args[1] as RequestInit | undefined, state.local);
 
 					return local ?? gatedCall.apply(this, args);
 				}

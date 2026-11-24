@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-const { answerLocally } = await import("../extensions/tsval/worker/loopback.ts");
+const { answeredHere, answerLocally } = await import("../extensions/tsval/worker/loopback.ts");
 
 /** A server on `port` that answers with what it was asked. */
 function serverOn(port) {
@@ -52,4 +52,15 @@ test("an answer with no body (204) is one", async () => {
 
 	assert.equal(response.status, 204);
 	assert.equal(await response.text(), "");
+});
+
+test("a request the run answers itself isn't the network's: a capability stop doesn't ask about it (answeredHere)", () => {
+	const local = serverOn(9222);
+
+	assert.equal(answeredHere("http://127.0.0.1:9222/json/version", local), true);
+	assert.equal(answeredHere("ws://localhost:9222/devtools/browser/editor", local), true, "a socket too");
+	assert.equal(answeredHere("http://127.0.0.1:9223/", local), false, "nothing here on that port");
+	assert.equal(answeredHere("https://example.com:9222/", local), false, "not loopback");
+	assert.equal(answeredHere("not a url", local), false);
+	assert.equal(answeredHere("http://127.0.0.1:9222/", undefined), false, "no run");
 });

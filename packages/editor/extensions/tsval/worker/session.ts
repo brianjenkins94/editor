@@ -953,10 +953,6 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 
 	packageProcess.argv = ["node", message.fileName, ...message.args ?? []];
 
-	if (where.env !== undefined) {
-		packageProcess.env = { ...where.env };
-	}
-
 	if (where.cwd !== undefined && packageProcess.cwd() !== where.cwd) {
 		packageProcess.chdir(where.cwd);
 	}
@@ -970,7 +966,13 @@ async function launchProgram(message: Extract<Control, { "type": "launch" }>, tr
 	const surface = capabilitySurface(message.fileName, message.args ?? [], message.eventLoop?.schedule === undefined
 		? loadedRuntime
 		: undefined, where);
-	const runProcess = surface.globals["process"] as { "stdout": { "write": unknown }; "stderr": { "write": unknown }; "exit": (code?: number) => never; "exitCode": number | undefined };
+	const runProcess = surface.globals["process"] as { "stdout": { "write": unknown }; "stderr": { "write": unknown }; "exit": (code?: number) => never; "exitCode": number | undefined; "env": Record<string, string> };
+
+	if (where.env === undefined) {
+		Object.assign(runProcess.env, packageProcess.env);
+	}
+
+	packageProcess.env = runProcess.env;
 
 	Object.assign(packageProcess.stdout, { "write": runProcess.stdout.write });
 	Object.assign(packageProcess.stderr, { "write": runProcess.stderr.write });

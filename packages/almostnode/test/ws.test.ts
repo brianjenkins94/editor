@@ -22,21 +22,23 @@ async function until(ready: () => boolean, what: string): Promise<void> {
 /** A few turns of the event loop, for what should NOT happen. */
 const turns = async (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 50); });
 
-test("a client connects to the server on its path, and each side's send reaches the other", async () => {
+test("a client connects to the server on its path, and each side's send reaches the other — `on` told as `ws` tells it: the data (text a Buffer) and whether it's binary", async () => {
 	const server = new WebSocketServer({ "path": "/socket" });
 	const heardByServer: unknown[] = [];
 	const heardByClient: unknown[] = [];
+	const binary: boolean[] = [];
 
 	server.on("connection", (socket: Socket) => {
-		socket.on("message", (event: MessageEvent) => {
-			heardByServer.push(event.data);
-			socket.send("pong " + String(event.data));
+		socket.on("message", (data: Uint8Array, isBinary: boolean) => {
+			heardByServer.push(String(data));
+			binary.push(isBinary, Buffer.isBuffer(data));
+			socket.send("pong " + String(data));
 		});
 	});
 
 	const client = new WebSocket("http://localhost:8080/socket");
 
-	client.on("message", (event: MessageEvent) => { heardByClient.push(event.data); });
+	client.on("message", (data: Uint8Array) => { heardByClient.push(String(data)); });
 	await until(() => client.readyState === WebSocket.OPEN, "the client to open");
 	assert.equal(server.clients.size, 1);
 
@@ -45,6 +47,7 @@ test("a client connects to the server on its path, and each side's send reaches 
 
 	assert.deepEqual(heardByServer, ["ping"]);
 	assert.deepEqual(heardByClient, ["pong ping"]);
+	assert.deepEqual(binary, [false, true], "text, as a Buffer");
 	server.close();
 });
 

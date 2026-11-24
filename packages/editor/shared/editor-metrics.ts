@@ -1,5 +1,6 @@
 import type { Hub } from "@brianjenkins94/hub";
-import type { ArchitectureStore, Gauge } from "@brianjenkins94/observability";
+import type { ArchitectureStore, Gauge, MemoryMeasurement } from "@brianjenkins94/observability";
+import { serve } from "@brianjenkins94/hub";
 import { longFrameGauge, memoryGauge, reportMetrics, spanMetrics } from "@brianjenkins94/observability";
 import { fsGauge } from "./fs-boundaries";
 
@@ -121,7 +122,12 @@ export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuf
 		}
 	});
 
-	metrics.gauge("memory", memoryGauge({ "everyMs": 10000, "name": (url, scope) => realmName(url, scope, store === undefined ? undefined : workerNames(store)) }));
+	let realms: { "at": number; "realms": RealmMemory[] } | undefined;
+
+	metrics.gauge("memory", memoryGauge({ "everyMs": 10000, "name": (url, scope) => realmName(url, scope, store === undefined ? undefined : workerNames(store)), "measured": (measurement) => { realms = { "at": Date.now(), "realms": realmsOf(measurement) }; } }));
+
+	const unserve = serve(hub, "devtools.realms", () => realms ?? thisWindow() ?? null);
+
 	metrics.gauge("longFrames", longFrameGauge(window));
 	metrics.gauge("hub", () => {
 		const now = performance.now();
@@ -145,8 +151,37 @@ export function reportWorkbenchMetrics(hub: Hub, workspaceBuffer: SharedArrayBuf
 
 	return () => {
 		untap();
+		unserve();
 		metrics.dispose();
 	};
+}
+
+export interface RealmMemory { "url": string; "scope": string; "bytes": number }
+
+export function thisWindow(): { "at": number; "realms": RealmMemory[] } | undefined {
+	const memory = (performance as Performance & { "memory"?: { "usedJSHeapSize": number } }).memory;
+
+	return memory === undefined ? undefined : { "at": Date.now(), "realms": [{ "url": location.href, "scope": "Window", "bytes": memory.usedJSHeapSize }] };
+}
+
+export function realmsOf(measurement: MemoryMeasurement): RealmMemory[] {
+	const byRealm = new Map<string, RealmMemory>();
+
+	for (const { bytes, attribution } of measurement.breakdown) {
+		const [only] = attribution;
+
+		if (attribution.length !== 1 || only?.url === undefined || only.scope === undefined) {
+			continue;
+		}
+
+		const key = only.scope + " " + only.url;
+		const known = byRealm.get(key) ?? { "url": only.url, "scope": only.scope, "bytes": 0 };
+
+		known.bytes += bytes;
+		byRealm.set(key, known);
+	}
+
+	return [...byRealm.values()];
 }
 
 export function reportSpanMetrics(hub: Hub): { "record": (record: unknown) => void; "dispose": () => void } {

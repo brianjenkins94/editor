@@ -7,6 +7,7 @@ import { expect as playwrightExpect, Page } from "@brianjenkins94/playwright";
 import { packageDisposition } from "@brianjenkins94/util/silo/policy";
 import nodeTestSource from "../node-test.js?raw";
 import playwrightTestSource from "../playwright-test.js?raw";
+import { DEVTOOLS_PORT, devtoolsJson, devtoolsSession } from "./devtools";
 import { tally } from "./gate";
 import { installPackage } from "./install";
 import { packageBuiltin, packageFetch, packageOf, packagesRan } from "./package-calls";
@@ -99,7 +100,7 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 		}
 	});
 	getServerBridge({ "onServerReady": (port: number) => {
-		if (listening.has(port) || state.live) {
+		if (listening.has(port) || state.live || port === DEVTOOLS_PORT) {
 			return;
 		}
 
@@ -121,8 +122,34 @@ async function loadRuntime(workspace: SharedArrayBuffer | undefined): Promise<Ru
 		"answer": async (request) => answerServer(serverOn(request.port)!, request)
 	};
 	state.nodeGlobals = programGlobals(state.runtime);
+	serveDevtools(state.runtime);
 
 	return state.runtime;
+}
+
+interface DevtoolsSocket { "send": (data: string) => void; "on": (event: "message", listener: (data: unknown) => void) => void }
+
+function serveDevtools(runtime: Runtime): void {
+	const http = runtime.require("http", "/", "package") as typeof import("node:http");
+	const { WebSocketServer } = runtime.require("ws", "/", "package") as { "WebSocketServer": new (options: { "server": unknown }) => { "on": (event: "connection", listener: (socket: DevtoolsSocket) => void) => void } };
+	const realms = async (): Promise<Awaited<ReturnType<NonNullable<typeof state.editorLink>["realms"]>>> => state.editorLink?.realms();
+	const server = http.createServer((request, response) => {
+		void realms().then((reading) => {
+			const json = devtoolsJson((request.url ?? "/").split("?")[0] ?? "/", reading, navigator.userAgent);
+
+			response.writeHead(json === undefined ? 404 : 200, { "content-type": "application/json" });
+			response.end(json === undefined ? "" : JSON.stringify(json));
+		});
+	});
+	const sockets = new WebSocketServer({ "server": server });
+
+	sockets.on("connection", (socket) => {
+		const handle = devtoolsSession(realms, (message) => { socket.send(JSON.stringify(message)); });
+
+		socket.on("message", (data) => { void handle(String(data)); });
+	});
+	server.listen(DEVTOOLS_PORT, "127.0.0.1");
+	server.unref();
 }
 
 const NODE_TEST = "/__editor__/node-test.js";

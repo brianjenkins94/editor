@@ -47,7 +47,14 @@ run's, and `this` and `globalThis` the program's. tsval leaves `eval` to its hos
 own scope can't be modeled by an interpreter that isn't the host's — so either kind is global code here, not the
 caller's scope. And outside the workspace, a program's `fs` is the run's memory, where its packages are unpacked
 (`/node_modules`): a package's file reads at the path `require.resolve` gives, and what a package writes there the
-program sees, as one disk is a process's. And a run takes node's `--import` (the terminal's `node`, so a package's `npm test` as written; a
+program sees, as one disk is a process's. And a run has a browser's DevTools endpoint at 127.0.0.1:9222 (worker/devtools.ts), the editor
+itself, answered in the run as loopback is: its realms are the targets — each window a page, each worker a worker —
+with their memory as the editor last measured it (`measureUserAgentSpecificMemory`, about every 10 s), so a program
+that reads a browser's memory (debug-mcp's memory by realm) reads the editor's; the port is taken, as beside a Chrome
+started with `--remote-debugging-port`. A request a run answers itself isn't asked about at a capability stop: it
+doesn't leave the page. Where the browser can't measure memory by realm (Claude's in-app browser), the editor's window
+is the one target, with its own heap (`performance.memory`). And the program and its packages share one `process.env`,
+as a process does: what the program sets there, a package reads. And a run takes node's `--import` (the terminal's `node`, so a package's `npm test` as written; a
 launch configuration's `runtimeArgs`; `runs_tests`' `imports`): the module loads before the program, and what it
 registers with `module.registerHooks` — Node's in-thread resolve and load hooks — every require and import after it
 goes through, the program's and its packages'. `module.register`'s hooks, off-thread, aren't (tsx's).
@@ -242,7 +249,8 @@ honest, and it would hide each gap instead of making it a bug to fix.
 
 1. **A browser page's own code**: observed, its breakpoints recorded stops (*Apps: recorded stops, not live ones*).
 2. **Too slow to interpret**: a program whose own code computes heavily, a simulation or a game's update loop (*What it
-   costs*). The answer is making tsval faster, not keeping a second world.
+   costs*). The answer is making tsval faster, not keeping a second world. None of the repository's tests is, as of
+   2026-11-23: the slowest, hub/model's 1,000 seeds of routing, passes here in 196 s.
 3. **Packages** are native already (packages/tsval/README.md, *Modules*), inside the run, not a separate mode. Their own
    async work is on the host's loop, outside the deterministic one.
 4. **What tsval doesn't support yet**, a syntax or a builtin: each a bug to fix, not a mode.

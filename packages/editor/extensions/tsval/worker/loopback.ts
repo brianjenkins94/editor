@@ -6,17 +6,34 @@ const NO_BODY = new Set([101, 204, 205, 304]);
 
 export interface Local { "listening": (port: number) => boolean; "answer": (request: RuntimeRequest) => Promise<RuntimeResponse> }
 
-export function answerLocally(input: unknown, init: RequestInit | undefined, local: Local): Promise<Response> | undefined {
-	const given = input instanceof Request ? input : undefined;
-	const url = new URL(given?.url ?? String(input instanceof URL ? input.href : input));
-
-	if ((url.protocol !== "http:" && url.protocol !== "https:") || !LOOPBACK.has(url.hostname)) {
+function loopbackPort(url: URL): number | undefined {
+	if (!LOOPBACK.has(url.hostname) || !["http:", "https:", "ws:", "wss:"].includes(url.protocol)) {
 		return undefined;
 	}
 
-	const port = Number(url.port === "" ? (url.protocol === "https:" ? 443 : 80) : url.port);
+	return Number(url.port === "" ? (url.protocol === "https:" || url.protocol === "wss:" ? 443 : 80) : url.port);
+}
 
-	if (!local.listening(port)) {
+export function answeredHere(resource: string, local: Local | undefined): boolean {
+	let url: URL;
+
+	try {
+		url = new URL(resource);
+	} catch {
+		return false;
+	}
+
+	const port = loopbackPort(url);
+
+	return local !== undefined && port !== undefined && local.listening(port);
+}
+
+export function answerLocally(input: unknown, init: RequestInit | undefined, local: Local): Promise<Response> | undefined {
+	const given = input instanceof Request ? input : undefined;
+	const url = new URL(given?.url ?? String(input instanceof URL ? input.href : input));
+	const port = url.protocol === "http:" || url.protocol === "https:" ? loopbackPort(url) : undefined;
+
+	if (port === undefined || !local.listening(port)) {
 		return undefined;
 	}
 

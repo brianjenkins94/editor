@@ -58,7 +58,8 @@ export function runtimeSession(id: string): string | undefined {
  *  the worker's debugger is in. The editor names the worker `<name>#<instance>` (its own, so an answer goes to it alone;
  *  the architecture view counts each as an instance of `name`), bound to `session` (runtimeSession), and the link carries
  *  only the runtime: the worker's log, architecture and metrics, its mailbox handed over, its servers' requests and
- *  their answers — no other service of the editor's. */
+ *  their answers, and the editor's realms (`devtools.realms`, for a run's DevTools endpoint) — no other service of the
+ *  editor's. */
 export function linkRuntime(hub: Hub, port: MessagePort, name: string, session?: string): () => void {
 	const id = `${name}#${crypto.randomUUID().slice(0, 8)}`;
 
@@ -66,7 +67,7 @@ export function linkRuntime(hub: Hub, port: MessagePort, name: string, session?:
 
 	const unlink = hub.link(portTransport(port), { "peer": id,
 "permissions": {
-		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "bridge.ready", rpcCallSubject("runtime.fs.attach"), rpcCallSubject("playwright.run"), rpcReplySubject("node")],
+		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "bridge.ready", rpcCallSubject("runtime.fs.attach"), rpcCallSubject("playwright.run"), rpcCallSubject("devtools.realms"), rpcReplySubject("node")],
 		"subscribe": ["$sys.arch.sync", rpcCallSubject("virtual.debug.*"), rpcReplySubject(id)]
 	} });
 
@@ -609,7 +610,14 @@ export interface RuntimeConnection {
 	"socket": (port: number | undefined, path: string) => RuntimeSocket;
 	/** The worker's logger: its records and spans are the editor's, as this worker's. */
 	"log": Observed["log"];
+	/** The editor's realms and their memory, as its last measurement had them (each window and worker of the page's
+	 *  agent: `measureUserAgentSpecificMemory`, about every 10 s) — undefined before one, or where there's none. */
+	"realms": () => Promise<RealmsReading | undefined>;
 }
+
+/** A memory measurement of the editor's realms: when, and each realm's URL, scope (`Window`, `DedicatedWorkerGlobalScope`,
+ *  …) and bytes. */
+export interface RealmsReading { "at": number; "realms": { "url": string; "scope": string; "bytes": number }[] }
 
 /** A WebSocket inside the worker, as `socket` sees it: each frame as it's sent (`fromClient`: by the program's client),
  *  and its close. */
@@ -677,6 +685,11 @@ export function connectRuntime(port: MessagePort, { name, network = NETWORK_PROB
 		"decide": (decision) => call({ "op": "decide", "call": decision }).meta as RuntimeVerdict,
 		"tarball": (name, version) => call({ "op": "tarball", "name": name, "version": version }).payload,
 		"log": log,
+		"realms": async () => {
+			const reading = await rpc.request("devtools.realms", {}, { "timeoutMs": 5000, "waitForResponderMs": 2000 }).catch(() => undefined) as RealmsReading | null | undefined;
+
+			return reading ?? undefined;
+		},
 		"playwright": async (playwright) => {
 			await ready;
 

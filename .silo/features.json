@@ -42,6 +42,22 @@
       "packages/editor/test/in-editor/commit-beside.spec.mjs"
     ]
   },
+  "A run's DevTools endpoint": {
+    "status": "active",
+    "why": "the user, 2026-11-23: \"we are going to want to be able to build mcp servers and test them inside the editor\" — a program that reads a browser through its DevTools endpoint finds one in a run, the editor itself",
+    "since": "2026-11-23",
+    "what": "A run has a browser's DevTools endpoint at 127.0.0.1:9222, answered in the run: the editor's realms its targets (each window a page, each worker a worker), their memory as the editor last measured it, for what a program asks of a browser's memory (debug-mcp's memory by realm reads it as it reads Chrome's).",
+    "docs": "packages/editor/RUNNING.md, *Deterministic*",
+    "ways": [
+      "hub request|devtools.realms"
+    ],
+    "paths": [
+      "packages/editor/extensions/tsval/worker/devtools.ts"
+    ],
+    "tests": [
+      "packages/editor/test/devtools-endpoint.test.mjs"
+    ]
+  },
   "Admin: architecture": {
     "status": "active",
     "why": "moved from the manifest (decision 21), area Admin app: outside the editor's reduction, kept as it was",

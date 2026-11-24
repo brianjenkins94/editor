@@ -11,6 +11,7 @@
  */
 
 import EventEmitter from "events/events.js";
+import { Buffer } from "../utils/buffer";
 
 // Polyfill for CloseEvent (not available in Node.js)
 const CloseEventPolyfill = typeof CloseEvent !== "undefined" ? CloseEvent : class CloseEvent extends Event {
@@ -138,7 +139,7 @@ export class WebSocket extends EventEmitter {
     // For internal WebSocket connections (from server to client), connect immediately
 		if (this.url.startsWith("internal://")) {
 			this.readyState = WebSocket.OPEN;
-			this.emit("open");
+			this._fire("open", new Event("open"));
 			if (this.onopen) { this.onopen(new Event("open")); }
 
 			return;
@@ -173,7 +174,7 @@ export class WebSocket extends EventEmitter {
 		server?._accept(this);
 		setTimeout(() => {
 			this.readyState = WebSocket.OPEN;
-			this.emit("open", new Event("open"));
+			this._fire("open", new Event("open"));
 			if (this.onopen) { this.onopen(new Event("open")); }
 		}, 0);
 	}
@@ -197,15 +198,30 @@ export class WebSocket extends EventEmitter {
 
 		ofType.set(listener, handler);
 		this._listeners.set(type, ofType);
-		this.on(type, handler);
 	}
 
 	removeEventListener(type: string, listener: (event: Event) => void): void {
-		const handler = this._listeners.get(type)?.get(listener);
+		this._listeners.get(type)?.delete(listener);
+	}
 
-		if (handler !== undefined) {
-			this._listeners.get(type)?.delete(listener);
-			this.off(type, handler);
+	/** An event, told both ways: to `on`'s listeners as `ws`'s sockets tell them — `message` its data (a Buffer for
+	 *  text) and whether it's binary, `close` its code and reason — and to `addEventListener`'s as a browser's
+	 *  WebSocket does, the event itself. */
+	_fire(type: string, event: Event): void {
+		if (type === "message") {
+			const { data } = event as MessageEvent;
+
+			this.emit(type, typeof data === "string" || data instanceof ArrayBuffer || ArrayBuffer.isView(data) ? Buffer.from(data as string) : data, typeof data !== "string");
+		} else if (type === "close") {
+			this.emit(type, (event as CloseEvent).code, Buffer.from((event as CloseEvent).reason));
+		} else if (type === "error") {
+			this.emit(type, event);
+		} else {
+			this.emit(type);
+		}
+
+		for (const handler of [...this._listeners.get(type)?.values() ?? []]) {
+			handler(event);
 		}
 	}
 
@@ -222,7 +238,7 @@ export class WebSocket extends EventEmitter {
       // No native WebSocket (test env, Node.js, etc.) — act as if connected
 			setTimeout(() => {
 				this.readyState = WebSocket.OPEN;
-				this.emit("open");
+				this._fire("open", new Event("open"));
 				if (this.onopen) { this.onopen(new Event("open")); }
 			}, 0);
 
@@ -236,7 +252,7 @@ export class WebSocket extends EventEmitter {
 			this.readyState = WebSocket.CLOSED;
 			const errorEvent = new Event("error");
 
-			this.emit("error", errorEvent);
+			this._fire("error", errorEvent);
 			if (this.onerror) { this.onerror(errorEvent); }
 
 			return;
@@ -244,14 +260,14 @@ export class WebSocket extends EventEmitter {
 
 		this._nativeWs.onopen = () => {
 			this.readyState = WebSocket.OPEN;
-			this.emit("open");
+			this._fire("open", new Event("open"));
 			if (this.onopen) { this.onopen(new Event("open")); }
 		};
 
 		this._nativeWs.onmessage = (event: globalThis.MessageEvent) => {
 			const msgEvent = new MessageEventPolyfill("message", { "data": event.data });
 
-			this.emit("message", msgEvent);
+			this._fire("message", msgEvent);
 			if (this.onmessage) { this.onmessage(msgEvent as unknown as MessageEvent); }
 		};
 
@@ -264,14 +280,14 @@ export class WebSocket extends EventEmitter {
 				"wasClean": event.wasClean
 			});
 
-			this.emit("close", closeEvent);
+			this._fire("close", closeEvent);
 			if (this.onclose) { this.onclose(closeEvent); }
 		};
 
 		this._nativeWs.onerror = () => {
 			const errorEvent = new Event("error");
 
-			this.emit("error", errorEvent);
+			this._fire("error", errorEvent);
 			if (this.onerror) { this.onerror(errorEvent); }
 		};
 	}
@@ -336,7 +352,7 @@ export class WebSocket extends EventEmitter {
 				"wasClean": true
 			});
 
-			this.emit("close", closeEvent);
+			this._fire("close", closeEvent);
 			if (this.onclose) { this.onclose(closeEvent); }
 		}, 0);
 	}
@@ -372,7 +388,7 @@ export class WebSocket extends EventEmitter {
 			"wasClean": false
 		});
 
-		this.emit("close", closeEvent);
+		this._fire("close", closeEvent);
 		if (this.onclose) { this.onclose(closeEvent); }
 	}
 
@@ -410,14 +426,14 @@ export class WebSocket extends EventEmitter {
 		this._server?.clients.delete(this);
 		const closeEvent = new CloseEventPolyfill("close", { "code": code || 1000, "reason": reason || "", "wasClean": true });
 
-		this.emit("close", closeEvent);
+		this._fire("close", closeEvent);
 		if (this.onclose) { this.onclose(closeEvent); }
 	}
 
 	_receiveMessage(data: unknown): void {
 		const msgEvent = new MessageEventPolyfill("message", { "data": data });
 
-		this.emit("message", msgEvent);
+		this._fire("message", msgEvent);
 		if (this.onmessage) { this.onmessage(msgEvent as unknown as MessageEvent); }
 	}
 }
@@ -525,7 +541,7 @@ export class WebSocketServer extends EventEmitter {
     // Broadcast to server-side handlers
 		const msgEvent = new MessageEventPolyfill("message", { "data": data });
 
-		client.emit("message", msgEvent);
+		client._fire("message", msgEvent);
 	}
 
 	handleUpgrade(

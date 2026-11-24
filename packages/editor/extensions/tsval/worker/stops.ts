@@ -3,6 +3,7 @@ import type { Place, Vm } from "./state";
 import ts from "typescript";
 import { classifyCall, shouldBreak, capabilityBreakLines } from "../capability-calls";
 import { lineReaches, probeResource } from "./gate";
+import { answeredHere } from "./loopback";
 import { arm, fileAt, rangeOf } from "./session";
 import { state } from "./state";
 
@@ -35,6 +36,10 @@ export function askAt(vm: Vm, place: Place): CapabilityAsk | undefined {
 			const before = resourceOf(vm, call.arguments[hit.argIndex], file);
 			const probe = before.resolved ? undefined : probeResource(vm, place, hit.capability, hit.argIndex);
 			const { resource, resolved } = probe === undefined ? before : { "resource": probe, "resolved": true };
+
+			if (hit.capability === "net" && resolved && answeredHere(resource, state.local)) {
+				continue;
+			}
 
 			if (shouldBreak(state.policy, { ...hit, "resource": resolved ? resource : "" })) {
 				return { "line": line - 1, "at": rangeOf(call), "capability": hit.capability, "callee": hit.callee, "resource": resource, "resolved": resolved, "dangerous": hit.dangerous, ...file === state.sourceFile ? {} : { "file": file.fileName, "source": file.text } };
