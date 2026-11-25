@@ -64,6 +64,13 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    Four browser suites stay out: worker-realms.mjs (dist/ in fresh workers on the editor's origin), test/agent-tools/ (the
    agents' requests, no UI), test/workbench/ (what a page can't do to its own window) and performance.mjs (budgets).
 
+7. **silo's command line, cut to what a file can't do** (the user, 2026-11-25; packages/silo/README.md, *The files are the
+   interface*). In order: the contract made true (`layout.ts` right, a version where a meaning can change, writers that keep
+   what they don't know; then a small program that reads each file without `util/silo`); `features`, `history`, `vouch`,
+   `remove` and `restore` out, with what in lib only they use, checked one by one; `observed` a script of this repository's,
+   until item 4 says what it becomes; `test` kept as CI's until there's a `run`. Undecided: whether `init` and `install`
+   stay (under *Decisions*). **Done when** `silo --help` lists `check`, `status`, `test` and whatever of those two is kept.
+
 ## Watching
 
 How each architecture test has gone in CI lately, failing and flaky first: `node test/outcomes.mjs` in
@@ -225,6 +232,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **Item 6's verdicts** (item 4 until 2026-11-24). Decided 2026-11-23, as proposed: what stays outside, the host its subject (in
   RUNNING.md, *Tests*); the tests that lacked only scaffolding change; the gaps a person's program would hit are fixed;
   a run has a `BroadcastChannel` of its own, Node's being the process's.
+- **Anticipate and Track from a terminal** (queue item 7): whether silo's command line keeps `install` (and `init` in it),
+  for a repository worked on outside the editor. This one has no baseline, and the editor makes its own.
 - **How few tests is enough** (queue item 5). Decided 2026-11-24: fewer than 10 of 80 commits run everything.
 - **Several owners** (a queue item until 2026-11-24). Decided 2026-11-22: a file may be several features' if and only if real coverage
   shows it — each owner's tests running it, as the last run's reach has it (`.silo/last-run/reach.json`, kept by

@@ -10,22 +10,26 @@ Silo is everything that should exist when trying to build software safely in the
 4. **Gate.** It protects you from arbitrary code running on your system by gating potentially dangerous fs, net and
    env access, in the day of AI and data exfiltration.
 
-The logic is lib's `util/silo` (pure where it can be, so the editor runs it in the browser). This package is the
-command line. The editor is the other front end.
+The product is what it leaves behind: the files in `.silo/`, in git, what ran there attributed to a person and a machine
+(*The files are the interface*). The logic is lib's `util/silo` (pure where it can be, so the editor runs it in the
+browser). The editor is the front end in use; this package is the command line, kept small.
 
 ## How it got here
 
-Silo began as a desktop-first command line (the prototype, since abandoned), and was first about approving or waiving
-AI-written code: how likely a file was written by AI, which code units were reviewed. Most code is AI-written now, so
-that part wasn't worth pursuing. Then the editor became the better place for silo to exist and be productized. Parts of
-the prototype that haven't been urgent there stayed behind, because the editor runs in the browser, which is already a
-sandbox: gating a program run from a terminal matters on a desktop, much less in a browser tab.
+Three times it was about something else (the user, 2026-11-25). It began as a desktop command line for tracking, waiving
+and approving AI-written code: how likely a file was written by AI, which code units were reviewed. Most code is
+AI-written now, so that went. Then it was about gating what a program reaches: net, fs, exec, env. Then came runs, and
+all that could be learned of a program by becoming its runtime, debugger and interpreter.
+
+Someone may one day run silo on their desktop, where gating matters more than in a browser tab, which is already a
+sandbox. Nobody does yet, so silo has grown by what the editor needed and by what it leaves in git. The prototype's parts
+that weren't urgent here stayed behind.
 
 The goal is to reconcile the two: each job implemented once, in lib `util/silo`, with the command line and the editor
 as two front ends to it. Where a job seems to be missing something, the prototype is the first place to look.
 
-This document is an inventory of what exists, written 2026-10-14 after `silo` grew seven subcommands in two days
-without a plan. It describes, it doesn't decide: the open questions at the end are decisions still to make.
+What follows says what exists, then the designs, each dated. The files and the commands are the next section's; where an
+older section says otherwise of them, that section is how it got here.
 
 ## The model
 
@@ -44,14 +48,113 @@ without a plan. It describes, it doesn't decide: the open questions at the end a
 - **At the call.** A package's call outside its baseline (or with no baseline) is the policy's to decide, the same as
   the program's own calls: allowed, denied, or asked; and recorded in the run, however it was decided.
 
-## The four jobs, and what exists for each
+## The files are the interface (designed 2026-11-25)
 
-| Job | Question it answers | Command line | Editor | lib `util/silo` | In `.silo/` |
+The user, 2026-11-25: how much of silo's complexity can its command line hide, since "a lot of these things are things
+silo does under the hood that result in files that silo can then go and read but really any other program could read
+provided it was familiar with the shape of silo's artifacts". Its commands had grown without that question: several were
+made to see something while testing it, and stayed. In one day (2026-11-25) a dormant list, a weekly cleanup, `coverage`
+and a row of `features --score` were found to have said nothing for three weeks, and `remove` to delete other features'
+code in 62 of the editor's features, which nobody had noticed because nobody ran them.
+
+So: **the files are silo's interface, and a command is for what a file can't do.** A command earns its place by doing one
+of three things; one that only prints what a file says, or what can be worked out from the code, is a reader silo
+happens to have, and lives in `util/silo`, where the editor and a test call it.
+
+1. It **witnesses**: silo has to be there as it happens (a run, an install).
+2. It **stops** something (a merge, a call).
+3. It **records a decision** only a person can make.
+
+### The commands
+
+| Command | For | Under the hood |
+|---|---|---|
+| `silo check` | stops a merge | the ledger's drift, untested and unowned code, what the runs did beyond the baseline |
+| `silo status` | a person's decision about a feature | writes the ledger |
+| `silo install` | witnesses the packages change | nothing under a week old; makes `.silo/` and the baseline, syncs it, says what grew |
+| `silo run <command>` | witnesses the program, and stops its calls | the policy at each call; the run's envelope and evidence. For tests: which to run, what each reached, and the pass as evidence for the next time |
+
+`run` isn't built, and what makes it worth building is a program run where nothing else gates it, on a desktop. Until then
+`silo test` does its part for CI's tests and stays, as CI's alone. The others have no place of their own:
+
+| Today | Goes |
+|---|---|
+| `init` | into `install`: the first install starts `.silo/` |
+| `vouch` | under the hood: the editor's commit adds its test runs to the corpus; from a terminal, `run` would |
+| `observed` | a script of the repository that keeps the record (`last-run/reach.json`), then `run`'s; `check` reads the record |
+| `features`, `features --score`, `history` | worked out from the code, so `util/silo`'s; the scoring was an experiment, and its result is below |
+| `remove` | deleting is an edit somebody reviews: the editor's, over lib's `removalOf`. The decision is `status` |
+| `restore` | the tombstone is already a `git checkout`, to run as it is |
+
+Decided with the direction: what a command is for. Not yet cut: any of it. `init` and `install` are for repositories other
+than this one, which has no baseline, so whether the command line keeps Anticipate and Track at all is the user's still.
+
+### The files
+
+Paths are lib `layout.ts`'s, the shapes its modules'. *Trust* is what a reader may act on, below.
+
+| In `.silo/` | Holds | Shape | Written by | Trust |
+|---|---|---|---|---|
+| `features.json` | what's been decided about each feature | `ledger.ts` `LedgerEntry` | `silo status`, or by hand (the editor reads it) | decision |
+| `policy.json`, `policy/<user>.json` | the rules: everyone's, then one person's over them | `policy.ts` `Policy` | by hand; Always allow, at a call | decision |
+| `notes/<user>/<file>.jsonl` (any collection of annotations) | a person's notes, each on a span | `annotations.ts` `Annotation` | the editor | decision |
+| `baseline.json` | what each package can do, what the code uses of it, and what that can reach | `audit.ts` `Baseline` | `silo install`; the editor's capabilities extension | derived |
+| `versions.json` | the version each dependency loads at, where no lockfile says | `layout.ts` `versionsPath` | the editor's resolver | derived |
+| `last-run/reach.json` | what each test ran, by file | `observed.ts` `ReachRecord` | `silo observed`, by hand | derived |
+| `runs/<user>.jsonl` | each run: who, where, on what code, what it did and was stopped from doing | `evidence.ts` `RunEnvelope` | the editor, as a run ends; util/mcp (kept local unless shared) | claim |
+| `evidence/<user>/<environment>/<file>.jsonl` | what those runs observed, by span: reached, values, branches, purity, time | `evidence.ts` `Observation` | the editor, as a run ends | claim |
+| `vouches/<user>.jsonl` | a test that passed, and the fingerprint of all it reached | `select.ts` `Vouch` | the editor's commit; `silo vouch` | claim (evidence for which tests run) |
+
+Beside them, `.gitignore` (`/local/`) and `.gitattributes` (`*.jsonl merge=union`), which silo seeds and adds to.
+`local/` is this machine's, never in git, and nobody's contract: runs kept local, value samples, traces, recorded
+results, the editor's reach, coverage and edit history, and its copy of `baseline.json` or `versions.json` until the
+repository commits one. `last-run/outcomes.json` and `zero-knowledge.json`, here, are the rewrite's records, not silo's.
+
+Whose a file is, is in its path: anything a person or their runs write is in a file named for them (a slug of their git
+identity), and evidence is also by environment (the machine's name as its user set it, runtime, engine, OS). So two people
+never write one file, and a line file merges by keeping both sides.
+
+### Trust
+
+Any program can read these, so any can write them. A name on a line is who says so, not proof. What a reader may do with
+one depends on which of three it is:
+
+- **A decision** holds once it's merged: its review is the commit. A pull request's own change to one is part of what's
+  being reviewed, so what CI enforces on that request has to be read knowing it may have just changed.
+- **Derived** can be worked out again from the code, the packages or the tests, so a reader that doubts one can.
+  `reach.json` is the exception in practice: made by hand from a dispatched run, taken as it is.
+- **A claim** is somebody's word about what happened on their machine. It's evidence: it can be shown, asked about and
+  weighed with other evidence, and what stops a merge doesn't rest on it alone. A vouch is one, and not an instruction to
+  skip (the user, 2026-11-25): it joins the corpus of runs that decides, in CI, whether a test needs to run. Beside it
+  are CI's own runs of the test, what the change reaches, and what each test was seen to reach, which a vouch also adds to
+  (`ranReach`). It tips the answer only for a test the change touches, that CI has run at least three times and
+  within a week, that hasn't failed or flaked in that week, and whose runtime is CI's or has agreed with it before; and only
+  while everything it reached is as it was. A pull request and the weekly run weigh nothing: they run everything. So a wrong
+  one costs at most the time until CI next runs the test itself, a week at the longest.
+
+### What the contract still needs
+
+What's written above is what the code does. To be something another program can rely on:
+
+1. **A version where a meaning can change.** `policy.json` and `reach.json` have one; evidence and annotations name how
+   their span ids are made (`"key": "bablr1"`); `runs`, `vouches`, `features.json` and `baseline.json` have none.
+2. **Writers that keep what they don't know.** Readers skip a line or a kind they don't know, but writers drop it: the
+   ledger is written with the fields its writer lists, and evidence is read, folded and written back without a kind it
+   hasn't heard of. An older silo loses a newer one's.
+3. **`layout.ts` right.** It lists `capabilities.json` and `capabilities/<user>.json`, gone since 2026-11-22 with their
+   path functions still there, and leaves out `vouches/` and `last-run/`.
+4. **A reader that isn't silo.** Nearly everything that reads these goes through `util/silo` (the debugger's reading of
+   `versions.json` is one that doesn't), so the shapes are only as clear as their types. The test of the
+   contract is a small program, not importing `util/silo`, that reads each.
+
+### The four jobs
+
+| Job | Question it answers | Command | Editor | lib `util/silo` | In `.silo/` |
 |---|---|---|---|---|---|
-| Anticipate | What could this package do? | `init`, `install` (record the baseline) | the capabilities extension's `baseline.ts`, reading packages in its worker | `detect`, `audit`, `slice`; `packages`, `deobfuscate` (unused, see below) | `baseline.json` |
-| Track | Has a package started doing something new? | `install` (sync, nothing under a week old; reports what each upgrade grew), `check` (runs beyond the baseline) | the Exceptions view (what grew) | `audit`, `evidence` (`syncPackages`, `settledCaps`, `beyondBaseline`) | `baseline.json`, `runs/` |
-| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `features` (`--score`: derivations against the declared features), `history`, `observed` (each test's reach against the features its file declares); the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `features`, `graph`, `history`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `derive`, `cost` | `runs/`, `evidence/`, `policy*`, `features.json`; `local/traces/` |
-| Gate | Should this call happen? Does the code keep to what's decided? | `check` (the ledger's drift: CI's lint) | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
+| Anticipate | What could this package do? | `install` | the capabilities extension's `baseline.ts`, reading packages in its worker | `detect`, `audit`, `slice`; `packages`, `deobfuscate` (unused, see below) | `baseline.json` |
+| Track | Has a package started doing something new? | `install`, `check` | the resolver takes nothing under a week old; what grew, where it's imported | `audit`, `install`, `evidence` (`syncPackages`, `settledCaps`, `beyondBaseline`) | `baseline.json`, `versions.json`, `runs/` |
+| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `status`; `run`, as what it leaves | coverage and what went through code, notes, the Margin's kept runs, the ledger's drift in Problems | `evidence`, `runs`, `features`, `graph`, `history`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `derive`, `cost`, `observed` | `runs/`, `evidence/`, `features.json`, `notes/`, `last-run/` |
+| Gate | Should this call happen? Does the code keep to what's decided? Which tests must run? | `check`, `run` (`test`) | the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`, `select`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `vouches/` |
 
 ## What the prototype had, and where it is now
 
@@ -110,11 +213,8 @@ Both came over from the `silo` prototype. (`provenance` and `review`, the AI-app
    runs and traces show is compared with the declaration, and doesn't stand in for it. That comparison isn't built:
    *Declared against observed*, which is also how sharing gets reassessed, and it needs per-test reach recorded against
    today's tests (`.silo/last-run/reach.json` is `full-editor`'s, whose tests are gone).
-5. ~~**Which subcommands belong.**~~ Answered 2026-11-22: all ten, each under its job (the table above): Anticipate
-   `init` and `install`; Track `install`'s sync and `check`'s runs beyond the baseline; Remember `features`,
-   `history`, `observed`, and the ledger's `status`, `remove` and `restore`; Gate `check` (CI's `silo` job). The command
-   line's header lists them; `coverage`, the tenth, was taken out 2026-11-25 (the user): it told what runs committed
-   under `.silo/` ran, commit by commit, and this repository has had none since 2026-11-02. `features` and `history` read the ledger's declared features now, not the parked layer.
+5. ~~**Which subcommands belong.**~~ Answered 2026-11-22 as all ten, each having a job; answered again 2026-11-25: a job isn't
+   enough (*The files are the interface*).
 6. ~~**The leftovers.**~~ Answered 2026-11-22: `packages` and `deobfuscate` stay in lib, unused here, with 1's carrying;
    `guard` has no caller in the editor or silo either, and is lib's to keep or drop.
 7. ~~**Tests and purity have no job yet.**~~ Decided 2026-10-24: no fifth job. Choosing which tests a change reaches,
@@ -138,7 +238,8 @@ everything a person decides lives in their policy.
 - **The same answer from both front ends.** Same analysis, same files, same decision core (`enforce/decide.mjs`), same
   run record. Where a front end can't do something (no node_modules in the browser, no terminal prompt in the editor),
   it reads what the other one wrote instead of computing something different.
-- **No subcommand without a job.** Every subcommand is one of the four jobs, and says which.
+- **No command for what a file can do.** One witnesses, stops, or records a decision (*The files are the interface*); a
+  job isn't enough, and neither is wanting to see something while testing it.
 - **The run is the gate, everywhere.** There's no separate check: a program run through silo is gated at each call, and
   where nobody can be asked (CI), a call that's needed but neither in the baseline nor allowed by policy fails the run.
 
@@ -158,8 +259,9 @@ the facts. Now (built):
    the decision comes at the call, when the capability is actually used. In CI, where nothing can ask, `silo run` fails
    on it, so a pull request that needs a new capability needs a policy rule (reviewed in that pull request) to pass.
 
-This removed `silo accept`, the editor's Accept action, and lib's `pending`/`acceptPending`. `silo check`, whose job the
-run does, goes when `silo run` exists. They're replaced by a capability's origin in the baseline, policy rules, and the
+This removed `silo accept`, the editor's Accept action, and lib's `pending`/`acceptPending`. `silo check`'s half
+of it, the runs' calls beyond the baseline, is the run's once `silo run` exists; its ledger half stays. The
+rest are replaced by a capability's origin in the baseline, policy rules, and the
 run's own failure in CI.
 
 ### Each dependency, seen four ways
@@ -206,28 +308,6 @@ What this asks of the design:
 4. **Nothing outside the join runs undecided.** A package's call the baseline doesn't cover (none kept, or an entry of
    another version) goes to the policy, and the run records how it went. Where nobody can be asked (a live run, CI), the
    policy decides alone, and what it would ask about is refused.
-
-### The jobs, reconciled
-
-| Job | Command line | Editor | Shared in lib |
-|---|---|---|---|
-| Anticipate | `silo install` makes and syncs the baseline (no separate `init`: the first install starts `.silo/`, as the prototype onboarded on first run) | Makes the baseline from the registry as a project opens, and syncs it as dependencies change (the capabilities extension, in a worker of its own; the `silo.baseline` setting turns it off) | One package analysis, given a package's files however they were read (node_modules or a tarball): the slice of each package the code imports (the import surface, tree-shaken), as the prototype's audit did |
-| Track | `silo install` (nothing under a week old; reports what each upgrade added, and what your use of a package reaches more) | The resolver takes nothing under a week old; the Exceptions view shows growth and the runs' exceptions | The resolver's age rule, growth, `beyondBaseline` |
-| Remember | `features`/`history` stay, parked (*Derived history*, below) | Insights (coverage, values, "what could go"), notes; the history extension for the session | One run record (`runs/<user>.jsonl`), one evidence format, one attribution of runs to features |
-| Gate | `silo run <file>` (new): Node with silo's `--import` preload (below), every gated call decided by the policy, the run recorded as the editor does; asks at a terminal, fails where it can't ask (CI) | Runs in the debugger, almostnode, previews, gated as today | `enforce/decide.mjs` (BERNARD, JUDICIAL), policy, the run envelope |
-
-So the command line becomes: `install`, `run`, with `features` and `history` parked. `init` folds into
-`install`; `accept` and `check` go. In CI, the gate is running the project (its tests, its scripts) through `silo run`.
-
-### What the design implies, when it's built
-
-- **Out:** `silo init` and `check`. (lib's `provenance` and `review` are out already, as is oxc: TypeScript reads the
-  code everywhere — the editor's TypeScript server, and the TypeScript 7.1 `silo` bundles.)
-- **One package analysis**, called by both front ends on a package's files, however they were read.
-- **`silo run`**, the desktop gate: the policy and decision core the editor already uses, a terminal prompt in place of
-  the editor's, failure in place of a prompt in CI, and the same run envelope.
-- **One run record and one attribution**: the local MCP ledger and the shared runs in one shape, and one way
-  of saying which features ran.
 
 ### The desktop gate: a `--import` preload
 
