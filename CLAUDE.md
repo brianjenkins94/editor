@@ -57,8 +57,6 @@ features, and `silo check` (CI's `silo` job, `.github/workflows/silo.yml`) holds
   request goes in the `ways` of the feature it serves, in the same change.
 - **An experiment starts with an entry** — `silo status "<name>" experiment "<why>" --until <date>`; it expires by
   default, and `silo check` says so.
-- **A dormant way in** (`silo check` lists them: their files load in CI's runs, their code never runs) is a decision to
-  make, not to ignore: remove it, or keep it with a reason that expires (`active --until`, 90 days on).
 
 
 ## Agent tools

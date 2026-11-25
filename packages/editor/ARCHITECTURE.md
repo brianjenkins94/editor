@@ -793,8 +793,7 @@ tools*). What the code doesn't say:
   *What … reaches*, and *History: What a Way In Reaches…* asks for the one at the cursor or one picked: a quick pick titled by
   the ledger's feature owning it, saying what only it reaches (what removing it frees), with every place it's registered, left
   by hand in files it shares, and named in code, tests and docs, each opening it. `code_reach` asks the same `history.reach`.
-  It's `silo remove`'s plan against History's reading of the program, nothing written; Remove itself comes back with *Dormant
-  features marked in History*.
+  It's `silo remove`'s plan against History's reading of the program, nothing written.
 - **How a commit did in CI is in the status bar** (workbench/ci-status.ts): HEAD's GitHub Actions runs on the workspace's
   github.com origin, passed, failed (naming what) or going, asked again when HEAD changes, while a run goes, and a few times
   while a commit has none yet; hidden with no such origin. Clicking it (or *CI: How HEAD Did in CI*, which takes a commit

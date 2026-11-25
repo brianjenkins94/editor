@@ -405,18 +405,9 @@ The design:
 - **Trust.** Once CI gates on selection, a pull request could edit the records so its own tests are skipped. So CI
   selects with the records at the merge base, and counts only CI's own evidence (`evidence/ci/…`).
 
-**Built for CI (2026-10-24)** (packages/editor/test/selection.mjs; architecture.yml's `select` and `reach` jobs). Every
-architecture shard but performance runs instrumented (`COVERAGE=1`, build/coverage.ts), and the harness reads each
-test's reach in every realm of its session, before and after it. On main, CI folds that into
-`.silo/evidence/ci/architecture.json` — per declaration (a file's top-level name, a class's `Class.member`, the rest
-`(top level)`), the tests that reached it — and commits it when it changes. Its sets only grow, but a declaration its
-file lost drops out: an approximation of "leaves after N runs without it" that over-selects rather than churns. A
-change selects by the records at its base: a changed declaration (by its tokens: a reformat selects nothing) its tests'
-shards; ambient code (boot's test, or 30% of a shard's tests) the smoke shard; any code the smoke and performance
-shards; a suite file its shard; ARCHITECTURE.md's diagram the tours (the diagram check runs only when they all do); a
-doc, a unit test or `.silo/` nothing; anything else (a dependency, a build script, the workflow) every shard; and a test
-with no record yet its shard. Over the 30 commits before it, with records from one instrumented run: 7 would have run
-every shard, 6 none, the rest some. Not built: unit tests' selection. (The outcomes a selection's safety needs are read from CI's history: *Tests by feature*.)
+**Built for CI (2026-10-24), gone with the reduction (2026-11-02).** The editor's architecture workflow ran instrumented,
+kept what each test reached in `.silo/evidence/ci/architecture.json` and selected shards by it (its test/selection.mjs).
+What CI selects by now is below.
 
 ### Tests by feature, in your face (designed 2026-10-29)
 
@@ -557,8 +548,7 @@ to it (`paths`; 17 of the 52 changed none), and weekly for what changes upstream
 
 **Dogfooding in the editor.** The editor is where this is tried first, and what it already has maps onto it:
 - **Reach** is its traces: tests run on tsval's `node:test` in the editor, and their reach is BABLR span ids, kept per
-  file (`.silo/local/traces`). CI's architecture suites have reach records too (`.silo/evidence/ci/architecture.json`)
-  and a selection of their own (packages/editor/test/selection.mjs, by shard), which the generic selection replaces.
+  file (`.silo/local/traces`).
 - **Agents** have it already in part: `runs_affected` (the tests a change reaches, stale or not) and `runs_tests`
   (results as data); the agent tool above is their successor.
 - **Vouches** would be made by its commit flow, as its git engine already shares runs at commit time (`shareRuns`,
@@ -772,11 +762,12 @@ computed facts, no model. It's Remember (what was decided) and Gate (the checks 
   first, errors one at a time once each is quiet here.
 - **Prices:** what deleting a feature frees, the code only its entry reaches (what it dominates in the import graph,
   later the call graph): lines, files, bytes per realm, and on request measured boot and memory with it stubbed out.
-  Shown on drift findings, dormant suggestions, and a pull request that removes code.
-- **Leases:** a feature the ledger doesn't decide about stays while runs reach its code — a test, a run in the editor,
-  an agent's tool call. It turns **dormant** when no test reaches it and, across enough runs that could have, none did
-  (a smoke test that never signs in mustn't make sign-in dormant). Dormant is a suggestion with its price: Remove, or
-  Keep with a reason that expires (90 days) and asks again.
+  Shown on drift findings, and a pull request that removes code.
+- **Leases:** an `active` entry kept `until` a date asks again once it's passed (`lease expired`). What turned on
+  evidence of use, a way in that's **dormant** because CI's runs loaded its files and never ran its code, was built
+  2026-10-25 and taken out 2026-11-25 with its weekly deletion pull request (the user; its marks in the editor went
+  2026-11-04): it read `.silo/evidence/ci/architecture.json`, which the reduction stopped making, so for three weeks it listed nothing.
+  A feature's own test, failing when the feature's broken, says more.
 - **Budgets:** bytes per realm beside the performance suite's; raising one is a line in the diff. Built 2026-10-25 (the
   editor's test/performance.mjs, `scriptKB.<realm>` in performance-budgets.json): the script each realm loaded by the
   time it's idle, decoded, from each frame's and worker's resource timing — the shell, the workbench, the extension
@@ -785,15 +776,11 @@ computed facts, no model. It's Remember (what was decided) and Gate (the checks 
 - **`silo remove` / `silo restore`:** remove takes out what only the entry reaches, its package manifests' entries and the
   tombstone, lists the docs that name it, and leaves a change for review; restore runs the tombstone.
 - **Agents:** replacing an approach removes the old one in the same change; an experiment starts with an entry, so it
-  expires by default; a scheduled run of `silo check` and the dormant list opens one deletion pull request a week.
-- **In the editor:** drift in Problems; dormant features in the evidence's purple with their price, Remove and Keep.
+  expires by default.
+- **In the editor:** drift in Problems.
 
-Where it lives: lib's `util/silo` (`ledger.ts` for the file, the drift rules and lease state; `cost.ts` for prices — not
+Where it lives: lib's `util/silo` (`ledger.ts` for the file, the drift rules; `cost.ts` for prices — not
 `reach.ts`, which is capability reach); the subcommands here; `silo check` in the lint workflow.
-
-How it weaves into the rest: its leases are the traces runs and tests keep (`traces`, by span; NEXT.md, test runs
-kept as traces), "could have reached" is selection's reach, and what one feature is comes from features from tests
-(NEXT.md) — the ways-in list it was designed on is this repository's only.
 
 Build order, each step useful alone: (1) the ledger and the checks that need no reach; (2) prices per area from the
 import graph; (3) realm budgets; (4) leases; (5) `remove` and `restore`; (6) the agent rules and the weekly run.
@@ -804,29 +791,14 @@ import graph; (3) realm budgets; (4) leases; (5) `remove` and `restore`; (6) the
   isn't priced. `silo check` puts each drift finding's price beside it, and `--prices` lists every entry's (here: the
   parked derived history frees 478 lines in 4 files; the capability engine 44 lines).
 - **Realm budgets**: above, in the editor's performance suite.
-- **Leases** (lib `ledger.ts` `dormant`, drift's `lease expired`): a way in nobody decided about is dormant when CI's
-  records (`.silo/evidence/ci/architecture.json`) show its files loaded and its own code never ran — its own code being
-  the functions and classes its way in names (a module's other names run as it loads, which the records can't tell
-  apart, so a handler written inline isn't judged). `silo check` lists them as suggestions, each with its price and
-  both ways out; keeping one is `active` with an `until` 90 days on, and `lease expired` asks again. The first run
-  here: the Insights monitor view and the preview profiler.
+- **Leases** (lib `ledger.ts`, drift's `lease expired`): above.
 - **`silo remove` / `silo restore`**: remove deletes the files only the entry reaches, takes its way in out of the
   manifests (lib `features.ts` `withoutWayIn`: a command with its menus and keybindings, a view, a setting), writes the
   tombstone (`restore`: a checkout of the files from the commit before), and lists what's left by hand — its code in
   files it shares, where its way in is registered, the docs that name it — leaving the change uncommitted. When it can
   take out nothing on its own it writes nothing and says what to do (exit 2). restore runs the tombstone, a checkout
   only, and sets the entry active.
-- **Agents**: CLAUDE.md's *Features* (replacing an approach removes the old one; an experiment starts with an entry; a
-  dormant way in is a decision), and `.github/workflows/ledger.yml` weekly: `silo check`, and one deletion pull
-  request for the first dormant way in `remove` can take out, none while one's open.
-
-**Built (2026-10-26): leases in the editor.** History (the extension that holds the ledger's drift in Problems) marks
-each dormant way in where it's registered, in the evidence's purple, with a Hint saying its price; the lightbulb offers
-Keep for 90 days (asking why) and Remove (asking why: the files only it reaches deleted, its package manifests' entries taken out,
-its tombstone, what's left by hand in the History output; nothing committed). Both write what `silo status` and `silo
-remove` write: what's dormant and what a removal is are lib's (`ledger.ts` `dormantWays`, `removalOf`, `removalText`),
-the CLI and the editor running the same code. What's dormant is by CI's records, as `silo check`'s: a repository
-without them has nothing dormant (a run in the editor or a test in it doesn't count yet).
+- **Agents**: CLAUDE.md's *Features* (replacing an approach removes the old one; an experiment starts with an entry).
 
 Open: **off isn't stopped** (a flag off by default ships but doesn't run: its own status, checked by "never reached");
 **restoring across a move** (a tombstone's paths mapped through the moves `history` detects); **what counts as one

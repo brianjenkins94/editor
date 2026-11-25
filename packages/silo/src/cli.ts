@@ -8,8 +8,8 @@
  *   silo status <entry> <status> [why] [--key …] [--paths …] [--until …]
  *                                                      a decision about a feature, in the ledger (.silo/features.json)
  *   silo check [repo] [--prices] [--json]              the ledger's drift from the code (each with what deleting its
- *                                                        feature would free), the dormant ways in, and what the runs'
- *                                                        packages did beyond the baseline
+ *                                                        feature would free), and what the runs' packages did
+ *                                                        beyond the baseline
  *   silo coverage [repo] [--since …] [--until …] [--ref …] [--json]
  *                                                      what the committed runs ran, commit by commit, by feature: what
  *                                                        started running, what stopped, what's reached and never ran
@@ -35,7 +35,7 @@
 import type { CoverageStep } from "@brianjenkins94/util/silo/coverage";
 import type { Price } from "@brianjenkins94/util/silo/cost";
 import type { Analyzer, DeclarationGraph } from "@brianjenkins94/util/silo/graph";
-import type { Drift, Ledger, LedgerStatus, WayCode } from "@brianjenkins94/util/silo/ledger";
+import type { Drift, Ledger, LedgerStatus } from "@brianjenkins94/util/silo/ledger";
 import type { Step } from "@brianjenkins94/util/silo/history";
 import type { GroupingScore } from "@brianjenkins94/util/silo/derive";
 import type { Rolldown } from "@brianjenkins94/util/silo/slice";
@@ -57,7 +57,7 @@ import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
 import { lastRunReachPath, ledgerPath } from "@brianjenkins94/util/silo/layout";
-import { CI_RECORDS, declaredDrift, declaredFeatures, dormantWays, drift, isOwnedCode, ledgerText, ownersOf, parseLedger, reachedFromRecords, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
+import { CI_RECORDS, declaredDrift, declaredFeatures, drift, isOwnedCode, ledgerText, ownersOf, parseLedger, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 import { filesOf, headOf, repoOf } from "./git.ts";
@@ -147,18 +147,6 @@ export function prices(repo: string, ledger: Ledger, program: Awaited<ReturnType
 
 	return new Map(Object.entries(ledger).filter(([, entry]) => entry.status !== "removed").map(([name, entry]) => [name, priceOf(program.graph, roots, { "roots": entry.key === undefined ? [] : program.features.get(entry.key)?.roots ?? [], ...entry.paths === undefined ? {} : { "paths": entry.paths } }, textOf)]));
 }
-
-/** The ways in that are dormant (lib util/silo/ledger `dormantWays`), each with its price: none without CI's records. */
-function dormantOf(repo: string, ledger: Ledger, program: Awaited<ReturnType<typeof currentProgram>>): { "way": WayCode; "price": Price }[] {
-	const records = path.join(repo, CI_RECORDS);
-	const reached = reachedFromRecords(fs.existsSync(records) ? fs.readFileSync(records) : undefined);
-	const textOf = (file: string): string | undefined => (fs.existsSync(path.join(repo, file)) ? fs.readFileSync(path.join(repo, file)) : undefined);
-
-	return reached === undefined ? [] : dormantWays(program.features, program.graph, ledger, reached, textOf);
-}
-
-/** Today plus `days`, as `YYYY-MM-DD`. */
-const daysOn = (days: number): string => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 
 /** `repo`'s ledger (.silo/features.json): none, when it has none. */
 function ledgerOf(repo: string): Ledger {
@@ -499,8 +487,6 @@ export const app = subcommands({
 				const drifted = await ledgerDrift(repo, undefined, program);
 				const priced = prices(repo, ledgerOf(repo), program);
 				const priceOfEntry = (entry: string | undefined): Price | undefined => (entry === undefined ? undefined : priced.get(entry));
-				// (suggestions, not errors: a lease run out asks for a decision)
-				const asleep = dormantOf(repo, ledgerOf(repo), program);
 				const found = fs.existsSync(paths.baseline) ? beyondBaseline(loadRuns(paths), loadBaseline(paths).packages) : undefined;
 
 				// (errors since 2026-10-25: every check was quiet here — silo README, *The feature ledger*)
@@ -509,7 +495,7 @@ export const app = subcommands({
 				}
 
 				if (config.get("json")) {
-					process.stdout.write(JSON.stringify({ "drift": drifted.map((each) => ({ ...each, ...priceOfEntry(each.entry) === undefined ? {} : { "price": priceOfEntry(each.entry) } })), "dormant": asleep.map(({ way, price }) => ({ "key": way.key, "facet": way.facet, "id": way.id, "price": price })), ...config.get("prices") ? { "prices": Object.fromEntries(priced) } : {}, "beyondBaseline": found ?? null }, undefined, "\t") + "\n");
+					process.stdout.write(JSON.stringify({ "drift": drifted.map((each) => ({ ...each, ...priceOfEntry(each.entry) === undefined ? {} : { "price": priceOfEntry(each.entry) } })), ...config.get("prices") ? { "prices": Object.fromEntries(priced) } : {}, "beyondBaseline": found ?? null }, undefined, "\t") + "\n");
 					process.exitCode = (found?.length ?? 0) > 0 || drifted.length > 0 ? 1 : 0;
 
 					return;
@@ -519,10 +505,6 @@ export const app = subcommands({
 					process.stdout.write("The ledger and the code agree.\n");
 				} else {
 					process.stdout.write(`Drift (${drifted.length}):\n${drifted.map((each) => `  ${each.check}: ${each.message}\n    change the code: ${each.code}; or the decision: ${each.decision}` + (priceOfEntry(each.entry) === undefined ? "" : `\n    deleting it ${priceText(priceOfEntry(each.entry) as Price)}`)).join("\n")}\n`);
-				}
-
-				if (asleep.length > 0) {
-					process.stdout.write(`Dormant (${asleep.length}) — the runs loaded their files and never ran their code; each, keep it a while or remove it:\n${asleep.map(({ way, price }) => `  ${way.facet} ${way.id}: deleting it ${priceText(price)}\n    keep: silo status "${way.id}" active "<why>" --key "${way.key}" --until ${daysOn(90)}; remove: silo remove "${way.id}" "<why>" --key "${way.key}"`).join("\n")}\n`);
 				}
 
 				if (config.get("prices")) {
@@ -554,7 +536,7 @@ export const app = subcommands({
 			"name": "remove",
 			"description": "Take a feature out (silo README, *The feature ledger*): the files only it reaches, its manifest entries (a command with its menus and keybindings, a view, a setting), and a tombstone in the ledger saying why and how to restore it — and the docs that still name it, and any of its code that shares a file with something else, to see to by hand. Nothing is committed: the change is left for review.",
 			"config": juvy({
-				"entry": { "format": String, "default": "", "positional": true, "doc": "Its name: the ledger's, or a dormant way in's id." },
+				"entry": { "format": String, "default": "", "positional": true, "doc": "Its name: the ledger's, or a way in's id." },
 				"why": { "format": String, "default": "", "positional": true, "doc": "Why it goes." },
 				"key": { "format": String, "default": "", "doc": "The way in it is (default: its ledger entry's)." },
 				"paths": { "format": Array, "default": [], "doc": "Its files or folders (default: its ledger entry's)." },
@@ -570,7 +552,7 @@ export const app = subcommands({
 				const paths = given.length > 0 ? given : entry?.paths ?? [];
 
 				if (name === "" || (key === undefined && paths.length === 0)) {
-					process.stderr.write("silo remove: say which feature — its ledger entry, or a way in's --key (as `silo check` lists the dormant ones), or --paths\n");
+					process.stderr.write("silo remove: say which feature — its ledger entry, or a way in's --key, or --paths\n");
 					process.exitCode = 1;
 
 					return;

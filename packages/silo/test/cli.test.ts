@@ -234,25 +234,25 @@ test("silo status, then silo check: the ledger's decisions held to the code — 
 	assert.match(String(silo("check", ledgered).stdout), /Drift \(3\):\n {2}removed but documented: "old exporter" was removed \(abc1234\), and README\.md still names it/u);
 });
 
-test("prices, dormant ways in, silo remove and silo restore", async () => {
+test("prices, silo remove and silo restore", async () => {
 	const notes = await repository({
 		"2026-10-20": {
 			"README.md": "Notes export to markdown (notes/export.ts).\n",
 			"notes/package.json": JSON.stringify({ "contributes": { "commands": [{ "command": "notes.add", "title": "Add" }, { "command": "notes.export", "title": "Export" }], "keybindings": [{ "command": "notes.export", "key": "ctrl+e" }] } }, undefined, "\t") + "\n",
 			"notes/extension.ts": "import * as vscode from \"vscode\";\nimport { exportAll } from \"./export\";\n\nfunction add(): number {\n\treturn 1;\n}\n\nvscode.commands.registerCommand(\"notes.add\", add);\nvscode.commands.registerCommand(\"notes.export\", exportAll);\n",
-			"notes/export.ts": "export function exportAll(): string {\n\treturn format();\n}\n\nfunction format(): string {\n\treturn \"# notes\";\n}\n",
-			// (CI's records: the suites loaded both files, and ran add — never exportAll)
-			".silo/evidence/ci/architecture.json": JSON.stringify({ "version": 1, "tests": [{ "shard": "smoke-app", "name": "adds" }], "reach": { "notes/extension.ts": { "(top level)": [0], "add": [0] }, "notes/export.ts": { "(top level)": [0] } } })
+			"notes/export.ts": "export function exportAll(): string {\n\treturn format();\n}\n\nfunction format(): string {\n\treturn \"# notes\";\n}\n"
 		}
 	});
 	const silo = (...args: string[]): ReturnType<typeof spawnSync> => spawnSync(process.execPath, ["--import", "tsx", CLI, ...args], { "encoding": "utf8" });
-	const checked = JSON.parse(String(silo("check", notes, "--json").stdout)) as { "dormant": { "key": string; "price": { "files": string[]; "declarations": string[] } }[] };
 
-	// Dormant: export's file loaded, its code never ran — priced at what deleting it frees: export.ts whole.
-	assert.deepEqual(checked.dormant.map((each) => each.key), ["command|notes.export"]);
-	assert.deepEqual(checked.dormant[0].price.files, ["notes/export.ts"]);
-	assert.deepEqual(checked.dormant[0].price.declarations, ["notes/export.ts#exportAll", "notes/export.ts#format"]);
-	assert.match(String(silo("check", notes).stdout), /Dormant \(1\)[^\n]*\n {2}command notes\.export: deleting it frees 2 declarations, 1 file whole[^\n]*\n {4}keep: silo status "notes\.export" active "<why>" --key "command\|notes\.export" --until \d{4}-\d\d-\d\d; remove: silo remove/u);
+	// Priced at what deleting it frees: export.ts whole.
+	assert.equal(silo("status", "notes.export", "active", "people export", "--key", "command|notes.export", "--repo", notes).status, 0);
+
+	const { prices } = JSON.parse(String(silo("check", notes, "--prices", "--json").stdout)) as { "prices": Record<string, { "files": string[]; "declarations": string[] }> };
+
+	assert.deepEqual(prices["notes.export"].files, ["notes/export.ts"]);
+	assert.deepEqual(prices["notes.export"].declarations, ["notes/export.ts#exportAll", "notes/export.ts#format"]);
+	assert.match(String(silo("check", notes, "--prices").stdout), /notes\.export: frees 2 declarations, 1 file whole/u);
 
 	// Removed: the file, its manifest entries, a tombstone — its registration and the README named for doing by hand.
 	const removed = silo("remove", "notes.export", "nobody exports", "--key", "command|notes.export", "--repo", notes);

@@ -2599,6 +2599,29 @@
       "packages/editor/workbench/terminal/commands/node/node.test.mjs"
     ]
   },
+  "Tests a change needs: silo test and vouch": {
+    "status": "active",
+    "why": "NEXT.md item 3, built 2026-11-22: CI runs fewer tests, those the rest of are vouched for or resting",
+    "since": "2026-11-22",
+    "what": "Runs only the tests a change needs: what the change reaches, less what a vouch made where the code was written or a long green streak excuses, more what failed lately; and vouches for passing tests, for a commit to carry — silo vouch's, and the editor's tsval runs', which its next commit carries.",
+    "docs": "packages/silo/README.md, *Tests by feature, in your face*",
+    "ways": [
+      "cli command|test",
+      "cli command|vouch",
+      "command|history.vouched"
+    ],
+    "paths": [
+      "packages/editor/extensions/history/vouches.ts",
+      "packages/silo/src/reporter.mjs",
+      "packages/silo/src/test.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/vouches.spec.mjs",
+      "packages/editor/test/vouches.test.mjs",
+      "packages/silo/test/test-command-git.test.ts",
+      "packages/silo/test/test-command.test.ts"
+    ]
+  },
   "Tests for agents": {
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
@@ -2940,9 +2963,9 @@
     ]
   },
   "Weekly ledger cleanup": {
-    "status": "active",
-    "why": "moved from the manifest (decision 21), area Repository: outside the editor's reduction, kept as it was",
-    "since": "2026-11-03",
+    "status": "removed",
+    "why": "taken out with silo check's dormant list (user, 2026-11-25): both read CI's record of what its suites reached, gone with the reduction (2026-11-02), so neither found anything; a feature whose test fails when it's broken says more than code that loads and doesn't run",
+    "since": "2026-11-25",
     "what": "Each week CI runs `silo check` and opens one pull request deleting the first dormant way in that `silo remove` can take out.",
     "paths": [
       ".github/workflows/ledger.yml"
@@ -3336,29 +3359,6 @@
       "packages/tsval/test/vm/stepped-patterns.test.ts",
       "packages/tsval/test/vm/stepping.test.ts",
       "packages/tsval/test/vm/throw-site.test.ts"
-    ]
-  },
-  "Tests a change needs: silo test and vouch": {
-    "status": "active",
-    "why": "NEXT.md item 3, built 2026-11-22: CI runs fewer tests, those the rest of are vouched for or resting",
-    "since": "2026-11-22",
-    "what": "Runs only the tests a change needs: what the change reaches, less what a vouch made where the code was written or a long green streak excuses, more what failed lately; and vouches for passing tests, for a commit to carry — silo vouch's, and the editor's tsval runs', which its next commit carries.",
-    "docs": "packages/silo/README.md, *Tests by feature, in your face*",
-    "ways": [
-      "cli command|test",
-      "cli command|vouch",
-      "command|history.vouched"
-    ],
-    "paths": [
-      "packages/editor/extensions/history/vouches.ts",
-      "packages/silo/src/reporter.mjs",
-      "packages/silo/src/test.ts"
-    ],
-    "tests": [
-      "packages/editor/test/in-editor/vouches.spec.mjs",
-      "packages/editor/test/vouches.test.mjs",
-      "packages/silo/test/test-command-git.test.ts",
-      "packages/silo/test/test-command.test.ts"
     ]
   }
 }
