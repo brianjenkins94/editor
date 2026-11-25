@@ -52,7 +52,7 @@ import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
 import { lastRunReachPath, ledgerPath } from "@brianjenkins94/util/silo/layout";
-import { declaredDrift, declaredFeatures, drift, isOwnedCode, ledgerText, parseLedger, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
+import { declaredDrift, declaredFeatures, drift, isOwnedCode, ledgerText, ownedByOthers, parseLedger, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 import { filesOf, headOf, repoOf } from "./git.ts";
@@ -135,12 +135,13 @@ export async function currentFeatures(repo: string): Promise<ReturnType<typeof f
 	return (await currentProgram(repo)).features;
 }
 
-/** What deleting each of the ledger's entries would free (lib util/silo/cost): the code only it reaches, from every way in. */
+/** What deleting each of the ledger's entries would free (lib util/silo/cost): the code only it reaches, from every
+ *  way in and from what the other features own. */
 export function prices(repo: string, ledger: Ledger, program: Awaited<ReturnType<typeof currentProgram>>): Map<string, Price> {
 	const roots = [...program.features.values()].flatMap((feature) => feature.roots);
 	const textOf = (file: string): string | undefined => (fs.existsSync(path.join(repo, file)) ? fs.readFileSync(path.join(repo, file)) : undefined);
 
-	return new Map(Object.entries(ledger).filter(([, entry]) => entry.status !== "removed").map(([name, entry]) => [name, priceOf(program.graph, roots, { "roots": entry.key === undefined ? [] : program.features.get(entry.key)?.roots ?? [], ...entry.paths === undefined ? {} : { "paths": entry.paths } }, textOf)]));
+	return new Map(Object.entries(ledger).filter(([, entry]) => entry.status !== "removed").map(([name, entry]) => [name, priceOf(program.graph, roots, { "roots": entry.key === undefined ? [] : program.features.get(entry.key)?.roots ?? [], ...entry.paths === undefined ? {} : { "paths": entry.paths } }, textOf, ownedByOthers(ledger, name, entry.key))]));
 }
 
 /** `repo`'s ledger (.silo/features.json): none, when it has none. */

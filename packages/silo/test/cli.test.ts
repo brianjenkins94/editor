@@ -412,3 +412,24 @@ test("remove: a feature whose only file is a workflow goes, and comes back; one 
 	assert.match(String(shared.stdout), /shared\.yml \(named in \.github\/workflows\/ci\.yml\)/u);
 	assert.equal(fs.existsSync(path.join(fresh, ".github/workflows/shared.yml")), true);
 });
+
+test("remove, and prices: another feature's code stays, though no way in reaches it but this one's", async () => {
+	const entry = (paths: string[]): unknown => ({ "status": "active", "why": "no tests: a fixture", "since": "2026-10-01", "what": "W.", "paths": paths });
+	const fresh = await repository({ "2026-10-01": {
+		".silo/features.json": JSON.stringify({ "Switch": entry(["api/switch.ts"]), "Log": entry(["api/log.ts"]), "Routes": entry(["api/index.ts"]) }),
+		"api/log.ts": "export function log(): number {\n\treturn stamp();\n}\n\nimport { stamp } from \"./stamp\";\n",
+		"api/stamp.ts": "export function stamp(): number {\n\treturn 1;\n}\n",
+		"api/only.ts": "export function only(): number {\n\treturn 2;\n}\n",
+		"api/switch.ts": "import { log } from \"./log\";\nimport { only } from \"./only\";\n\nexport function turn(): number {\n\treturn log() + only();\n}\n",
+		"api/index.ts": "import { log } from \"./log\";\n\nexport function route(): number {\n\treturn log();\n}\n"
+	} });
+	const silo = (...args: string[]): ReturnType<typeof spawnSync> => spawnSync(process.execPath, ["--import", "tsx", CLI, ...args], { "encoding": "utf8" });
+	const { prices } = JSON.parse(String(silo("check", fresh, "--prices", "--json").stdout)) as { "prices": Record<string, { "files": string[] }> };
+
+	assert.deepEqual(prices["Switch"].files, ["api/only.ts", "api/switch.ts"]);
+
+	const removed = silo("remove", "Switch", "gone", "--repo", fresh);
+
+	assert.equal(removed.status, 0, String(removed.stderr) + String(removed.stdout));
+	assert.deepEqual(["switch", "only", "log", "stamp", "index"].map((name) => fs.existsSync(path.join(fresh, `api/${name}.ts`))), [false, false, true, true, true]);
+});

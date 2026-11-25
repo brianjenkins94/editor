@@ -789,7 +789,8 @@ import graph; (3) realm budgets; (4) leases; (5) `remove` and `restore`; (6) the
 **Built (steps 2–6, 2026-10-25):**
 - **Prices** (lib `cost.ts`): by the declaration graph, what's reachable from every way in with an entry and not
   without it — its declarations, the files that are nothing but those, their bytes and lines; code no way in reaches
-  isn't priced. `silo check` puts each drift finding's price beside it, and `--prices` lists every entry's (here: the
+  isn't priced. Since 2026-11-25 what another feature owns, and what that reaches, isn't this one's to free: 62 of the
+  editor's features would have taken 298 files of others' with them (the API's routes aren't ways in). `silo check` puts each drift finding's price beside it, and `--prices` lists every entry's (here: the
   parked derived history frees 478 lines in 4 files; the capability engine 44 lines).
 - **Realm budgets**: above, in the editor's performance suite.
 - **Leases** (lib `ledger.ts`, drift's `lease expired`): above.
