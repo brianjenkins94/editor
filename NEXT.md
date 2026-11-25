@@ -64,8 +64,11 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    Four browser suites stay out: worker-realms.mjs (dist/ in fresh workers on the editor's origin), test/agent-tools/ (the
    agents' requests, no UI), test/workbench/ (what a page can't do to its own window) and performance.mjs (budgets).
 
-7. **`silo remove` and a workflow** (found 2026-11-25, taking out the weekly cleanup): it can't take out a feature whose only
-   file is a workflow, which frees nothing by its reckoning; it was deleted by hand. **Done when** it does, or says so plainly.
+7. **`silo remove` deletes another feature's code** (found 2026-11-25, trying it on the API's features): *Kill switch and
+   switches* and *Sign in with a passkey* would each delete packages/api/src/log.ts, *Redacted logging*'s and imported by
+   index.ts. What "only it reaches" is worked out from the ways in, and the API's routes aren't ways in, so nothing else is
+   seen to reach it (lib `cost.ts` `priceOf`; its prices are too high the same way). Until then, read what it deletes before
+   committing. **Done when** a file another live feature owns, or that its code reaches, isn't deleted or priced.
 
 ## Watching
 

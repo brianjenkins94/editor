@@ -793,7 +793,8 @@ import graph; (3) realm budgets; (4) leases; (5) `remove` and `restore`; (6) the
   parked derived history frees 478 lines in 4 files; the capability engine 44 lines).
 - **Realm budgets**: above, in the editor's performance suite.
 - **Leases** (lib `ledger.ts`, drift's `lease expired`): above.
-- **`silo remove` / `silo restore`**: remove deletes the files only the entry reaches, takes its way in out of the
+- **`silo remove` / `silo restore`**: remove deletes the files only the entry reaches and, since 2026-11-25, its files that
+  aren't code (a workflow, a page; never a package.json or a migration) that nothing staying names, takes its way in out of the
   manifests (lib `features.ts` `withoutWayIn`: a command with its menus and keybindings, a view, a setting), writes the
   tombstone (`restore`: a checkout of the files from the commit before), and lists what's left by hand — its code in
   files it shares, where its way in is registered, the docs that name it — leaving the change uncommitted. When it can

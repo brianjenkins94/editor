@@ -389,3 +389,26 @@ test("remove: the tests only it names go with it, one another feature names stay
 	assert.equal(fs.existsSync(path.join(fresh, "old/a.ts")), false);
 	assert.match(JSON.parse(fs.readFileSync(path.join(fresh, ".silo/features.json")))["Old"].restore, /old\/a\.ts.*test\/old\.mjs/u);
 });
+
+test("remove: a feature whose only file is a workflow goes, and comes back; one something else names stays, saying what", async () => {
+	const entry = (paths: string[]): unknown => ({ "status": "active", "why": "no tests: workflows", "since": "2026-10-01", "what": "W.", "paths": paths });
+	const fresh = await repository({ "2026-10-01": {
+		".silo/features.json": JSON.stringify({ "Weekly": entry([".github/workflows/weekly.yml"]), "Shared": entry([".github/workflows/shared.yml"]) }),
+		".github/workflows/weekly.yml": "{}\n",
+		".github/workflows/shared.yml": "{}\n",
+		".github/workflows/ci.yml": "{ \"jobs\": { \"shared\": { \"uses\": \"./.github/workflows/shared.yml\" } } }\n"
+	} });
+	const silo = (...args: string[]): ReturnType<typeof spawnSync> => spawnSync(process.execPath, ["--import", "tsx", CLI, ...args, "--repo", fresh], { "encoding": "utf8" });
+	const removed = silo("remove", "Weekly", "nothing runs it");
+
+	assert.equal(removed.status, 0, String(removed.stderr) + String(removed.stdout));
+	assert.equal(fs.existsSync(path.join(fresh, ".github/workflows/weekly.yml")), false);
+	assert.equal(silo("restore", "Weekly").status, 0);
+	assert.equal(fs.existsSync(path.join(fresh, ".github/workflows/weekly.yml")), true);
+
+	const shared = silo("remove", "Shared", "gone");
+
+	assert.equal(shared.status, 2, String(shared.stdout));
+	assert.match(String(shared.stdout), /shared\.yml \(named in \.github\/workflows\/ci\.yml\)/u);
+	assert.equal(fs.existsSync(path.join(fresh, ".github/workflows/shared.yml")), true);
+});
