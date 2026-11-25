@@ -42,7 +42,15 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    decide from the diffs whether evidence is committed by default (its *Open questions*, the first); then the evidence
    diff (*Not built*: what an edit changed at runtime, a view first). **Done when** a week's evidence of this repository
    has been read and that default decided.
-4. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
+4. **Unused code, from a coverage run** (the user, 2026-11-25: "by having detailed coverage information we can eliminate
+   unused code"; after item 2, as no new test machinery until then). A dispatched architecture run records what each test ran,
+   by statement, and `.silo/last-run/reach.json` keeps of it each file and the tests that ran any: what nothing ran is never
+   asked, and the dormant check, which meant to (by way in), went 2026-11-25. In order: which realms and packages that run
+   and the unit tests' reach don't measure (165 of 544 source files weren't in the record on 2026-11-24, 40 the API's and 23
+   the theme's: a lead, not a finding); then the declarations no test ran, by feature, as something seen in the editor
+   before a tool; then each one checked: nothing needs it and it goes, or it needs a test. What a person's runs reach counts
+   as use too (item 3). **Done when** that list is empty of surprises: each entry removed, tested, or kept with why.
+5. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
    (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s `why`,
    the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). CI's specs aren't selected by
    reach: each boots the whole workbench (silo README, *Built*). Target, decided 2026-11-24: fewer than 10 of 80 commits
@@ -51,12 +59,12 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    re-export: run by no test, though their importers are; build and dev scripts), 3 a package.json, 3 a workflow.
    Waits behind item 2. **Done when** the same replay says under 10; taking a file no test runs by its importers is
    most of what's left.
-5. **Every test in the editor** (the end goal; the user, 2026-11-03). What's left stays outside, each for its reason
+6. **Every test in the editor** (the end goal; the user, 2026-11-03). What's left stays outside, each for its reason
    (RUNNING.md, *Tests*); decided 2026-11-24 to leave it there. 141 of 176 unit test files pass in its debugger (2026-11-23).
    Four browser suites stay out: worker-realms.mjs (dist/ in fresh workers on the editor's origin), test/agent-tools/ (the
    agents' requests, no UI), test/workbench/ (what a page can't do to its own window) and performance.mjs (budgets).
 
-6. **`silo remove` and a workflow** (found 2026-11-25, taking out the weekly cleanup): it can't take out a feature whose only
+7. **`silo remove` and a workflow** (found 2026-11-25, taking out the weekly cleanup): it can't take out a feature whose only
    file is a workflow, which frees nothing by its reckoning; it was deleted by hand. **Done when** it does, or says so plainly.
 
 ## Watching
@@ -215,12 +223,12 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Decisions
 
-- **Code from strings in a run** (queue item 5). Decided 2026-11-23: a debug run gives a program `eval`, as Node does —
+- **Code from strings in a run** (queue item 6). Decided 2026-11-23: a debug run gives a program `eval`, as Node does —
   compiled in the run's scope (RUNNING.md, *Deterministic*); a direct eval's own scope isn't modeled, so it's global code.
-- **Item 5's verdicts** (item 4 until 2026-11-24). Decided 2026-11-23, as proposed: what stays outside, the host its subject (in
+- **Item 6's verdicts** (item 4 until 2026-11-24). Decided 2026-11-23, as proposed: what stays outside, the host its subject (in
   RUNNING.md, *Tests*); the tests that lacked only scaffolding change; the gaps a person's program would hit are fixed;
   a run has a `BroadcastChannel` of its own, Node's being the process's.
-- **How few tests is enough** (queue item 4). Decided 2026-11-24: fewer than 10 of 80 commits run everything.
+- **How few tests is enough** (queue item 5). Decided 2026-11-24: fewer than 10 of 80 commits run everything.
 - **Several owners** (a queue item until 2026-11-24). Decided 2026-11-22: a file may be several features' if and only if real coverage
   shows it — each owner's tests running it, as the last run's reach has it (`.silo/last-run/reach.json`, kept by
   `silo observed`), not static reach; otherwise it's split, or one feature's.
