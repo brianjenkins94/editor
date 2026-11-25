@@ -27,8 +27,8 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    deleted the test that said so, and its entry stayed active, "kept as it was", for three weeks. Back 2026-11-25 with its
    test (test/workbench/contrib.mjs, editor-contrib's starting point in a real editor), as are the starter interpreter's and
    renderer's. The other 28 checked 2026-11-25, each by breaking it and seeing whether a test failed, or by using it: 26 work
-   and declare what guards them. Nine had nothing that did, and have it now: the log's redaction (its gate could be taken out
-   unnoticed), Spell check, the theme in VS Code's document, the brand's colours, the admin app's two pages and the account
+   and declare what guards them. Eleven had nothing that did, and have it now: the log's redaction (its gate could be taken
+   out unnoticed), Spell check, the theme in VS Code's document and the look it's drawn with, the brand's colours, the admin app's two pages and the account
    page (test/workbench/admin.mjs, over the API's harness), the lint rules, the root domain's gate, `silo install`. Left:
    - **Dormant ways in, and the weekly cleanup** (*Weekly ledger cleanup*): both read CI's record of what its suites ran
      (`.silo/evidence/ci/architecture.json`), which went with the reduction, so `silo check` has listed none dormant and the
@@ -60,8 +60,8 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    diff (*Not built*: what an edit changed at runtime, a view first). **Done when** a week's evidence of this repository
    has been read and that default decided.
 5. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Built 2026-11-22;
-   resting held for one run at a time until 2026-11-24 (each test's standing now carried from run to run). **Done when**
-   two pushes in a row skip tests as resting in CI's log.
+   resting held for one run at a time until 2026-11-24 (each test's standing now carried from run to run). 35ffc41d's ci
+   rested 231 of 243 (2026-11-25). **Done when** the next push's does too.
 6. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
    (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s `why`,
    the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). CI's specs aren't selected by

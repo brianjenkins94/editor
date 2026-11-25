@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import * as path from "node:path";
 import { after, before, test } from "node:test";
 import * as url from "node:url";
+import { stripVTControlCharacters } from "node:util";
 import { launchChromium } from "@brianjenkins94/util/playwright/chromium";
 
 const packages = url.fileURLToPath(new URL("../../../", import.meta.url));
@@ -20,13 +21,14 @@ const errors = [];
 
 /** A server of the repository's, once it says it's up. */
 async function serve(command, args, folder, ready, env = {}) {
-	const child = spawn(command, args, { "cwd": path.join(packages, folder), "env": { ...process.env, ...env } });
+	// (a group of its own, so what it starts ends with it)
+	const child = spawn(command, args, { "cwd": path.join(packages, folder), "env": { ...process.env, ...env }, "detached": true });
 	let said = "";
 
 	started.push(child);
 	await new Promise((resolve, reject) => {
 		const heard = (chunk) => {
-			said += String(chunk);
+			said += stripVTControlCharacters(String(chunk));
 
 			if (said.includes(ready)) {
 				resolve();
@@ -36,6 +38,7 @@ async function serve(command, args, folder, ready, env = {}) {
 		child.stdout.on("data", heard);
 		child.stderr.on("data", heard);
 		child.on("exit", (code) => { reject(new Error(`${folder}'s server ended (${String(code)}): ${said.slice(-600)}`)); });
+		setTimeout(() => { reject(new Error(`${folder}'s server isn't up in 60 s: ${said.slice(-600)}`)); }, 60_000).unref();
 	});
 }
 
@@ -54,7 +57,10 @@ after(async () => {
 
 	for (const child of started) {
 		child.removeAllListeners("exit");
-		child.kill();
+
+		try {
+			process.kill(-child.pid, "SIGTERM");
+		} catch { /* ended already */ }
 	}
 });
 
