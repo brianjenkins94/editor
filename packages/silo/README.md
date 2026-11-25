@@ -86,8 +86,9 @@ happens to have, and lives in `util/silo`, where the editor and a test call it.
 | `remove` | deleting is an edit somebody reviews: the editor's, over lib's `removalOf`. The decision is `status` |
 | `restore` | the tombstone is already a `git checkout`, to run as it is |
 
-Decided with the direction: what a command is for. Not yet cut: any of it. `init` and `install` are for repositories other
-than this one, which has no baseline, so whether the command line keeps Anticipate and Track at all is the user's still.
+Decided with the direction: what a command is for. `install` stays, `init` folded into it (the user, 2026-11-25): the
+command line keeps Anticipate and Track for a repository worked on outside the editor, though this one has no baseline.
+Not yet cut: any of it.
 
 ### The files
 
