@@ -946,7 +946,8 @@
     ],
     "tests": [
       "packages/editor/test/fixtures/url-extension/",
-      "packages/editor/test/in-editor/workbench.spec.mjs"
+      "packages/editor/test/in-editor/workbench.spec.mjs",
+      "packages/editor/test/workbench/contrib.mjs"
     ]
   },
   "Feature ledger drift in Problems": {
@@ -1697,10 +1698,15 @@
     "docs": "packages/editor/RUNNING.md, *Another interpreter*",
     "ways": [
       "hub request|runtime.fs.attach",
-      "hub subscription|bridge.ready"
+      "hub subscription|bridge.ready",
+      "setting|run.debugger"
     ],
     "paths": [
-      "components/monaco-vscode-api/runtime.worker.ts"
+      "components/monaco-vscode-api/runtime.worker.ts",
+      "packages/editor-api/src/debugger.ts"
+    ],
+    "tests": [
+      "packages/editor/test/workbench/contrib.mjs"
     ]
   },
   "Preview CPU profiles": {
@@ -2394,6 +2400,9 @@
     ],
     "paths": [
       "contrib/src/renderer.ts"
+    ],
+    "tests": [
+      "packages/editor/test/workbench/contrib.mjs"
     ]
   },
   "Starter interpreter": {
@@ -2414,6 +2423,9 @@
       "contrib/src/interpreter.ts",
       "contrib/src/worker.ts",
       "contrib/vite.config.mjs"
+    ],
+    "tests": [
+      "packages/editor/test/workbench/contrib.mjs"
     ]
   },
   "Stepping debugger with step back": {

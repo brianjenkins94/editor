@@ -387,6 +387,12 @@ terminal) is the bridge's, for any debugger.
 A debugger in another extension host (editor-contrib's) is followed by what VS Code tells every host: no tracker sees
 it, so an agent doesn't see its output.
 
+A contributed extension may use a webview (editor-contrib's Rendered view does, as VS Code's own Markdown preview does);
+the editor's own views don't (a pane view instead). A webview's pages and their service worker are in a folder of their own
+(`__vscode__/webview/`, components/monaco-vscode-api), as that worker takes every page in its folder: beside the workbench's
+it took the workbench, whose package requests are coi-serviceworker.js's. It adds the isolation headers to its pages, so
+they draw on GitHub Pages too (2026-11-25).
+
 ### 2. The workspace runtime
 
 What the contract can't carry: a debugger's worker reads the workspace synchronously (`require`, `readFileSync`).

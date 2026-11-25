@@ -2,6 +2,14 @@ const ACTIVE_WITHIN_MS = 5000;
 
 let registering: Promise<unknown> | undefined;
 
+async function withoutWebviewWorker(): Promise<void> {
+	for (const registration of await navigator.serviceWorker.getRegistrations()) {
+		if (new URL(registration.scope).pathname.endsWith("/__vscode__/")) {
+			await registration.unregister();
+		}
+	}
+}
+
 export async function serviceWorkerActive(): Promise<void> {
 	if (registering === undefined) {
 		return;
@@ -9,6 +17,7 @@ export async function serviceWorkerActive(): Promise<void> {
 
 	const failed = registering.then(() => new Promise<never>(() => { /* ready says when */ }), () => undefined);
 
+	await withoutWebviewWorker().catch(() => undefined);
 	await Promise.race([navigator.serviceWorker.ready, failed, new Promise((resolve) => {
 		setTimeout(resolve, ACTIVE_WITHIN_MS);
 	})]);

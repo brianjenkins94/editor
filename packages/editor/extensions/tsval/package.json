@@ -20,6 +20,11 @@
     "configuration": {
       "title": "Run",
       "properties": {
+        "run.debugger": {
+          "type": "string",
+          "default": "tsval",
+          "description": "The debugger Run (▷), live runs and an agent's run start: tsval, or another extension's debug type — an interpreter plugged in from editor-contrib. Its `values` and `coverage` events show in the margin as tsval's do."
+        },
         "run.liveRuns": {
           "type": "boolean",
           "default": true,

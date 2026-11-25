@@ -1,5 +1,6 @@
 import type { Hub } from "@brianjenkins94/hub";
 import type { ObservedExtension } from "@brianjenkins94/editor-api/runtime";
+import { runDebugger } from "@brianjenkins94/editor-api/debugger";
 import { serve } from "@brianjenkins94/hub";
 import * as vscode from "vscode";
 
@@ -29,6 +30,8 @@ interface Variable { "name": string; "value": string; "type"?: string }
 
 const OUTPUT_LINES = 200;
 
+const ENDED_KEPT = 200;
+
 async function textOf(uri: vscode.Uri): Promise<string> {
 	const open = vscode.workspace.textDocuments.find((document) => document.uri.toString() === uri.toString());
 
@@ -38,6 +41,7 @@ async function textOf(uri: vscode.Uri): Promise<string> {
 class Session {
 	public state: DebugState = "starting";
 	public readonly session: vscode.DebugSession;
+	public tracked = false;
 	private reason: string | undefined;
 	private asking = false;
 	private thread = 1;
@@ -106,6 +110,13 @@ class Session {
 			this.state = "running";
 			this.output = [];
 		}
+	}
+
+	public stoppedOn(thread: number): void {
+		this.reason = this.asking ? "capability" : undefined;
+		this.asking = false;
+		this.thread = thread;
+		this.settle("stopped");
 	}
 
 	public settle(state: DebugState): void {
@@ -222,6 +233,7 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 	const sessions = new Map<string, Session>();
 	const launches = new Map<string, (session: Session) => void>();
 	const served = new Map<string, () => void>();
+	const ended = new Set<string>();
 
 	const follow = (debugSession: vscode.DebugSession): Session | undefined => {
 		if (debugSession.configuration["__live"] === true) {
@@ -291,7 +303,7 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 			}, { "once": true });
 		});
 
-		if (!await vscode.debug.startDebugging(undefined, { "type": "tsval", "request": "launch", "name": "Run", "program": path, "__launchId": launch, ...eventLoop === undefined ? {} : { "eventLoop": eventLoop } })) {
+		if (!await vscode.debug.startDebugging(undefined, { "type": runDebugger(), "request": "launch", "name": "Run", "program": path, "__launchId": launch, ...eventLoop === undefined ? {} : { "eventLoop": eventLoop } })) {
 			launches.delete(launch);
 
 			throw new Error("VS Code didn't start the run");
@@ -307,7 +319,13 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 			"createDebugAdapterTracker": (debugSession) => {
 				const session = follow(debugSession);
 
-				return session === undefined ? undefined : {
+				if (session === undefined) {
+					return undefined;
+				}
+
+				session.tracked = true;
+
+				return {
 					"onDidSendMessage": (message: { "type"?: string; "event"?: string; "body"?: Record<string, unknown> }) => {
 						session.sent(message);
 					},
@@ -317,7 +335,44 @@ export function serveDebugControl(context: vscode.ExtensionContext, hub: Hub, lo
 				};
 			}
 		}),
+		vscode.debug.onDidStartDebugSession((debugSession) => {
+			if (!ended.has(debugSession.id)) {
+				follow(debugSession);
+
+				return;
+			}
+
+			const launch = debugSession.configuration["__launchId"];
+			const over = new Session(debugSession);
+
+			over.settle("terminated");
+
+			if (typeof launch === "string") {
+				launches.get(launch)?.(over);
+				launches.delete(launch);
+			}
+		}),
+		vscode.debug.onDidReceiveDebugSessionCustomEvent(({ session, event }) => {
+			const followed = sessions.get(session.id);
+
+			if (followed?.tracked === false) {
+				followed.sent({ "type": "event", "event": event });
+			}
+		}),
+		vscode.debug.onDidChangeActiveStackItem((item) => {
+			const followed = item === undefined ? undefined : sessions.get(item.session.id);
+
+			if (followed?.tracked === false && item !== undefined && "frameId" in item) {
+				followed.stoppedOn(item.threadId);
+			}
+		}),
 		vscode.debug.onDidTerminateDebugSession((debugSession) => {
+			ended.add(debugSession.id);
+
+			if (ended.size > ENDED_KEPT) {
+				ended.delete(ended.values().next().value as string);
+			}
+
 			sessions.get(debugSession.id)?.settle("terminated");
 			sessions.delete(debugSession.id);
 			served.get(debugSession.id)?.();

@@ -13,6 +13,7 @@
     "./recorded": "./src/recorded.ts",
     "./gate": "./src/gate.ts",
     "./lifecycle": "./src/lifecycle.ts",
+    "./debugger": "./src/debugger.ts",
     "./evidence": "./src/evidence.ts",
     "./cpuprofile": "./src/cpuprofile.ts",
     "./failures": "./src/failures.ts",

@@ -6,6 +6,8 @@ import { mergeConfig } from "vite";
 // main.ts (the customized workbench) + all of its monaco-vscode-api dependencies into a
 // self-contained, minified ES build under dist/, so consumers import the finished artifact
 // rather than raw source.
+const WEBVIEW_WORKER = /^webview\/service-worker-[\w-]+\.js$/u;
+
 export default mergeConfig(defaults, {
 	// Relative base so emitted asset URLs (e.g. the codicon font, `url(./codicon.ttf)`) resolve
 	// relative to wherever the bundle is served rather than the origin root. Consumers mount this
@@ -24,7 +26,13 @@ export default mergeConfig(defaults, {
 			"input": { "main": "main.ts" },
 			// Bundle everything; nothing is externalized. Output naming (deterministic content-hashed chunks +
 			// assets, readable `main` entry) comes from the shared @brianjenkins94/util/vite/defaults.
-			"preserveEntrySignatures": "strict"
+			"preserveEntrySignatures": "strict",
+			"output": {
+				// VS Code's webview page, its frame's and its service worker in a folder of their own: a worker takes every page
+				// in its folder and below, and beside the workbench's it took the workbench, whose package requests (the editor's
+				// own worker's, coi-serviceworker.js) were a 404 from the first webview on (a Markdown preview), reloads included.
+				"assetFileNames": (asset) => (asset.originalFileNames.some((file) => /\/webview\/browser\/pre\//u.test(file)) ? "webview/[name]-[hash][extname]" : "[name]-[hash][extname]")
+			}
 		}
 	},
 	"plugins": [
@@ -102,7 +110,7 @@ export default mergeConfig(defaults, {
 			// loudly if upstream's shape changes (then check whether it handles this itself).
 			"name": "localhost-requests-from-workers",
 			"generateBundle": function(_options, bundle) {
-				const worker = Object.values(bundle).find((output) => output.type === "asset" && /^service-worker-[\w-]+\.js$/u.test(output.fileName));
+				const worker = Object.values(bundle).find((output) => output.type === "asset" && WEBVIEW_WORKER.test(output.fileName));
 
 				if (worker === undefined || worker.type !== "asset") {
 					throw new Error("localhost-requests-from-workers: no service-worker asset in the bundle");
@@ -117,6 +125,41 @@ export default mergeConfig(defaults, {
 				}
 
 				worker.source = source.replace(anchor, "if (!webviewId) {$1if (client.type !== 'worker' && client.type !== 'sharedworker') { console.error('Could not resolve webview id'); }$2return fetch(event.request);");
+			}
+		},
+		{
+			// A webview's frames are asked of the host directly (their worker answers only for their resources), and on one
+			// that can't send the isolation headers — GitHub Pages — a frame without them in an isolated page is refused. So
+			// their worker adds them, as coi-serviceworker.js does for the rest of the site (Safari has no `credentialless`).
+			"name": "isolated-webview-frames",
+			"generateBundle": function(_options, bundle) {
+				const worker = Object.values(bundle).find((output) => output.type === "asset" && WEBVIEW_WORKER.test(output.fileName));
+
+				if (worker === undefined || worker.type !== "asset") {
+					throw new Error("isolated-webview-frames: no webview service worker in the bundle (its folder is assetFileNames')");
+				}
+
+				const source = String(worker.source);
+				const anchor = /(return event\.respondWith\(processLocalhostRequest\(event, requestUrl\)\);\s*\})/u;
+
+				if (!anchor.test(source)) {
+					throw new Error("isolated-webview-frames: the end of the fetch handler not found in " + worker.fileName);
+				}
+
+				worker.source = source.replace(anchor, `$1
+
+	if (requestUrl.origin === sw.origin && event.request.mode === 'navigate') {
+		return event.respondWith(fetch(event.request).then((response) => {
+			const headers = new Headers(response.headers);
+			const safari = /Safari/.test(navigator.userAgent) && !/Chrom/.test(navigator.userAgent);
+
+			headers.set('Cross-Origin-Embedder-Policy', safari ? 'require-corp' : 'credentialless');
+			headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+			headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+
+			return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+		}));
+	}`);
 			}
 		},
 		{

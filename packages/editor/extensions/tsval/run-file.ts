@@ -1,3 +1,4 @@
+import { runDebugger } from "@brianjenkins94/editor-api/debugger";
 import { logger } from "@brianjenkins94/util/logger";
 import * as vscode from "vscode";
 
@@ -10,7 +11,7 @@ export function fileToRun(asked?: unknown): vscode.Uri | undefined {
 	return [asked instanceof vscode.Uri ? asked : undefined, vscode.window.activeTextEditor?.document.uri, ...vscode.window.visibleTextEditors.map((editor) => editor.document.uri)].find(runnable);
 }
 
-export const runOf = (file: vscode.Uri): vscode.DebugConfiguration => ({ "type": "tsval", "request": "launch", "name": "Run", "program": file.path });
+export const runOf = (file: vscode.Uri): vscode.DebugConfiguration => ({ "type": runDebugger(), "request": "launch", "name": "Run", "program": file.path });
 
 export function nothingToRun(): void {
 	void vscode.window.showInformationMessage("Open a JavaScript or TypeScript file to run it.");

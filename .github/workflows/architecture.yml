@@ -23,6 +23,7 @@
         "packages/theme/**",
         "packages/tsval/**",
         "components/**",
+        "contrib/**",
         "package.json",
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
@@ -34,6 +35,8 @@
         "packages/editor/test/*.mjs",
         "packages/editor/test/*.json",
         "packages/editor/test/in-editor/**",
+        "packages/editor/test/workbench/**",
+        "packages/editor/test/agent-tools/**",
         "packages/editor/test/fixtures/**",
         "!packages/editor/test/*.test.mjs"
       ]
@@ -54,6 +57,7 @@
         "packages/theme/**",
         "packages/tsval/**",
         "components/**",
+        "contrib/**",
         "package.json",
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
@@ -65,6 +69,8 @@
         "packages/editor/test/*.mjs",
         "packages/editor/test/*.json",
         "packages/editor/test/in-editor/**",
+        "packages/editor/test/workbench/**",
+        "packages/editor/test/agent-tools/**",
         "packages/editor/test/fixtures/**",
         "!packages/editor/test/*.test.mjs"
       ]

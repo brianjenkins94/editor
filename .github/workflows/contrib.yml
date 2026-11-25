@@ -1,7 +1,7 @@
 {
   "name": "contrib",
   # contrib/ is where editor-contrib's starting point is made. Once the editor has built, tested and deployed (cd, after a
-  # successful ci) and the architecture suites — contrib/ run in a real editor among them (test/contrib.mjs) — have passed
+  # successful ci) and the architecture suites — contrib/ run in a real editor among them (test/workbench/contrib.mjs) — have passed
   # on the commit, whichever finishes second: the changes made under contrib/ since the editor commit editor-contrib last
   # took from — and
   # nothing else — go to editor-contrib as a commit: applied as a patch (three-way), so what editor-contrib has of its
