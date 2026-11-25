@@ -153,8 +153,17 @@ function ledgerOf(repo: string): Ledger {
 	return parseLedger(fs.existsSync(path.join(repo, ledgerPath())) ? fs.readFileSync(path.join(repo, ledgerPath())) : undefined);
 }
 
+/** A finding of `silo check`: lib's, or a declared feature's with no tests (`untested`). */
+export type Finding = Omit<Drift, "check"> & { "check": Drift["check"] | "no tests" };
+
+/** The active declared features that name no tests, and whose `why` doesn't say why there are none (`no tests: …`): one
+ *  can stop working with nothing to notice, its entry active all along (as Run's debugger did for three weeks). */
+export function untested(ledger: Ledger): Finding[] {
+	return declaredFeatures(ledger).filter(([, entry]) => entry.status === "active" && (entry.tests ?? []).length === 0 && !/\bno tests: \S/u.test(entry.why ?? "")).map(([name]) => ({ "check": "no tests", "entry": name, "message": `"${name}" names no tests, so nothing notices when it stops working`, "code": `test it, and name the test (\`silo status "${name}" --tests <path> --add\`)`, "decision": "say in its why that it has none, and why (`no tests: …`)" }));
+}
+
 /** The feature ledger's drift from `repo` as it is (the checks that need no reach: lib util/silo/ledger). */
-export async function ledgerDrift(repo: string, today = new Date().toISOString().slice(0, 10), program?: Awaited<ReturnType<typeof currentProgram>>): Promise<Drift[]> {
+export async function ledgerDrift(repo: string, today = new Date().toISOString().slice(0, 10), program?: Awaited<ReturnType<typeof currentProgram>>): Promise<Finding[]> {
 	const ledger = ledgerOf(repo);
 	// (and the files not yet committed, but for those git ignores: a new file is held to an owner before it's committed)
 	const files = (await filesOf(repo, { "untracked": true })).filter((file) => fs.existsSync(path.join(repo, file)));
@@ -173,7 +182,7 @@ export async function ledgerDrift(repo: string, today = new Date().toISOString()
 		// (every code file a feature's, tests and vendored code among them: decision 22; a repository declaring none isn't held)
 		// (and a file several own held to what the last run's reach shows of it: real coverage, nothing else)
 		...declaredFeatures(ledger).length === 0 ? {} : { "owned": { "files": files.filter(isOwnedCode), "ran": ranByFile(fs.existsSync(path.join(repo, lastRunReachPath())) ? fs.readFileSync(path.join(repo, lastRunReachPath())) : undefined) } }
-	}), ...declaredDrift(ledger, { "ways": ways, "exists": exists })];
+	}), ...declaredDrift(ledger, { "ways": ways, "exists": exists }), ...untested(ledger)];
 }
 
 /** How many of the declared features own each declaration (lib util/silo/derive `codeOwners`). */
@@ -478,7 +487,7 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "check",
-			"description": "The feature ledger's drift from the code — a stopped feature still there, a removed one still in the docs, an experiment past its end, an entry naming nothing, a code file in an owned folder (.silo/owned.json) no feature owns or two do, and dead ends (a command or view declared and never registered, a setting never read) — and the declared features': a way in or a code file no feature owns, one owned that's gone or owned twice, a path that isn't there — each with both ways out; then what the runs' packages did that the baseline doesn't account for — a capability a package couldn't do when it was added, or a package it doesn't have. Exits 1 on either.",
+			"description": "The feature ledger's drift from the code — a stopped feature still there, a removed one still in the docs, an experiment past its end, an entry naming nothing, a code file in an owned folder (.silo/owned.json) no feature owns or two do, and dead ends (a command or view declared and never registered, a setting never read) — and the declared features': a way in or a code file no feature owns, one owned that's gone or owned twice, a path that isn't there, an active one that names no tests and doesn't say why — each with both ways out; then what the runs' packages did that the baseline doesn't account for — a capability a package couldn't do when it was added, or a package it doesn't have. Exits 1 on either.",
 			"config": juvy({ "repo": repoArgument, "json": jsonFlag, "prices": { "format": Boolean, "default": false, "doc": "Every entry's price, too: what deleting its feature would free." } }),
 			"handler": async (config) => {
 				const repo = await repoOf(config.get("repo"));

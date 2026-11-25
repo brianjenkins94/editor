@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import * as fs from "@brianjenkins94/util/fs";
 
-import { coverageOf, currentFeatures, historyOf, installArgs } from "../src/cli.ts";
+import { coverageOf, currentFeatures, historyOf, installArgs, untested } from "../src/cli.ts";
 import { filesOf, headOf, repoOf } from "../src/git.ts";
 
 const CLI = path.join(import.meta.dirname, "../src/cli.ts");
@@ -232,6 +232,33 @@ test("silo status, then silo check: the ledger's decisions held to the code — 
 		["dead end", "setting notes.unread is declared and its code never reads it"]
 	]);
 	assert.match(String(silo("check", ledgered).stdout), /Drift \(3\):\n {2}removed but documented: "old exporter" was removed \(abc1234\), and README\.md still names it/u);
+});
+
+test("silo check: an active feature names its tests, or says why it has none", async () => {
+	const repo = await repository({ "2026-10-20": { "notes/add.ts": "export const add = 1;\n", "notes/test/add.test.ts": "import \"../add\";\n" } });
+	const silo = (...args: string[]): ReturnType<typeof spawnSync> => spawnSync(process.execPath, ["--import", "tsx", CLI, ...args], { "encoding": "utf8" });
+	const status = (...args: string[]): void => assert.equal(silo("status", "Notes", ...args, "--repo", repo).status, 0);
+	const found = (): (string | undefined)[][] => (JSON.parse(String(silo("check", repo, "--json").stdout)) as { "drift": { "check": string; "entry"?: string }[] }).drift.map((each) => [each.check, each.entry]);
+
+	status("active", "the core keeps notes", "--what", "Notes beside their code.", "--paths", "notes");
+	assert.deepEqual(found(), [["no tests", "Notes"]]);
+
+	const checked = silo("check", repo);
+
+	assert.equal(checked.status, 1);
+	assert.match(String(checked.stdout), /no tests: "Notes" names no tests, so nothing notices[^\n]*\n {4}change the code: test it, and name the test[^\n]*; or the decision: say in its why/u);
+
+	// Named, it has them; and with none, its why says why (a reason, not the words alone).
+	status("--tests", "notes/test");
+	assert.deepEqual(found(), []);
+	assert.equal(silo("check", repo).status, 0);
+
+	const entry = { "since": "2026-10-20", "what": "Notes.", "paths": ["notes"] };
+
+	assert.equal(untested({ "Notes": { ...entry, "status": "active", "why": "core; no tests:" } }).length, 1);
+	assert.equal(untested({ "Notes": { ...entry, "status": "active", "why": "core; no tests: it's a workflow, run on each push" } }).length, 0);
+	// Only an active feature: not an experiment, a parked one, nor an entry that's only a decision.
+	assert.equal(untested({ "Notes": { ...entry, "status": "experiment", "why": "w", "until": "2099-01-01" }, "Old": { ...entry, "status": "parked", "why": "w" }, "A decision": { "status": "active", "why": "w", "since": "2026-10-20", "paths": ["notes"] } }).length, 0);
 });
 
 test("prices, silo remove and silo restore", async () => {

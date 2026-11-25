@@ -978,6 +978,11 @@ themselves (packages/editor/RUNNING.md, *Tests*). Tried first, and dropped: a tr
 anything), and a treemap of every declaration by folder (it showed files, not features). Not built: a way to give
 unowned code a feature from the map; a pane of the open file's features.
 
+**No tests (2026-11-25; the user).** An active declared feature that names no tests fails `silo check` (`no tests`), unless
+its `why` says why it has none (`no tests: …`): *Plug an interpreter into Run* was broken for three weeks with its entry
+active. The reason is in `why`, not a field of its own, so `silo status` writes it. An experiment or a parked one isn't held
+to it, and naming a test doesn't show that it fails when the feature's broken. `untested`, in the command line.
+
 Where: lib `util/silo/ledger.ts` (`declaredFeatures`, `declaredDrift`, `withoutRemoved`), read by `silo check`;
 `derive.ts` (`scoreGrouping`, `codeOwners`), read by `silo features --score`. Not built: declared features' drift in the
 editor's Problems (only CI's `silo check` reports it).

@@ -2003,7 +2003,7 @@
   },
   "Release pipeline": {
     "status": "active",
-    "why": "moved from the manifest (decision 21), area Repository: outside the editor's reduction, kept as it was",
+    "why": "moved from the manifest (decision 21), area Repository: outside the editor's reduction, kept as it was; no tests: it's the workflows, which run on each push to main, and a failed one says so",
     "since": "2026-11-03",
     "what": "Each push to main tests, builds and publishes every package as a GitHub release tarball and deploys the site, with no npm registry.",
     "paths": [

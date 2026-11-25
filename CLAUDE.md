@@ -55,6 +55,7 @@ features, and `silo check` (CI's `silo` job, `.github/workflows/silo.yml`) holds
 - **The ledger declares the features** — an entry holds what a feature is for (`what`, `docs`) and what it owns (`ways`,
   `paths`, `tests`). `silo check` fails on a way in no feature owns, so a new command, view, setting, tool or hub
   request goes in the `ways` of the feature it serves, in the same change.
+- **An active feature has tests** — `silo check` fails on one that names none, unless its `why` says why (`no tests: …`).
 - **An experiment starts with an entry** — `silo status "<name>" experiment "<why>" --until <date>`; it expires by
   default, and `silo check` says so.
 
