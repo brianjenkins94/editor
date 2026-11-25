@@ -12,6 +12,8 @@
       "paths": [
         "packages/editor/**",
         "packages/account/**",
+        "packages/admin/**",
+        "packages/api/**",
         "packages/almostnode/**",
         "packages/bablr/**",
         "packages/bablr-language-ts/**",
@@ -46,6 +48,8 @@
       "paths": [
         "packages/editor/**",
         "packages/account/**",
+        "packages/admin/**",
+        "packages/api/**",
         "packages/almostnode/**",
         "packages/bablr/**",
         "packages/bablr-language-ts/**",

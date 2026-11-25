@@ -30,6 +30,15 @@ test("the theme follows the system's: VS Code's theme switches, and the shell dr
 		});
 	};
 
+	// (and Web Awesome, in VS Code's own document, on the theme's colours and in its mode)
+	const inWorkbench = async (mode, colour) => session.eventually(`Web Awesome in the workbench, ${mode}`, async () => (await session.workbench().evaluate(() => {
+		const workbench = document.querySelector(".monaco-workbench");
+
+		return `${[...workbench.classList].filter((name) => name === "wa-dark" || name === "wa-light").join()} ${getComputedStyle(workbench).getPropertyValue("--wa-color-surface-default").trim().toLowerCase()}`;
+	}) === `wa-${mode} ${colour}` ? true : undefined), 30_000);
+
 	await inColours("dark", "Default Dark+", "#1e1e1e");
+	await inWorkbench("dark", "#1e1e1e");
 	await inColours("light", "Default Light+", "#ffffff");
+	await inWorkbench("light", "#ffffff");
 });

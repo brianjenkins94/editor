@@ -28,8 +28,12 @@ const PORT = Number(process.env["PORT"] ?? 8787);
 const root = new URL("..", import.meta.url).pathname;
 const random = (): string => base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
 
-/** `.dev.vars`' KEY=VALUE lines, for the GitHub client secret. */
+/** `.dev.vars`' KEY=VALUE lines, for the GitHub client secret: none with HARNESS_STAND_IN, as a test runs it. */
 function devVars(): Record<string, string> {
+	if (process.env["HARNESS_STAND_IN"] !== undefined) {
+		return {};
+	}
+
 	try {
 		return Object.fromEntries(fs.readFileSync(`${root}.dev.vars`, { "encoding": "utf-8" }).split("\n").map((line) => /^(\w+)\s*=\s*"?(.*?)"?\s*$/u.exec(line)).filter((match) => match !== null).map((match) => [match[1], match[2]]));
 	} catch {

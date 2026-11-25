@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "wrangler dev",
-    "dev:editor": "wrangler dev --config editor.jsonc"
+    "dev:editor": "wrangler dev --config editor.jsonc",
+    "test": "node --test --test-force-exit test/gate.test.ts"
   },
   "dependencies": {
     "@coinbase/x402": "latest",

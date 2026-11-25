@@ -67,6 +67,10 @@
     "paths": [
       "packages/admin/src/architecture.tsx",
       "packages/api/src/architecture.ts"
+    ],
+    "tests": [
+      "packages/api/test/admin.test.ts",
+      "packages/editor/test/workbench/admin.mjs"
     ]
   },
   "Admin: overview and users": {
@@ -77,6 +81,10 @@
     "docs": "packages/api/README.md, *The UI*",
     "paths": [
       "packages/admin/src/users.tsx"
+    ],
+    "tests": [
+      "packages/api/test/admin.test.ts",
+      "packages/editor/test/workbench/admin.mjs"
     ]
   },
   "Admin: sign-in and roles": {
@@ -332,6 +340,9 @@
       ".github/workflows/architecture.yml",
       "packages/editor/test/performance-budgets.json",
       "packages/editor/test/performance.mjs"
+    ],
+    "tests": [
+      "packages/editor/test/performance.mjs"
     ]
   },
   "Brand theme": {
@@ -348,6 +359,10 @@
       "packages/theme/src/tokens.ts",
       "packages/theme/src/web-awesome.ts",
       "packages/theme/test/budget.mjs"
+    ],
+    "tests": [
+      "packages/editor/test/workbench/admin.mjs",
+      "packages/theme/test/web-awesome.mjs"
     ]
   },
   "Breakpoints in a page's code": {
@@ -1142,6 +1157,10 @@
       "packages/api/src/clients.ts",
       "packages/api/src/grant.ts",
       "packages/api/src/tokens.ts"
+    ],
+    "tests": [
+      "packages/api/test/sessions.test.ts",
+      "packages/api/test/signin.test.ts"
     ]
   },
   "How a commit did in CI": {
@@ -1190,7 +1209,10 @@
       "hub subscription|RPC_CALL + \".\" + name",
       "hub subscription|RPC_REPLY + \".\" + id"
     ],
-    "paths": []
+    "paths": [],
+    "tests": [
+      "packages/hub/test/hub.test.ts"
+    ]
   },
   "In-browser Node runtime (almostnode)": {
     "status": "active",
@@ -1843,6 +1865,9 @@
     "docs": "packages/theme/README.md, *Published: `components/<name>`*",
     "paths": [
       "components/app-window"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/preview-windows.spec.mjs"
     ]
   },
   "Push to GitHub": {
@@ -1911,6 +1936,9 @@
     "docs": "packages/api/README.md, *Hardening*",
     "paths": [
       "packages/api/src/limits.ts"
+    ],
+    "tests": [
+      "packages/api/test/detection.test.ts"
     ]
   },
   "Real effects, decided per call": {
@@ -1944,6 +1972,10 @@
     "docs": "packages/api/README.md, *Visibility, and the redaction rule*",
     "paths": [
       "packages/api/src/log.ts"
+    ],
+    "tests": [
+      "packages/api/test/log.test.ts",
+      "packages/api/test/sessions.test.ts"
     ]
   },
   "Refactoring for agents": {
@@ -2271,6 +2303,9 @@
       "packages/api/src/email-code.html",
       "packages/api/src/email-code.txt",
       "packages/api/src/email.ts"
+    ],
+    "tests": [
+      "packages/api/test/email.test.ts"
     ]
   },
   "Sign in with GitHub": {
@@ -2358,6 +2393,9 @@
       "packages/site/public/robots.txt",
       "packages/site/src/gate.ts",
       "packages/site/wrangler.jsonc"
+    ],
+    "tests": [
+      "packages/site/test/gate.test.ts"
     ]
   },
   "Source Control for git": {
@@ -2387,6 +2425,9 @@
     "ways": [],
     "paths": [
       "packages/editor/extensions/cspell"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/spell-check.spec.mjs"
     ]
   },
   "Starter code renderer": {
@@ -2476,6 +2517,10 @@
       "packages/theme/src/styles/git-panel.ts",
       "packages/theme/src/styles/shell.ts",
       "packages/theme/src/styles/workbench.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/source-control.spec.mjs",
+      "packages/editor/test/in-editor/workbench.spec.mjs"
     ]
   },
   "Tamper-evident audit log": {
@@ -2655,7 +2700,9 @@
       "packages/editor/test/architecture-harness.mjs",
       "packages/editor/workbench/debug-bridge.ts"
     ],
-    "tests": []
+    "tests": [
+      "packages/editor/test/workbench/theme-follows.mjs"
+    ]
   },
   "The shell": {
     "status": "active",
@@ -2726,6 +2773,9 @@
       "packages/theme/src/vscode-skin.ts",
       "packages/theme/src/vscode.d.ts",
       "packages/theme/src/vscode.js"
+    ],
+    "tests": [
+      "packages/editor/test/workbench/theme-follows.mjs"
     ]
   },
   "Theme follows your system": {
@@ -2784,6 +2834,9 @@
     "paths": [
       "packages/api/src/mfa-state.ts",
       "packages/api/src/mfa.ts"
+    ],
+    "tests": [
+      "packages/api/test/password.test.ts"
     ]
   },
   "Type queries": {
@@ -2852,6 +2905,9 @@
     "paths": [
       "components/vscode-theme",
       "packages/theme/src/vscode-theme.ts"
+    ],
+    "tests": [
+      "packages/editor/test/workbench/theme-follows.mjs"
     ]
   },
   "Web Awesome components through the theme": {
@@ -2878,6 +2934,9 @@
     "docs": "packages/theme/README.md, *The four lint gaps*",
     "paths": [
       "packages/eslint-plugin-webawesome/src/index.js"
+    ],
+    "tests": [
+      "packages/eslint-plugin-webawesome/test/"
     ]
   },
   "Weekly ledger cleanup": {
@@ -3069,6 +3128,13 @@
       "packages/account/src/account.tsx",
       "packages/api/src/account-routes.ts",
       "packages/theme/src/styles/account.ts"
+    ],
+    "tests": [
+      "packages/api/test/account.test.ts",
+      "packages/api/test/link.test.ts",
+      "packages/api/test/passkeys.test.ts",
+      "packages/api/test/password.test.ts",
+      "packages/editor/test/workbench/admin.mjs"
     ]
   },
   "Your edits since the last commit": {
@@ -3150,6 +3216,9 @@
     "docs": "packages/silo/README.md, *Which tests reach what (designed 2026-10-22; the record built 2026-10-23)*",
     "ways": [
       "cli command|coverage"
+    ],
+    "tests": [
+      "packages/silo/test/cli.test.ts"
     ]
   },
   "silo features": {
@@ -3160,6 +3229,9 @@
     "docs": "packages/silo/README.md, *Derived history: features, reach, what runs say (built 2026-10-12; the feature layer parked)*",
     "ways": [
       "cli command|features"
+    ],
+    "tests": [
+      "packages/silo/test/cli.test.ts"
     ]
   },
   "silo history": {
@@ -3170,6 +3242,9 @@
     "docs": "packages/silo/README.md, *Derived history: features, reach, what runs say (built 2026-10-12; the feature layer parked)*",
     "ways": [
       "cli command|history"
+    ],
+    "tests": [
+      "packages/silo/test/cli.test.ts"
     ]
   },
   "silo init": {
@@ -3179,6 +3254,9 @@
     "what": "Sets up .silo/ in a repository, with its git settings and a baseline of what the code imports.",
     "ways": [
       "cli command|init"
+    ],
+    "tests": [
+      "packages/silo/test/cli.test.ts"
     ]
   },
   "silo install": {
@@ -3188,6 +3266,9 @@
     "what": "Installs dependencies with the project's package manager, skipping anything published in the last week.",
     "ways": [
       "cli command|install"
+    ],
+    "tests": [
+      "packages/silo/test/cli.test.ts"
     ]
   },
   "silo remove and restore": {
@@ -3199,6 +3280,9 @@
     "ways": [
       "cli command|remove",
       "cli command|restore"
+    ],
+    "tests": [
+      "packages/silo/test/cli.test.ts"
     ]
   },
   "silo status": {
@@ -3209,6 +3293,9 @@
     "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes (designed 2026-10-12; step 1 built 2026-10-23)*",
     "ways": [
       "cli command|status"
+    ],
+    "tests": [
+      "packages/silo/test/cli.test.ts"
     ]
   },
   "terminal_run": {

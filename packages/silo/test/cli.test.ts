@@ -170,6 +170,28 @@ test("silo install: nothing published in the last `days` days — `latest` is th
 	assert.deepEqual(installArgs("pnpm", project, ["zod@4.1.0"], 7, now), ["add", "zod@4.1.0", "--config.minimum-release-age=10080", "--config.minimum-release-age-exclude=rolldown@1.2.13", "--config.minimum-release-age-exclude=zod@4.1.0"]);
 });
 
+test("the command line: silo install runs the project's package manager by that rule, then syncs the baseline; a failed install is a failure", async () => {
+	const project = await fs.mkdtemp(path.join(fs.tmpdir(), "silo-install-cli-"));
+	const bin = path.join(project, "bin");
+
+	await fs.mkdir(bin);
+	await fs.writeFile(path.join(project, "package.json"), JSON.stringify({ "name": "project", "dependencies": {} }));
+	// (a package manager that says what it was asked, and fails when asked for a package called `broken`)
+	await fs.writeFile(path.join(bin, "npm"), "#!/bin/sh\necho \"$@\" > asked.txt\ncase \"$*\" in *broken*) exit 3;; esac\n");
+	execFileSync("chmod", ["755", path.join(bin, "npm")]);
+	execFileSync("git", ["init", "-q"], { "cwd": project });
+
+	const install = (...packages: string[]): ReturnType<typeof spawnSync> => spawnSync(process.execPath, ["--import", "tsx", CLI, "install", ...packages, "--project", project], { "encoding": "utf8", "env": { ...process.env, "PATH": `${bin}${path.delimiter}${process.env["PATH"]!}` } });
+	const ran = install("left-pad");
+
+	assert.equal(ran.status, 0, String(ran.stderr));
+	assert.match(String(fs.readFileSync(path.join(project, "asked.txt"))), /^install left-pad --before=\S+/u);
+	assert.ok(fs.existsSync(path.join(project, ".silo/baseline.json")), "the baseline synced");
+	assert.equal(install("broken").status, 3);
+
+	await fs.rm(project, { "recursive": true, "force": true });
+});
+
 test("silo status, then silo check: the ledger's decisions held to the code — drift fails it", async () => {
 	const ledgered = await repository({
 		"2026-10-20": {

@@ -26,9 +26,18 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    the setting Run, live runs and an agent's run read, and how a debugger in another extension host is followed, and
    deleted the test that said so, and its entry stayed active, "kept as it was", for three weeks. Back 2026-11-25 with its
    test (test/workbench/contrib.mjs, editor-contrib's starting point in a real editor), as are the starter interpreter's and
-   renderer's. Left: the other 28, each checked against its `what` as a person has it, and what's gone brought back or its
-   entry removed; then whether `silo check` should say an active feature with no tests. **Done when** each has a test
-   declared or a reason it can't.
+   renderer's. The other 28 checked 2026-11-25, each by breaking it and seeing whether a test failed, or by using it: 26 work
+   and declare what guards them. Nine had nothing that did, and have it now: the log's redaction (its gate could be taken out
+   unnoticed), Spell check, the theme in VS Code's document, the brand's colours, the admin app's two pages and the account
+   page (test/workbench/admin.mjs, over the API's harness), the lint rules, the root domain's gate, `silo install`. Left:
+   - **Dormant ways in, and the weekly cleanup** (*Weekly ledger cleanup*): both read CI's record of what its suites ran
+     (`.silo/evidence/ci/architecture.json`), which went with the reduction, so `silo check` has listed none dormant and the
+     weekly run has done nothing since 2026-11-02. Under *Decisions*.
+   - **`silo coverage`** reads the runs committed under `.silo/`, of which there are none since 2026-11-02: here it says
+     nothing, after 140 s. Its test passes.
+   - **Release pipeline** has no test: it's the workflows, which run on each push.
+   - Whether `silo check` should say an active feature with no tests: under *Decisions*.
+   **Done when** those are decided.
 3. **The editor, used** (the user, 2026-11-24): for two weeks, to 2026-12-08, work on this repository happens in the
    editor, and on example-consumer (the user's choice); no new test machinery meanwhile. What it lacks, and the worst of
    *Watching*, is the queue after. A push from it needs the user signed in there. example-consumer's first session
@@ -228,6 +237,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **Item 7's verdicts** (item 4 until 2026-11-24). Decided 2026-11-23, as proposed: what stays outside, the host its subject (in
   RUNNING.md, *Tests*); the tests that lacked only scaffolding change; the gaps a person's program would hit are fixed;
   a run has a `BroadcastChannel` of its own, Node's being the process's.
+- **Dormant ways in** (queue item 2): make CI's record again (the reach a dispatched coverage run keeps, by declaration, made
+  and committed by CI), or take out dormancy, the weekly cleanup and what says they work (CLAUDE.md, silo README). Suggested:
+  take them out; a feature whose test fails when it's broken says more than code that loads and doesn't run.
+- **An active feature with no tests** (queue item 2): an error of `silo check`, unless its entry says why it has none.
+  Suggested: yes; two would say why (Release pipeline, Weekly ledger cleanup).
 - **How few tests is enough** (queue item 6). Decided 2026-11-24: fewer than 10 of 80 commits run everything.
 - **Several owners** (a queue item until 2026-11-24). Decided 2026-11-22: a file may be several features' if and only if real coverage
   shows it — each owner's tests running it, as the last run's reach has it (`.silo/last-run/reach.json`, kept by

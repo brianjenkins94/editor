@@ -9,6 +9,9 @@
   "files": [
     "src"
   ],
+  "scripts": {
+    "test": "node --test test/rules.test.mjs"
+  },
   "keywords": [
     "eslint",
     "eslintplugin",
