@@ -45,13 +45,113 @@ export function reportedIn(log: string): TestOutcome[] {
 	});
 }
 
-/** Each test's standing in `runs`, by its id (file › titles): what the job's name adds before it, taken off. */
+/** What a run's selection says each test's standing was as it started, a line a test: a test it then skips has no report,
+ *  and the runs read back are few, so its streak is carried from run to run. */
+const STANDING_LINE = /silo:standing (\{.*\})\s*$/u;
+
+/** A standing a run's log carries, among its tests' outcomes: an outcome of no attempt. */
+type Carried = TestOutcome & { "standing"?: TestStanding };
+
+/** `selected`'s standings, as a run's log carries them to the next. */
+export function standingsText(selected: readonly Standing[]): string {
+	return selected.flatMap(({ file, standing }) => (standing === undefined ? [] : [`silo:standing ${JSON.stringify({ "file": file, "standing": standing })}\n`])).join("");
+}
+
+/** The tests a job's log reported (`reportedIn`), and the standings it carried. */
+export function logRead(log: string): TestOutcome[] {
+	const carried = log.split("\n").flatMap((line): Carried[] => {
+		const json = STANDING_LINE.exec(line)?.[1];
+
+		if (json === undefined) {
+			return [];
+		}
+
+		try {
+			const { file, standing } = JSON.parse(json) as { "file": string; "standing": TestStanding };
+
+			return [{ "titles": [file, standing.id.slice(file.length + " › ".length)], "outcome": "skip", "standing": standing }];
+		} catch {
+			return [];
+		}
+	});
+
+	return [...reportedIn(log), ...carried];
+}
+
+/** `after`'s runs on from `carried`'s. */
+function continued(carried: TestStanding, after: TestStanding | undefined): TestStanding {
+	if (after === undefined) {
+		return carried;
+	}
+
+	const unbroken = after.streak.runs === after.runs && after.streak.verdict === carried.streak.verdict;
+	const lastFailed = after.lastFailed ?? carried.lastFailed;
+
+	return {
+		...after,
+		"runs": carried.runs + after.runs,
+		"flakes": carried.flakes + after.flakes,
+		"streak": { "verdict": after.streak.verdict, "runs": after.streak.runs + (unbroken ? carried.streak.runs : 0) },
+		...lastFailed === undefined ? {} : { "lastFailed": lastFailed }
+	};
+}
+
+/** Each test's standing in `runs`, by its id (file › titles): what the job's name adds before it, taken off. A test's
+ *  latest carried standing stands for the runs before it — unless that run ran the test's file and the test wasn't in
+ *  it: renamed or removed, it's no test any more. */
 export function standingsByTest(runs: CiRun[]): Map<string, TestStanding> {
-	return new Map([...standings(runs)].map(([id, standing]) => {
+	const ordered = [...runs].sort((left, right) => left.at.localeCompare(right.at));
+	const carried = new Map<string, { "standing": TestStanding; "from": number }>();
+	const gone = new Map<string, number>();
+	const plain = ordered.map((run, index): CiRun => {
+		const tests = run.attempts.flatMap(({ jobs }) => jobs.flatMap((job) => job.tests as Carried[]));
+		const reported = new Set(tests.filter((test) => test.standing === undefined).map((test) => test.titles.join(" › ")));
+		const ran = new Set(tests.filter((test) => test.standing === undefined).map((test) => test.titles[0]));
+
+		for (const { titles, standing } of tests) {
+			if (standing !== undefined) {
+				if (ran.has(titles[0]) && !reported.has(standing.id)) {
+					carried.delete(standing.id);
+					gone.set(standing.id, index);
+				} else {
+					carried.set(standing.id, { "standing": standing, "from": index });
+					gone.delete(standing.id);
+				}
+			}
+		}
+
+		return { ...run, "attempts": run.attempts.map((attempt) => ({ ...attempt, "jobs": attempt.jobs.map((job) => ({ ...job, "tests": (job.tests as Carried[]).filter((test) => test.standing === undefined) })) })) };
+	});
+	const since = (from: number): Map<string, TestStanding> => new Map([...standings(plain.slice(from))].map(([id, standing]) => {
 		const test = id.slice(id.indexOf(" › ") + 3);
 
 		return [test, { ...standing, "id": test }];
 	}));
+	const read = new Map<number, Map<string, TestStanding>>();
+	const from = (index: number): Map<string, TestStanding> => {
+		const known = read.get(index) ?? since(index);
+
+		read.set(index, known);
+
+		return known;
+	};
+	const all = new Map(from(0));
+
+	for (const [id, at] of gone) {
+		const again = from(at + 1).get(id);
+
+		if (again === undefined) {
+			all.delete(id);
+		} else {
+			all.set(id, again);
+		}
+	}
+
+	for (const [id, { standing, "from": index }] of carried) {
+		all.set(id, continued(standing, from(index).get(id)));
+	}
+
+	return all;
 }
 
 /** Everyone's vouches in `repo`. */
@@ -206,11 +306,14 @@ export interface TestOptions {
 	"say"?: (text: string) => void;
 }
 
+/** A test selected or not, and its standing as it was. */
+export type Standing = Selected & { "standing"?: TestStanding };
+
 /** Each candidate test, run or not, and why. */
-export async function selectFor(options: TestOptions): Promise<Selected[]> {
+export async function selectFor(options: TestOptions): Promise<Standing[]> {
 	const head = await graphAt(options.repo, options.analyzer, options.candidates);
 	const base = options.base === undefined || /^0+$/u.test(options.base) ? undefined : await graphAt(options.repo, options.analyzer, options.candidates, options.base);
-	const runs = options.ci === undefined ? [] : await githubRuns({ "repository": options.ci.repository, "workflow": options.ci.workflow, "limit": options.ci.limit ?? 20, "read": reportedIn, ...options.ci.token === undefined ? {} : { "token": options.ci.token } }).catch((error: unknown) => {
+	const runs = options.ci === undefined ? [] : await githubRuns({ "repository": options.ci.repository, "workflow": options.ci.workflow, "limit": options.ci.limit ?? 20, "read": logRead, ...options.ci.token === undefined ? {} : { "token": options.ci.token } }).catch((error: unknown) => {
 		options.say?.(`${options.ci!.repository}'s ${options.ci!.workflow} runs couldn't be read (${(error as Error).message}): every test is new to this run.`);
 
 		return [];
@@ -232,7 +335,7 @@ export async function selectFor(options: TestOptions): Promise<Selected[]> {
 	const then = base === undefined ? [] : [...vouches, ...vouchesAt(options.repo, options.base!)];
 	const ran = base === undefined ? new Map<string, Set<string>>() : ranReach(then, idsAt(options.repo, options.base!, [...new Set(then.flatMap((vouch) => Object.keys(vouch.reached).filter((key) => !key.includes("#") && !key.includes("node_modules/"))))]), filesNamedIn(options.repo, then));
 
-	return selectTests({
+	const selected = selectTests({
 		"tests": tests,
 		"reach": (test) => ran.get(test.id) ?? staticReach(head, test.file),
 		"changed": new Set(base === undefined ? [] : [...changedDeclarations(base, head), ...filesChangedSince(options.repo, options.base!)]),
@@ -245,6 +348,8 @@ export async function selectFor(options: TestOptions): Promise<Selected[]> {
 		"audit": options.audit,
 		"now": Date.now()
 	});
+
+	return selected.map((test) => ({ ...test, ...known.has(test.id) ? { "standing": known.get(test.id)! } : {} }));
 }
 
 /** Vouches for the tests that passed in `outcomes` (silo's reporter's, read back: `reportedIn`), each with the fingerprints
@@ -271,10 +376,11 @@ export function runWithReporter(files: readonly string[], runner: readonly strin
 }
 
 /** The selection said, and the runner run on its files with silo's reporter beside its own: the runner's exit code. */
-export async function runSelected(selected: Selected[], runner: readonly string[], options: { "repo": string; "cwd": string; "say": (text: string) => void }): Promise<number> {
+export async function runSelected(selected: Standing[], runner: readonly string[], options: { "repo": string; "cwd": string; "say": (text: string) => void }): Promise<number> {
 	const files = filesToRun(selected);
 
 	options.say(selectionText(selected));
+	options.say(standingsText(selected));
 
 	if (process.env.GITHUB_STEP_SUMMARY !== undefined) {
 		await fs.appendFile(process.env.GITHUB_STEP_SUMMARY, "### Tests selected\n\n```\n" + selectionText(selected) + "\n```\n");

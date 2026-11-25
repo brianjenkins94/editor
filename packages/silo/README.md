@@ -536,7 +536,11 @@ than its file's static reach (`ranReach`, 2026-11-22): the files of its latest e
 code at the push's base (the base's vouches read too, a vouches file keeping only each test's latest), and the push's
 changes by file as well as by declaration. Code a test didn't run can't change how it comes out unless a file it ran
 changes, and then it's touched; a vouch that didn't hold at the base says nothing, and static reach stands in. The run
-was tsval's, so a path only Node takes isn't in it: the weekly full run is what catches that.
+was tsval's, so a path only Node takes isn't in it: the weekly full run is what catches that. A
+test that rests isn't in a run's log, and CI's runs are read back only so far (20), so each run carries every test's
+standing as its selection found it (`silo:standing`, a line a test) and the next goes on from the latest: until
+2026-11-24 a resting test's passes left the window as it rested, so it rested one run and ran again (22225a82: 14 of
+224 run; every push after it, all). A run whose job failed before its tests is neither a pass nor a break.
 
 **Would it fail if its subject broke** (built 2026-11-23, the editor's front end: RUNNING.md, *What a file's tests notice
 broken*). A test that stays green may be guarding or may not look. The editor breaks what a file's tests ran, a
