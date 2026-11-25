@@ -873,7 +873,7 @@ Little beats the file that registers a way in. What that says:
   ways in reach different code: a command, its view and its setting share a feature, not declarations. And 141 of the
   368 reach nothing of their own: their handlers are written inline, where they're registered. Its two parameters
   barely matter (F 0.50–0.55 over ambient 3–40%, join 0.2–0.7).
-- **CI's tests can't tell features apart.** The architecture suites share a boot: 207 declarations are ambient, the 112
+- **CI's tests can't tell features apart** (the row was taken out 2026-11-25, its record gone since 2026-11-02). The architecture suites share a boot: 207 declarations are ambient, the 112
   tests make 34 clusters, and two thirds of the ways in overlap none of them. Unit tests' traces would do better (the
   2026-10-22 spike, *Which tests reach what*), and they stay on the machine that ran them.
 - **The joins missing are across realms.** Against the manifest's 26 areas instead, every derivation is more precise

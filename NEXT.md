@@ -56,10 +56,8 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    Four browser suites stay out: worker-realms.mjs (dist/ in fresh workers on the editor's origin), test/agent-tools/ (the
    agents' requests, no UI), test/workbench/ (what a page can't do to its own window) and performance.mjs (budgets).
 
-6. **What silo's removals left** (2026-11-25; the user had the dormant check, the weekly cleanup and `silo coverage` taken
-   out, lib's code for them too: lib 8fcc870). `silo features --score`'s "by tests" row reads the same missing record and
-   never shows (with it, lib's `CI_RECORDS`, `testsFromRecords` and `byTests`). `silo remove` can't take out a feature whose
-   only file is a workflow. **Done when** each is taken out, fixed or kept with why.
+6. **`silo remove` and a workflow** (found 2026-11-25, taking out the weekly cleanup): it can't take out a feature whose only
+   file is a workflow, which frees nothing by its reckoning; it was deleted by hand. **Done when** it does, or says so plainly.
 
 ## Watching
 

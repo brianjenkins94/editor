@@ -46,13 +46,13 @@ import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianje
 import { priceOf, priceText } from "@brianjenkins94/util/silo/cost";
 import { installCommand, packageManagerOf, pinOfRequest, workspacePins } from "@brianjenkins94/util/silo/install";
 import { observedAgainstDeclared, observedText, parseReach, ranByFile, reachRecord } from "@brianjenkins94/util/silo/observed";
-import { byFile, byFolder, byReach, byTests, codeOwners, linkedBySubjects, scoreGrouping, testsFromRecords } from "@brianjenkins94/util/silo/derive";
+import { byFile, byFolder, byReach, codeOwners, linkedBySubjects, scoreGrouping } from "@brianjenkins94/util/silo/derive";
 import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
 import { lastRunReachPath, ledgerPath } from "@brianjenkins94/util/silo/layout";
-import { CI_RECORDS, declaredDrift, declaredFeatures, drift, isOwnedCode, ledgerText, parseLedger, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
+import { declaredDrift, declaredFeatures, drift, isOwnedCode, ledgerText, parseLedger, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 import { filesOf, headOf, repoOf } from "./git.ts";
@@ -204,15 +204,13 @@ export async function derivationScores(repo: string): Promise<{ "derivations": {
 
 	const { features, graph } = await currentProgram(repo);
 	const ways = [...features.values()];
-	const records = fs.existsSync(path.join(repo, CI_RECORDS)) ? fs.readFileSync(path.join(repo, CI_RECORDS)) : undefined;
 	const textOf = (file: string): string | undefined => (fs.existsSync(path.join(repo, file)) ? fs.readFileSync(path.join(repo, file)) : undefined);
 	const groupings: [string, Map<string, string>][] = [
 		["by file", byFile(ways)],
 		["by folder", byFolder(ways)],
 		["by reach", byReach(ways, graph)],
 		["by file, linked by subjects", linkedBySubjects(byFile(ways), ways, textOf)],
-		["subject links alone", linkedBySubjects(new Map(ways.map((way) => [way.key, way.key])), ways, textOf)],
-		...records === undefined ? [] : [["by tests", byTests(ways, graph, testsFromRecords(records))] as [string, Map<string, string>]]
+		["subject links alone", linkedBySubjects(new Map(ways.map((way) => [way.key, way.key])), ways, textOf)]
 	];
 
 	const owners = codeOwners(declared, features, graph);
@@ -751,7 +749,7 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "features",
-			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code. With --score, what they add up to instead: the ways in grouped from the code alone (by file and by folder, the baselines; by reach; by file joined where a registration quotes a hub subject; by CI's tests), each grouping scored against the ledger's declared features: how many of its features each finds whole, splits or merges, and its precision and recall; and who owns the code: how many of the manifest's features reach each declaration, from their ways in and what registers them.",
+			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code. With --score, what they add up to instead: the ways in grouped from the code alone (by file and by folder, the baselines; by reach; by file joined where a registration quotes a hub subject), each grouping scored against the ledger's declared features: how many of its features each finds whole, splits or merges, and its precision and recall; and who owns the code: how many of the manifest's features reach each declaration, from their ways in and what registers them.",
 			"config": juvy({ "repo": repoArgument, "json": jsonFlag, "score": { "format": Boolean, "default": false, "doc": "Score each derivation of features from the code against the ledger's declared features (silo README, *The feature manifest*)." } }),
 			"handler": async (config) => {
 				const repo = await repoOf(config.get("repo"));
