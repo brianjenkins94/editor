@@ -57,10 +57,9 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    agents' requests, no UI), test/workbench/ (what a page can't do to its own window) and performance.mjs (budgets).
 
 6. **What silo's removals left** (2026-11-25; the user had the dormant check, the weekly cleanup and `silo coverage` taken
-   out). lib's `util/silo` keeps what only they used: `ledger.ts`'s `dormant`, `dormantWays` and `reachedFromRecords`, and
-   `coverage.ts`. `silo features --score`'s "by tests" row reads the same missing record and never shows. `silo remove` can't
-   take out a feature whose only file is a workflow. **Done when** each is taken out, fixed or kept with why; lib's is a push
-   to lib, the user's to OK.
+   out, lib's code for them too: lib 8fcc870). `silo features --score`'s "by tests" row reads the same missing record and
+   never shows (with it, lib's `CI_RECORDS`, `testsFromRecords` and `byTests`). `silo remove` can't take out a feature whose
+   only file is a workflow. **Done when** each is taken out, fixed or kept with why.
 
 ## Watching
 
