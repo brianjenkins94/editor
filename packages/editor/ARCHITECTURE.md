@@ -747,7 +747,7 @@ score. No new silo subcommand.
   The last full state is tagged `full-editor` before the reduction: browsable on GitHub, a worktree away locally, and
   read from in the editor (which fetches the tag: its clone is otherwise one commit deep). Production keeps the full
   editor by skipping only its deploy step while the rewrite runs (the API, admin and site deploy as before), so the
-  full editor works on main until the core can host its own work.
+  full editor works on main until the core can host its own work. It did until 2026-11-24, when this editor was deployed.
 - **The core is the candidates in step 2 plus running tests** (tsval and the test runner), so the core's tests run, and
   are vouched for, in the editor from the first commit.
 - **A declared feature's ledger entry holds what the manifest held, and the ledger becomes the source of truth**:

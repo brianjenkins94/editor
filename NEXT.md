@@ -15,15 +15,12 @@ How it's kept:
 
 Each item says what finishes it. One that has no such line yet waits on a decision, under *Decisions*.
 
-1. **The new editor on editor.unusuallygood.dev** (the user, 2026-11-24). Production still serves the editor of 2026-11-03:
-   only that step is held (`EDITOR_DEPLOYS` is `off`, production.yml); Pages and every tarball have published all along
-   (example-consumer green against them). Checked 2026-11-24, one browser profile on production's editor and then this
-   one's, at one address: a file's edit and a cloned repository's uncommitted work kept, `.silo/local` read, boot
-   (1.2–1.4 s) and memory (about 840 MB against 790–935) as production's, and back again the files are kept. Found and
-   fixed by it: BABLR never answered while a tab of the old editor was open (its store's upgrade waited on that tab); on
-   a first load the workbench could open before the service worker had the page, every package a 404; a tsconfig's
-   missing `extends` or `types` never healed (VS Code gives those problems no code). **Done when** the variable's on and
-   the site serves this editor, checked in Brave signed in (the user's own sign-in).
+1. **The new editor on editor.unusuallygood.dev** (the user, 2026-11-24: "Yes, deploy"). Deployed 2026-11-24 (be7d512a,
+   production run 45527774205; `EDITOR_DEPLOYS` is `on`, so each green `cd` deploys it). On the live site: the starter and a
+   cloned repository come up with no problems, under the service worker, and a program runs (in the user's Chrome). Held
+   before that since 2026-11-03; work kept in the old editor was checked to come through (be7d512a's message). Going
+   back isn't the switch: it's deploying `full-editor`'s build again, not tried. **Done when** it's been used signed in
+   (the user's own sign-in), a commit pushed from it.
 2. **The editor, used** (the user, 2026-11-24): for two weeks, work on this repository happens in the editor, and on one
    other repository (the user's to name); no new test machinery meanwhile. What it lacks, and the worst of *Watching*, is
    the queue after. A push from it needs the user signed in there. **Done when** two weeks' work is done there, its
@@ -65,6 +62,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
   dispatched coverage run and the unit tests' reach copied out of an editor; nothing in the editor writes it. As it is
   (2026-11-24, 1,834 tests), 10 files are run mostly by other features' tests, each for a reason: previews/page-evidence.ts
   goes into a page as text and request.ts's tests drive Chromium, so neither is counted; eight are bases.
+
+- **packages/api's "a sign-in: the code for DPoP-bound tokens" failed once on CI** (be7d512a, "Body has already been
+  read" reading `/me`'s answer, which nothing had read; green on its rerun, and here).
+- **On a first load change-problems' recheck logs an error** (the live site, 2026-11-24: "TypeScript Server Error"), likely
+  asked as TypeScript's projects reload for a package it had missed (versions.ts). Nothing shown; its span says it.
 
 - **A type error shown 4 minutes, once** (2026-10-31): features-map.ts's `wa-card` (ts 2345, L157) resolves, but one
   run showed it after 4 minutes: likely TypeScript checking before type acquisition wrote Web Awesome's types, and never
@@ -224,7 +226,7 @@ packages/editor (`--all`, `--runs N`, `--json`).
   the test suite eliminated and rebuilt with the features, declared, so CI can run fewer of them by resting and
   vouches.
   Decided 2026-11-02 too: main is reduced, the last full state tagged `full-editor` (and fetched by the editor to read
-  from), production keeping the full editor by skipping only its deploy step; the core is step 2's candidates plus
+  from), production keeping the full editor by skipping only its deploy step (until 2026-11-24); the core is step 2's candidates plus
   running tests; the ledger holds what the manifest did (`what`, `docs`, `paths`, `ways`, `tests`) and becomes the
   source of truth, `silo check` erroring on drift; ownership by file, runs, tests and traces giving continuous
   coverage. Decided 2026-11-20: a note migrated from a comment is the repository's, its `git blame` author kept on it.
