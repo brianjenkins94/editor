@@ -10,7 +10,7 @@ import { openEditor, openFile, problems } from "./editor.mjs";
 test("an import of a dependency type-checks against its own types, nothing installed", async ({ page }) => {
 	const workbench = await openEditor(page, {
 		"package.json": "{\n  \"type\": \"module\",\n  \"dependencies\": {\n    \"nanoid\": \"5.0.9\"\n  }\n}\n",
-		"tsconfig.json": "{ \"compilerOptions\": { \"module\": \"esnext\", \"moduleResolution\": \"bundler\", \"target\": \"esnext\", \"strict\": true } }\n",
+		"tsconfig.json": "{ \"compilerOptions\": { \"module\": \"esnext\", \"moduleResolution\": \"bundler\", \"target\": \"esnext\", \"strict\": true, \"types\": [\"nanoid\"] } }\n",
 		"src/id.ts": "import { nanoid } from \"nanoid\";\n\nexport const id: number = nanoid();\nexport const sized: string = nanoid(10);\n"
 	});
 
@@ -22,4 +22,6 @@ test("an import of a dependency type-checks against its own types, nothing insta
 	await expect(rows.filter({ "hasText": "Type 'string' is not assignable to type 'number'" })).toHaveCount(1, { "timeout": 180_000 });
 	await expect(rows.filter({ "hasText": "Cannot find module 'nanoid'" })).toHaveCount(0);
 	await expect(rows.filter({ "hasText": "is not assignable" })).toHaveCount(1);
+	// (nor does its tsconfig, which names the package's types, miss them)
+	await expect(rows.filter({ "hasText": "Cannot find type definition file" })).toHaveCount(0, { "timeout": 60_000 });
 });

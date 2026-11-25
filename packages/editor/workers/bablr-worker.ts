@@ -37,6 +37,8 @@ function done<T>(request: IDBRequest<T>): Promise<T> {
 	});
 }
 
+let released = false;
+
 const database = new Promise<IDBDatabase | undefined>((resolve) => {
 	try {
 		const open = indexedDB.open("bablr", 3);
@@ -49,7 +51,14 @@ const database = new Promise<IDBDatabase | undefined>((resolve) => {
 			open.result.createObjectStore("parses");
 		});
 		open.addEventListener("success", () => {
+			open.result.addEventListener("versionchange", () => {
+				released = true;
+				open.result.close();
+			});
 			resolve(open.result);
+		});
+		open.addEventListener("blocked", () => {
+			resolve(undefined);
 		});
 		open.addEventListener("error", () => {
 			resolve(undefined);
@@ -80,7 +89,7 @@ serve(hub, "bablr.parse", async (args, { signal }) => {
 
 	const key = PARSE_VERSION + "/" + await blobOid(source);
 	const db = await database;
-	const kept = db === undefined ? undefined : await done(db.transaction("parses").objectStore("parses").get(key) as IDBRequest<Answer | undefined>).catch(() => undefined);
+	const kept = db === undefined || released ? undefined : await done(db.transaction("parses").objectStore("parses").get(key) as IDBRequest<Answer | undefined>).catch(() => undefined);
 
 	if (kept !== undefined) {
 		return { ...kept, "cached": true };
@@ -110,7 +119,7 @@ serve(hub, "bablr.parse", async (args, { signal }) => {
 		return { "parsed": true, "comments": comments, "ms": Math.round(performance.now() - started) };
 	});
 
-	if (db !== undefined) {
+	if (db !== undefined && !released) {
 		await done(db.transaction("parses", "readwrite").objectStore("parses").put(answer, key)).catch(() => undefined);
 	}
 

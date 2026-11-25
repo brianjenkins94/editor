@@ -15,99 +15,41 @@ How it's kept:
 
 Each item says what finishes it. One that has no such line yet waits on a decision, under *Decisions*.
 
-1. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Built 2026-11-22:
-   lib `util/silo/select` and silo's `silo test` and `silo vouch` (selection by test, vouches that lapse when what they
-   reached changes, resting after 20 green runs, the week's window, audits, runtimes that must have agreed); ci.yml
-   passes the push's base and runs everything Mondays; packages/editor's unit tests run through `silo test`, CI's runs
-   read back (213 tests known). The editor's tsval runs vouch and its commits carry them, running first the touched tests
-   that hadn't run since their code changed (decision 12), each held to the packages it loaded, so an upgrade lapses
-   it; CI selects by each test's reach from a run where a vouch says it. Nothing's left to build. **Done when** a push's
-   CI log says it skipped tests as resting or vouched: a test a push doesn't reach rests after 20 green runs, so from
-   about the 20th push after 2026-11-22; a touched one vouched for in the editor sooner, once CI has passed it after a
-   vouch (decision 19).
-2. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
-   (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s
-   `why`, the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). Replayed over the
-   last 80 commits (2026-11-16), 34 would run everything: code nothing here reaches, package.json, the workflow. CI's
-   specs aren't selected by reach — each boots the whole workbench, so every change to the editor's code reaches every
-   one (2026-11-22, silo README, *Built*); the architecture workflow runs only for a change to what its suites are made
-   of. And what a file's tests notice broken, a statement skipped at a time, the tests that notice none in Problems
-   for a person to decide (2026-11-23; RUNNING.md, *What a file's tests notice broken*). **Done when** the same
-   replay, over the 80 commits before it's run, runs everything for no more than the target, which waits on a
-   decision (*Decisions*, *How few tests is enough*).
-3. **Where code is shared between features** (*Silo, firmed up*: one owner a file is where it starts, reassessed from
-   what runs show). What's there: `silo observed .silo/local/reach` compares each test's reach with the ledger
-   (2026-11-17: 149 tests, a median of 100% in their own features' code, 26 under half, mostly a dependency); CI's, from
-   a dispatched architecture run (2026-11-20, 41 specs, a median of 17%, `activate` and what every editor runs left
-   out); Features and tests says which of a feature's files other features' tests run (2026-11-21); the known case,
-   packages/admin/src/views.tsx, split 2026-11-22. Decided: several owners if and only if real coverage shows it
-   (*Decisions*, *Several owners*), built 2026-11-22: `silo observed <reach>` keeps what each test ran in
-   `.silo/last-run/reach.json`, and the ownership check (`silo check`, the editor's Problems) lets a file be several
-   features' only when it shows each one's tests running it. The record is from a full coverage run since 2026-11-23:
-   architecture run 45111162082's 86 and the unit tests' 1,723, run in an editor (143 files), 1,809 tests. The
-   unit tests' reach came out of that editor by a download from the page: nothing in the editor writes the record yet.
-   Read per file, with what more than a tenth of either kind of test runs left out, 39 files have most of their own
-   code run only by other features' tests; decided 2026-11-23 (the user: "as proposed"). Moved: the terminal's `git`,
-   `node` and `vite` commands' code (their `command.ts` stay the terminal's) to Git in the browser, Run from the shell
-   and the in-browser dev server; editor-api's recorded.ts to Breakpoints in a page's code; debug-mcp's tools/context.ts
-   to Connected tabs. Shared: cdp-memory.ts with debug-mcp server, preview-windows.tsx with the in-browser dev server,
-   playwright's engine.ts with Live runs. tsval's handlers stay the interpreter's, which now counts the conformance
-   suites among its tests. Left:
-   - **The record again from 45418212617** (2026-11-24: every spec's workbench reach, the agent suites a file per
-     feature): 16 files, from 39. Settled by it: ata.ts, code-refactor.ts, fs-trace.ts and script-run.ts have one
-     owner's tests now, as do features-view.tsx, evidence.ts, pane-views.ts, terminal/index.ts and baseline.ts.
-   - **No test had the debug worker's reach** (Playwright lists no worker a worker started, and it ended with its run):
-     fixed 2026-11-24, the harness asks every realm on the coverage runtime's own channel and the debug worker publishes
-     its counts before it's ended.
-   - **Each owner's tests now run its file** (the user, 2026-11-24: completed), confirmed by the record: coverage run
-     45460146486 with the unit tests' reach (the new ones' from an editor cloned from main), 1,834 tests, 11 files run
-     mostly by other features' tests, from 39. Tested: editor-api's rules.ts, policy.ts and evidence.ts in node
-     (policy's through a stand-in `vscode` module), gated-eval.ts in the workbench (test/workbench/gated-eval.mjs),
-     history/extension.ts by ledger-drift.spec, node-modules-provider.ts by package-types.spec, tsval's languageFunctions
-     in globals.test.ts, Playwright's value matchers in expect.test.mjs. Moved to the feature they test: a preview's
-     evidence (agent-tools/preview-evidence.mjs), a package a run imports (packages-in-run.mjs), a write the policy asks
-     about (real-effects.mjs). Shared, each owner's tests running it: coi-serviceworker.js with Capability prompts for
-     previews, workbench/evidence.ts with Evidence from previews. Bugs the tests found, fixed: a fresh project's import of
-     a dependency never type-checked — the provider took a package's folder for its main file (folders now from the
-     package's listing, its manifest and declarations with its root), and TypeScript kept a miss from before it could
-     answer (a "Cannot find module" for a pinned package reloads its projects, up to three times); a place in a rule read
-     `rates [country]`; `languageFunctions` missed Intl's prototypes; `toEqual` took two Maps, Sets, or dates a
-     millisecond apart for equal, and `toStrictEqual` was `toEqual`. Of the 11 left: previews/page-evidence.ts goes into
-     a page as text, as the socket gate does, so its own test's run of it isn't counted; request.ts's tests drive
-     Chromium, outside the editor; history/extension.ts (it registers other features' commands too), worker/values.ts,
-     session.ts, vite-dev-server.ts, calls.ts, engine.ts, preview-windows.tsx and margin/values.ts have their owners'
-     tests running them, the features built on them running more: bases, left so.
-   - **10 of 51 specs lost workbench reach** in 45111162082 (fixed 2026-11-24: frames get 30 s, and say when they
-     don't answer; in 45418212617 every spec has 60–65 workbench files).
-   - **preview-prompts failed under COVERAGE=1** (CI's `specs-2` in 45111162082 and 45418212617): fixed 2026-11-24.
-     Two causes, each needed: the socket gate goes into a preview's page as its source text, so instrumented it named
-     the service worker's counters and threw there (build/coverage.ts leaves it out); and a spec's windows were kept
-     open for the harness to read, each a whole editor, so three crashed the renderer (now read as the editor lets
-     them go, then closed).
-4. **Every test in the editor** (the end goal; the user, 2026-11-03). Four browser suites stay outside, each for a
-   reason a spec can't take away: worker-realms.mjs (dist/ in fresh workers on the editor's origin), test/agent-tools/
-   (the agents' requests, no UI), test/workbench/ (the system's colour scheme, the architecture plane, sign-in with the
-   API stood in for) and performance.mjs (budgets, from outside). The unit tests, counted again 2026-11-23 in an editor
-   cloned from main (e283640d; every one in its debugger, `runs_tests`, a package at a time: packages/tsval/vendor
-   aside, 176 files): 138 green, 1,707 tests passing and 20 failing in the files that load; 34 of the rest stay outside
-   as RUNNING.md, *Tests*, has it, and 4 were left — debug-mcp's page-tools, tabs and outdated green since, so 141.
-   (That morning: 104 of 163.) What held the rest out was judged test by test
-   — does the test need it to test what it's meant to? (the user, 2026-11-16 and again 2026-11-23: not blindly
-   implemented, as before) — and done as judged (the user's word, 2026-11-23): what stays outside, the host its subject,
-   is in RUNNING.md, *Tests*; the tests that only lacked scaffolding changed (06ca07e0, 697b25d1, 769d881a); what a
-   person's program would hit fixed (387e1dcc: a trailing-slash require, top-level await by static import, a Worker that
-   never ran nor failed, EADDRINUSE, loopback fetch, a run's own BroadcastChannel, metrics' zero interval), and tsval's
-   `then` forwarded by call, apply or Reflect.apply, found settling one. almostnode's Runtime tests all pass here
-   since 2026-11-23: a run's `eval` sees the program's globals, a program's fs outside the workspace is the run's
-   memory, a vm context has the language's built-ins, and a run takes `--import` and `module.registerHooks` (modules'
-   backpressure test needs its loader: `runs_tests` with `imports`, or `npm test` in the terminal). tsval's own tests
-   that hold it to V8 pass here too since 2026-11-23 (30bd7a2c, e283640d): its promise jobs are its own, so the tsval
-   under test orders as V8 whoever hosts it, and its event loop takes as external only a promise a host API returns,
-   not one the language's own functions do (87508749: promise-order's 30, its subclasses too, pass in an editor cloned
-   from main). And a program's changes to the built-ins it shares are its own, the worker's held apart (the user,
-   2026-11-23; RUNNING.md, *A program's changes to the built-ins are its own*): test262's file, which stalled its
-   debugger for 145 s, ends in under 30 s with its results — stopping, as tsval's own code can't run past it, at the test
-   that replaces the array iterator; it stays outside for its fresh realms.
+1. **The new editor on editor.unusuallygood.dev** (the user, 2026-11-24). Production still serves the editor of 2026-11-03:
+   only that step is held (`EDITOR_DEPLOYS` is `off`, production.yml); Pages and every tarball have published all along
+   (example-consumer green against them). Checked 2026-11-24, one browser profile on production's editor and then this
+   one's, at one address: a file's edit and a cloned repository's uncommitted work kept, `.silo/local` read, boot
+   (1.2–1.4 s) and memory (about 840 MB against 790–935) as production's, and back again the files are kept. Found and
+   fixed by it: BABLR never answered while a tab of the old editor was open (its store's upgrade waited on that tab); on
+   a first load the workbench could open before the service worker had the page, every package a 404; a tsconfig's
+   missing `extends` or `types` never healed (VS Code gives those problems no code). **Done when** the variable's on and
+   the site serves this editor, checked in Brave signed in (the user's own sign-in).
+2. **The editor, used** (the user, 2026-11-24): for two weeks, work on this repository happens in the editor, and on one
+   other repository (the user's to name); no new test machinery meanwhile. What it lacks, and the worst of *Watching*, is
+   the queue after. A push from it needs the user signed in there. **Done when** two weeks' work is done there, its
+   gaps listed here.
+3. **Runtime evidence, used** (after item 2; packages/editor/RUNTIME-EVIDENCE.md). Built: values, branches and types on
+   hover, what could go, coverage, previews' evidence, time. But none is kept for this repository (no `.silo/evidence`),
+   so nothing it says has been read in real work. In order: run this repository's own programs in it as item 2 goes;
+   decide from the diffs whether evidence is committed by default (its *Open questions*, the first); then the evidence
+   diff (*Not built*: what an edit changed at runtime, a view first). **Done when** a week's evidence of this repository
+   has been read and that default decided.
+4. **Fewer tests, by vouches and rest** (packages/silo/README.md, *Tests by feature, in your face*). Built 2026-11-22;
+   resting held for one run at a time until 2026-11-24 (each test's standing now carried from run to run). **Done when**
+   two pushes in a row skip tests as resting in CI's log.
+5. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
+   (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s `why`,
+   the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). CI's specs aren't selected by
+   reach: each boots the whole workbench (silo README, *Built*). Target, decided 2026-11-24: fewer than 10 of 80 commits
+   run everything. Replayed 2026-11-24 over the last 80 by file, against `.silo/last-run/reach.json`: 26, from 34
+   on 2026-11-16 — 20 for code nothing there reaches (types alone, as the debugger's protocol is, and modules that only
+   re-export: run by no test, though their importers are; build and dev scripts), 3 a package.json, 3 a workflow.
+   Waits behind item 2. **Done when** the same replay says under 10; taking a file no test runs by its importers is
+   most of what's left.
+6. **Every test in the editor** (the end goal; the user, 2026-11-03). What's left stays outside, each for its reason
+   (RUNNING.md, *Tests*); decided 2026-11-24 to leave it there. 141 of 176 unit test files pass in its debugger (2026-11-23).
+   Four browser suites stay out: worker-realms.mjs (dist/ in fresh workers on the editor's origin), test/agent-tools/ (the
+   agents' requests, no UI), test/workbench/ (what a page can't do to its own window) and performance.mjs (budgets).
 
 ## Watching
 
@@ -118,6 +60,11 @@ packages/editor (`--all`, `--runs N`, `--json`).
   `.silo/runs/…` untracked: 2026-11-24, one of three full runs here; alone, 2 of 2).
 - **evidence-kept's preview test missed its app's page once** (test/agent-tools/evidence-kept.mjs, "timed out waiting
   for the app's page", 2026-11-24, the second of three full runs of the split suites here; alone, 3 of 3).
+
+- **The reach record is made by hand** (`.silo/last-run/reach.json`, what lets a file have several owners): from a
+  dispatched coverage run and the unit tests' reach copied out of an editor; nothing in the editor writes it. As it is
+  (2026-11-24, 1,834 tests), 10 files are run mostly by other features' tests, each for a reason: previews/page-evidence.ts
+  goes into a page as text and request.ts's tests drive Chromium, so neither is counted; eight are bases.
 
 - **A type error shown 4 minutes, once** (2026-10-31): features-map.ts's `wa-card` (ts 2345, L157) resolves, but one
   run showed it after 4 minutes: likely TypeScript checking before type acquisition wrote Web Awesome's types, and never
@@ -131,16 +78,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
   editor's commit flow hasn't been tried against it: if one's refused, look here first.
 
 - **silo as a reusable workflow** (`.github/workflows/silo.yml`, 2026-11-03): its default runs `packages/silo@latest.tgz`,
-  and the tarball published now can't install (`file:../bablr`; fixed, not published, as deploys are off). A clean install
-  of one built locally ran on this repository, on lib (its ledger declares nothing, so it passes) and failed a stray file
-  in a repository declaring a feature. lib adopts it once deploys are on: a `silo` job in its ci, and its own ledger.
-
-- **When deploys are on again** (`EDITOR_DEPLOYS` is `off`, so no tarball has published since 2026-11-03): the first
-  publish of `@brianjenkins94/app-window` is the first bundled one (util-publish bundles a package that names a
-  `customElements` manifest, everything inlined but its peers). Checked locally against lib's script and
-  example-consumer; `example-consumer` installs from `@latest`, so it's what proves the published one. It needs a
-  `util` with that publish.ts published first. The retired `toolbar`, `caption`, `code` and `frame` tarballs stay on
-  Pages at their last versions, and stop updating.
+  published since (2026-11-23; installing it clean not tried again). lib adopts it next: a `silo` job in its ci, and its
+  own ledger.
 
 - **Reported errors, as of 2026-10-27** (the admin app's Errors pages; reporting fixed the same day: stack frames kept
   out of redaction, the workbench's errors with their stack, nothing reported once the page is going, a 7/30/90-day
@@ -263,15 +202,13 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Decisions
 
-- **Code from strings in a run** (queue item 4). Decided 2026-11-23: a debug run gives a program `eval`, as Node does —
+- **Code from strings in a run** (queue item 6). Decided 2026-11-23: a debug run gives a program `eval`, as Node does —
   compiled in the run's scope (RUNNING.md, *Deterministic*); a direct eval's own scope isn't modeled, so it's global code.
-- **Item 4's verdicts** (queue item 4). Decided 2026-11-23, as proposed: what stays outside, the host its subject (in
+- **Item 6's verdicts** (item 4 until 2026-11-24). Decided 2026-11-23, as proposed: what stays outside, the host its subject (in
   RUNNING.md, *Tests*); the tests that lacked only scaffolding change; the gaps a person's program would hit are fixed;
   a run has a `BroadcastChannel` of its own, Node's being the process's.
-- **How few tests is enough** (queue item 2): the target its replay is held to — how many of 80 commits may still run
-  everything. Suggested: under 10, the rest of what's left being package.json and the workflows, which run everything
-  by design.
-- **Several owners** (queue item 3). Decided 2026-11-22: a file may be several features' if and only if real coverage
+- **How few tests is enough** (queue item 5). Decided 2026-11-24: fewer than 10 of 80 commits run everything.
+- **Several owners** (a queue item until 2026-11-24). Decided 2026-11-22: a file may be several features' if and only if real coverage
   shows it — each owner's tests running it, as the last run's reach has it (`.silo/last-run/reach.json`, kept by
   `silo observed`), not static reach; otherwise it's split, or one feature's.
 - **Tests by feature**, silo's for any repository, the editor's rewrite first (packages/silo/README.md, *Tests by

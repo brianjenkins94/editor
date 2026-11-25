@@ -105,6 +105,11 @@ export async function openProject(vscode: typeof vscodeApi, root: string, log: L
 	}
 
 	for (const path of openEditors) {
+		if (!workspaceStore.existsSync(path)) {
+			log.info("openProject: not there to show", { "path": path });
+			continue;
+		}
+
 		try {
 			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(path));
 

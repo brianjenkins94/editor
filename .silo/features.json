@@ -2208,7 +2208,8 @@
     ],
     "tests": [
       "packages/editor/test/in-editor/workbench.spec.mjs",
-      "packages/editor/test/static-host.test.mjs"
+      "packages/editor/test/static-host.test.mjs",
+      "packages/editor/test/workbench/controlled.mjs"
     ]
   },
   "Runtime evidence kept in git": {

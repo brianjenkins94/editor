@@ -10,9 +10,22 @@ import { markReady } from "./readiness";
 
 export const MIN_AGE_DAYS = 7;
 
-const CANNOT_FIND_MODULE = "2307";
+const MODULE_NOT_FOUND = /^Cannot find module '([^']+)'/u;
+const TYPES_NOT_FOUND = /^Cannot find type definition file for '([^']+)'/u;
+const FILE_NOT_FOUND = /^File '([^']+)' not found/u;
 
-const MODULE_NAMED = /module '([^']+)'/u;
+export function packagesNotFound(message: string): string[] {
+	const named = (MODULE_NOT_FOUND.exec(message) ?? FILE_NOT_FOUND.exec(message))?.[1];
+	const types = TYPES_NOT_FOUND.exec(message)?.[1];
+
+	if (types !== undefined) {
+		const { pkg } = splitPackage(types);
+
+		return [pkg, `@types/${pkg}`];
+	}
+
+	return named === undefined ? [] : [splitPackage(named).pkg];
+}
 
 const STALE_SETTLE_MS = 1000;
 
@@ -348,7 +361,7 @@ export function watchVersions(vscode: typeof vscodeApi): vscodeApi.Disposable {
 	let lastReload = 0;
 	let pending: ReturnType<typeof setTimeout> | undefined;
 	const stale = (): void => {
-		const missing = [...new Set(vscode.languages.getDiagnostics().flatMap(([, diagnostics]) => diagnostics).filter((diagnostic) => diagnostic.source === "ts" && String(typeof diagnostic.code === "object" ? diagnostic.code.value : diagnostic.code) === CANNOT_FIND_MODULE).map((diagnostic) => splitPackage(MODULE_NAMED.exec(diagnostic.message)?.[1] ?? "").pkg))].filter((name) => pinned[name] !== undefined && (reloads.get(name) ?? 0) < STALE_RELOADS);
+		const missing = [...new Set(vscode.languages.getDiagnostics().flatMap(([, diagnostics]) => diagnostics).filter((diagnostic) => diagnostic.source === "ts").flatMap((diagnostic) => packagesNotFound(diagnostic.message)))].filter((name) => pinned[name] !== undefined && (reloads.get(name) ?? 0) < STALE_RELOADS);
 
 		if (missing.length === 0) {
 			return;

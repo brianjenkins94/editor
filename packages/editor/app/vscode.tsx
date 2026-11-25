@@ -3,6 +3,7 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { WorkbenchFile } from "@brianjenkins94/monaco-vscode-api/main";
 import { serve } from "@brianjenkins94/hub";
 import { windowServerTransport } from "../shared/pane-link";
+import { serviceWorkerActive } from "./coi";
 import { hostLog } from "./logging";
 
 const PANE_ID = "editor";
@@ -53,7 +54,9 @@ export function createVscodeWindow(options: VscodeWindowOptions = {}): VscodeWin
 		query.append("extension", extension);
 	}
 
-	iframe.src = base + "__vscode__/host.html?" + query.toString();
+	void span.span("editor.app.vscode.controlled", {}, async () => serviceWorkerActive()).then(() => {
+		iframe.src = base + "__vscode__/host.html?" + query.toString();
+	});
 
 	// eslint-disable-next-line webawesome/no-inline-styles, webawesome/no-css-in-strings -- an iframe filling its own mount box; not themeable chrome
 	iframe.style.cssText = "width:100%;height:100%;border:0;display:block;";

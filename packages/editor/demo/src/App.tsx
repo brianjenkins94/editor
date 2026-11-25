@@ -12,7 +12,7 @@ export function App() {
 			<p>
 				Edit <code>src/App.tsx</code> and save — the preview updates instantly.
 			</p>
-			<button type="button" onClick={() => setCount((value) => value + 1)}>
+			<button type="button" onClick={() => { setCount((value) => value + 1); }}>
 				count is {count}
 			</button>
 		</div>

@@ -4,7 +4,7 @@
 // one. With deps.dev and npm's registry stood in.
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { aliasOf, lockedVersions, resolveVersions } from "../workbench/versions.ts";
+import { aliasOf, lockedVersions, packagesNotFound, resolveVersions } from "../workbench/versions.ts";
 
 function json(body) {
 	return new Response(JSON.stringify(body), {
@@ -115,4 +115,13 @@ test("a lockfile's package nested a level down under the one that asked is on th
 
 	assert.equal(locked.ignore.version, "7.0.12");
 	assert.deepEqual(locked["isomorphic-git"].nested, { "ignore": "5.3.2" });
+});
+
+test("the packages TypeScript says it can't find: an import's, a tsconfig's types and what it extends, whose errors have no code; a file of the workspace's is no package's", () => {
+	assert.deepEqual(packagesNotFound("Cannot find module 'nanoid/non-secure' or its corresponding type declarations."), ["nanoid"]);
+	assert.deepEqual(packagesNotFound("Cannot find module '@scope/name/deep'. Did you mean to set the 'moduleResolution' option to 'nodenext', or to add aliases to the 'paths' option?"), ["@scope/name"]);
+	assert.deepEqual(packagesNotFound("Cannot find type definition file for 'vite/client'.\n  The file is in the program because:"), ["vite", "@types/vite"]);
+	assert.deepEqual(packagesNotFound("File '@tsconfig/node-lts/tsconfig.json' not found."), ["@tsconfig/node-lts"]);
+	assert.deepEqual(packagesNotFound("Type 'string' is not assignable to type 'number'."), []);
+	assert.deepEqual(packagesNotFound("Property 'x' does not exist: Cannot find module 'nanoid'"), []);
 });

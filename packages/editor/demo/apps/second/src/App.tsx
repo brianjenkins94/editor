@@ -12,7 +12,7 @@ export function App() {
 			<p>
 				This is a different package (<code>apps/second</code>) on its own preview port.
 			</p>
-			<button type="button" onClick={() => setTicks((value) => value + 1)} style={{ "padding": "6px 12px", "borderRadius": 6, "border": "none", "cursor": "pointer" }}>
+			<button type="button" onClick={() => { setTicks((value) => value + 1); }} style={{ "padding": "6px 12px", "borderRadius": 6, "border": "none", "cursor": "pointer" }}>
 				ticks: {ticks}
 			</button>
 		</div>
