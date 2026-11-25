@@ -10,9 +10,6 @@
  *   silo check [repo] [--prices] [--json]              the ledger's drift from the code (each with what deleting its
  *                                                        feature would free), and what the runs' packages did
  *                                                        beyond the baseline
- *   silo coverage [repo] [--since …] [--until …] [--ref …] [--json]
- *                                                      what the committed runs ran, commit by commit, by feature: what
- *                                                        started running, what stopped, what's reached and never ran
  *   silo test --files <globs> --run <runner> [--base …] [--full] [--audit …] [--dry] [--json]
  *                                                      the tests a change needs, run: what it reaches, less what's vouched
  *                                                        for or resting, more what failed lately in CI (decision 20)
@@ -32,7 +29,6 @@
  * The logic is @brianjenkins94/util/silo (features, history, git-snapshots): pure, so the editor runs the same code in
  * the browser over its own workspace. This file is only the command line's way to ask: git, the disk, and stdout.
  */
-import type { CoverageStep } from "@brianjenkins94/util/silo/coverage";
 import type { Price } from "@brianjenkins94/util/silo/cost";
 import type { Analyzer, DeclarationGraph } from "@brianjenkins94/util/silo/graph";
 import type { Drift, Ledger, LedgerStatus } from "@brianjenkins94/util/silo/ledger";
@@ -48,7 +44,6 @@ import { juvy } from "@brianjenkins94/util/juvy";
 import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
 import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianjenkins94/util/silo/audit";
 import { priceOf, priceText } from "@brianjenkins94/util/silo/cost";
-import { coverageMarkdown, coverageReplay } from "@brianjenkins94/util/silo/coverage";
 import { installCommand, packageManagerOf, pinOfRequest, workspacePins } from "@brianjenkins94/util/silo/install";
 import { observedAgainstDeclared, observedText, parseReach, ranByFile, reachRecord } from "@brianjenkins94/util/silo/observed";
 import { byFile, byFolder, byReach, byTests, codeOwners, linkedBySubjects, scoreGrouping, testsFromRecords } from "@brianjenkins94/util/silo/derive";
@@ -57,7 +52,7 @@ import { featuresOf } from "@brianjenkins94/util/silo/features";
 import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
 import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
 import { lastRunReachPath, ledgerPath } from "@brianjenkins94/util/silo/layout";
-import { CI_RECORDS, declaredDrift, declaredFeatures, drift, isOwnedCode, ledgerText, ownersOf, parseLedger, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
+import { CI_RECORDS, declaredDrift, declaredFeatures, drift, isOwnedCode, ledgerText, parseLedger, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
 import { filesOf, headOf, repoOf } from "./git.ts";
@@ -159,7 +154,7 @@ export type Finding = Omit<Drift, "check"> & { "check": Drift["check"] | "no tes
 /** The active declared features that name no tests, and whose `why` doesn't say why there are none (`no tests: …`): one
  *  can stop working with nothing to notice, its entry active all along (as Run's debugger did for three weeks). */
 export function untested(ledger: Ledger): Finding[] {
-	return declaredFeatures(ledger).filter(([, entry]) => entry.status === "active" && (entry.tests ?? []).length === 0 && !/\bno tests: \S/u.test(entry.why ?? "")).map(([name]) => ({ "check": "no tests", "entry": name, "message": `"${name}" names no tests, so nothing notices when it stops working`, "code": `test it, and name the test (\`silo status "${name}" --tests <path> --add\`)`, "decision": "say in its why that it has none, and why (`no tests: …`)" }));
+	return declaredFeatures(ledger).filter(([name, { tests = [] }]) => ledger[name].status === "active" && tests.length === 0 && !/\bno tests: \S/u.test(ledger[name].why)).map(([name]) => ({ "check": "no tests", "entry": name, "message": `"${name}" names no tests, so nothing notices when it stops working`, "code": `test it, and name the test (\`silo status "${name}" --tests <path> --add\`)`, "decision": "say in its why that it has none, and why (`no tests: …`)" }));
 }
 
 /** The feature ledger's drift from `repo` as it is (the checks that need no reach: lib util/silo/ledger). */
@@ -270,35 +265,6 @@ export async function historyOf(repo: string, options: { "since"?: string; "unti
 
 	try {
 		for await (const step of replay(gitSnapshots(repo, options), objects.read, { "analyzer": analyzer })) {
-			steps.push(step);
-		}
-	} finally {
-		objects.close();
-		analyzer.close?.();
-	}
-
-	return steps;
-}
-
-/** Where each span of a text is, as BABLR names them — the ids runtime evidence is keyed by (the editor's BABLR worker
- *  does the same). Throws, with BABLR's reason, for a text its grammar doesn't take. */
-async function placeSpans(source: string): Promise<{ "id": string; "start": number; "end": number }[]> {
-	const bablr = await import("@brianjenkins94/bablr") as { "cstSpansAsync": (source: string, language: string) => Promise<unknown>; "spanAnchors": (source: string, language: string, cst: unknown) => { "id": string; "type": string | null; "start": number; "end": number }[] };
-	const cst = await bablr.cstSpansAsync(source, "Program");
-
-	return bablr.spanAnchors(source, "Program", cst).filter((span) => span.type !== null).map(({ id, start, end }) => ({ "id": id, "start": start, "end": end }));
-}
-
-/** What the runs committed in a span of the history did, commit by commit (its baseline, the commit before it, first). */
-export async function coverageOf(repo: string, options: { "since"?: string; "until"?: string; "ref"?: string } = {}): Promise<CoverageStep[]> {
-	const analyzer = await analyzerOf(repo);
-	const objects = gitObjects(repo);
-	const steps: CoverageStep[] = [];
-	const ledger = ledgerOf(repo);
-
-	try {
-		// (told by whose the code is declared to be now: the one attribution, decision 22)
-		for await (const step of coverageReplay(gitSnapshots(repo, options), objects.read, { "analyzer": analyzer, "place": placeSpans, "owners": (file) => ownersOf(ledger, file) })) {
 			steps.push(step);
 		}
 	} finally {
@@ -632,35 +598,6 @@ export const app = subcommands({
 
 				fs.writeFileSync(path.join(repo, ledgerPath()), ledgerText(withStatus({ ...ledger, [name]: rest }, name, "active", `restored: ${entry.why}`, new Date().toISOString().slice(0, 10))));
 				process.stdout.write(`Restored "${name}" from ${checkout[1]}: ${checkout[2]}. It's active again.${entry.key === undefined ? "" : ` Its manifest entries (${entry.key}) came out beside it: \`git show ${checkout[1]}:<manifest>\` has them.`}\n`);
-			}
-		}),
-		command({
-			"name": "coverage",
-			"description": "What the runs committed in .silo/ ran, commit by commit: what started running, what stopped, and what was reached and never ran — by feature, or by folder where no feature reaches it — and what changed alongside. Exits 1 when something ran that couldn't be parsed (so isn't counted).",
-			"config": juvy({
-				"repo": repoArgument,
-				"since": { "format": String, "default": "", "doc": "Start of the span: anything git's --since takes. Default: the whole history." },
-				"until": { "format": String, "default": "", "doc": "End of the span, as git's --until takes it. Default: now." },
-				"ref": { "format": String, "default": "HEAD", "doc": "The branch or commit to walk back from." },
-				"json": jsonFlag
-			}),
-			"handler": async (config) => {
-				const repo = await repoOf(config.get("repo"));
-				const since = config.get("since");
-				const until = config.get("until");
-				const steps = await coverageOf(repo, { "ref": config.get("ref"), ...since === "" ? {} : { "since": since }, ...until === "" ? {} : { "until": until } });
-				const span = since === "" ? steps : steps.slice(1);
-
-				process.stdout.write(config.get("json") ? JSON.stringify(span, undefined, "\t") + "\n" : coverageMarkdown(span, { "title": "Coverage of " + path.basename(repo) }));
-
-				// What ran but isn't counted, because its code couldn't be parsed: said again where it can't be missed, and
-				// the command fails.
-				const unparsed = span.flatMap((step) => Object.entries(step.unparsed).map(([file, why]) => `${step.snapshot.slice(0, 7)} ${file}: ${why}`));
-
-				if (unparsed.length > 0) {
-					process.stderr.write(`silo coverage: ${unparsed.length} file${unparsed.length === 1 ? "" : "s"} ran but couldn't be parsed, so what ran there isn't counted:\n${unparsed.map((line) => "  " + line).join("\n")}\n`);
-					process.exitCode = 1;
-				}
 			}
 		}),
 		command({

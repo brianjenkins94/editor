@@ -19,7 +19,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@brianjenkins94/bablr": "https://brianjenkins94.github.io/editor/packages/bablr@latest.tgz",
     "@brianjenkins94/util": "https://brianjenkins94.github.io/lib/util@latest.tgz",
     "@typescript/typescript-wasip1-wasm": "7.1.0-dev.20261107.1",
     "cmd-ts": "latest",

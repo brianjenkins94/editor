@@ -3232,9 +3232,9 @@
     ]
   },
   "silo coverage": {
-    "status": "active",
-    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
-    "since": "2026-11-03",
+    "status": "removed",
+    "why": "taken out (user, 2026-11-25): it read the runs committed under .silo/, of which this repository has none since 2026-11-02, so it said nothing, after 140 s; what ran is read in the editor (Coverage in the gutter, Runtime evidence)",
+    "since": "2026-11-25",
     "what": "Shows what the runs saved in .silo/ executed, commit by commit: what started or stopped running, and what was never reached.",
     "docs": "packages/silo/README.md, *Which tests reach what (designed 2026-10-22; the record built 2026-10-23)*",
     "ways": [

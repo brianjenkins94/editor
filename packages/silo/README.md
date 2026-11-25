@@ -50,7 +50,7 @@ without a plan. It describes, it doesn't decide: the open questions at the end a
 |---|---|---|---|---|---|
 | Anticipate | What could this package do? | `init`, `install` (record the baseline) | the capabilities extension's `baseline.ts`, reading packages in its worker | `detect`, `audit`, `slice`; `packages`, `deobfuscate` (unused, see below) | `baseline.json` |
 | Track | Has a package started doing something new? | `install` (sync, nothing under a week old; reports what each upgrade grew), `check` (runs beyond the baseline) | the Exceptions view (what grew) | `audit`, `evidence` (`syncPackages`, `settledCaps`, `beyondBaseline`) | `baseline.json`, `runs/` |
-| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `coverage` (what committed runs ran, by owning feature), `features` (`--score`: derivations against the declared features), `history`, `observed` (each test's reach against the features its file declares); the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `derive`, `cost` | `runs/`, `evidence/`, `policy*`, `features.json`; `local/traces/` |
+| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `features` (`--score`: derivations against the declared features), `history`, `observed` (each test's reach against the features its file declares); the feature ledger's `status`, `remove`, `restore` | insights (coverage in the gutter; Set Status… in the Features view), notes, the history extension (the ledger's drift in Problems), the Margin's kept runs (its balls) | `evidence`, `runs`, `coverage`, `features`, `graph`, `history`, `oxc`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `derive`, `cost` | `runs/`, `evidence/`, `policy*`, `features.json`; `local/traces/` |
 | Gate | Should this call happen? Does the code keep to what's decided? | `check` (the ledger's drift: CI's lint) | the capabilities extension (static squiggles, the tsval canary), the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `local/registry.json` |
 
 ## What the prototype had, and where it is now
@@ -106,14 +106,15 @@ Both came over from the `silo` prototype. (`provenance` and `review`, the AI-app
    reduction, the second no reader. Their gap, the signal they were kept apart for, is asked of the two directly: a
    feature's "… not in its tests' runs", an allow rule no run used.
 4. ~~**Two attributions of runs to features.**~~ Decided 2026-11-03: one, the ledger's. A file's features are who declares
-   it (lib `ownersOf`, decision 22), and `coverage` tells what ran by them. `exercise` had no callers left and went. What
+   it (lib `ownersOf`, decision 22). `exercise` had no callers left and went. What
    runs and traces show is compared with the declaration, and doesn't stand in for it. That comparison isn't built:
    *Declared against observed*, which is also how sharing gets reassessed, and it needs per-test reach recorded against
    today's tests (`.silo/last-run/reach.json` is `full-editor`'s, whose tests are gone).
 5. ~~**Which subcommands belong.**~~ Answered 2026-11-22: all ten, each under its job (the table above): Anticipate
-   `init` and `install`; Track `install`'s sync and `check`'s runs beyond the baseline; Remember `coverage`, `features`,
+   `init` and `install`; Track `install`'s sync and `check`'s runs beyond the baseline; Remember `features`,
    `history`, `observed`, and the ledger's `status`, `remove` and `restore`; Gate `check` (CI's `silo` job). The command
-   line's header lists all ten. `features` and `history` read the ledger's declared features now, not the parked layer.
+   line's header lists them; `coverage`, the tenth, was taken out 2026-11-25 (the user): it told what runs committed
+   under `.silo/` ran, commit by commit, and this repository has had none since 2026-11-02. `features` and `history` read the ledger's declared features now, not the parked layer.
 6. ~~**The leftovers.**~~ Answered 2026-11-22: `packages` and `deobfuscate` stay in lib, unused here, with 1's carrying;
    `guard` has no caller in the editor or silo either, and is lib's to keep or drop.
 7. ~~**Tests and purity have no job yet.**~~ Decided 2026-10-24: no fifth job. Choosing which tests a change reaches,
@@ -212,10 +213,10 @@ What this asks of the design:
 |---|---|---|---|
 | Anticipate | `silo install` makes and syncs the baseline (no separate `init`: the first install starts `.silo/`, as the prototype onboarded on first run) | Makes the baseline from the registry as a project opens, and syncs it as dependencies change (the capabilities extension, in a worker of its own; the `silo.baseline` setting turns it off) | One package analysis, given a package's files however they were read (node_modules or a tarball): the slice of each package the code imports (the import surface, tree-shaken), as the prototype's audit did |
 | Track | `silo install` (nothing under a week old; reports what each upgrade added, and what your use of a package reaches more) | The resolver takes nothing under a week old; the Exceptions view shows growth and the runs' exceptions | The resolver's age rule, growth, `beyondBaseline` |
-| Remember | `silo coverage` (what committed runs ran); `features`/`history` stay, parked (*Derived history*, below) | Insights (coverage, values, "what could go"), notes; the history extension for the session | One run record (`runs/<user>.jsonl`), one evidence format, one attribution of runs to features |
+| Remember | `features`/`history` stay, parked (*Derived history*, below) | Insights (coverage, values, "what could go"), notes; the history extension for the session | One run record (`runs/<user>.jsonl`), one evidence format, one attribution of runs to features |
 | Gate | `silo run <file>` (new): Node with silo's `--import` preload (below), every gated call decided by the policy, the run recorded as the editor does; asks at a terminal, fails where it can't ask (CI) | Runs in the debugger, almostnode, previews, gated as today | `enforce/decide.mjs` (BERNARD, JUDICIAL), policy, the run envelope |
 
-So the command line becomes: `install`, `run`, `coverage`, with `features` and `history` parked. `init` folds into
+So the command line becomes: `install`, `run`, with `features` and `history` parked. `init` folds into
 `install`; `accept` and `check` go. In CI, the gate is running the project (its tests, its scripts) through `silo run`.
 
 ### What the design implies, when it's built
@@ -225,8 +226,8 @@ So the command line becomes: `install`, `run`, `coverage`, with `features` and `
 - **One package analysis**, called by both front ends on a package's files, however they were read.
 - **`silo run`**, the desktop gate: the policy and decision core the editor already uses, a terminal prompt in place of
   the editor's, failure in place of a prompt in CI, and the same run envelope.
-- **One run record and one attribution**: the local MCP ledger and the shared runs in one shape, and one way, shared
-  by `silo coverage` and the history extension, of saying which features ran.
+- **One run record and one attribution**: the local MCP ledger and the shared runs in one shape, and one way
+  of saying which features ran.
 
 ### The desktop gate: a `--import` preload
 

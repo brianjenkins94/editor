@@ -21,25 +21,7 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    before that since 2026-11-03; work kept in the old editor was checked to come through (be7d512a's message). Going
    back isn't the switch: it's deploying `full-editor`'s build again, not tried. **Done when** it's been used signed in
    (the user's own sign-in), a commit pushed from it.
-2. **Every feature without tests, checked to work** (the user, 2026-11-25, of `run.debugger`: "a pretty core feature").
-   31 active features declared no tests when *Plug an interpreter into Run* was found gone: the reduction (2026-11-02) took
-   the setting Run, live runs and an agent's run read, and how a debugger in another extension host is followed, and
-   deleted the test that said so, and its entry stayed active, "kept as it was", for three weeks. Back 2026-11-25 with its
-   test (test/workbench/contrib.mjs, editor-contrib's starting point in a real editor), as are the starter interpreter's and
-   renderer's. The other 28 checked 2026-11-25, each by breaking it and seeing whether a test failed, or by using it: 26 work
-   and declare what guards them. Eleven had nothing that did, and have it now: the log's redaction (its gate could be taken
-   out unnoticed), Spell check, the theme in VS Code's document and the look it's drawn with, the brand's colours, the admin app's two pages and the account
-   page (test/workbench/admin.mjs, over the API's harness), the lint rules, the root domain's gate, `silo install`. Left:
-   - **Dormant ways in, and the weekly cleanup**: taken out 2026-11-25 (the user). A third reader of the record they read,
-     `silo features --score`'s "by tests" row, is still there and never shows; and lib's `ledger.ts` still has what only
-     `silo check`'s list used (`dormant`, `dormantWays`, `reachedFromRecords`), for a change to lib.
-     And `silo remove` took out nothing of it: a feature whose only file is a workflow frees nothing by its reckoning, so it
-     was deleted by hand.
-   - **`silo coverage`** reads the runs committed under `.silo/`, of which there are none since 2026-11-02: here it says
-     nothing, after 140 s. Its test passes.
-   - An active feature that names no tests fails `silo check` (2026-11-25), unless its `why` says why: Release pipeline's does.
-   **Done when** those are decided.
-3. **The editor, used** (the user, 2026-11-24): for two weeks, to 2026-12-08, work on this repository happens in the
+2. **The editor, used** (the user, 2026-11-24): for two weeks, to 2026-12-08, work on this repository happens in the
    editor, and on example-consumer (the user's choice); no new test machinery meanwhile. What it lacks, and the worst of
    *Watching*, is the queue after. A push from it needs the user signed in there. example-consumer's first session
    (2026-11-24, the live site): it loads with no problems, `npm install` and `npm run dev` work, and its previews didn't;
@@ -54,25 +36,31 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      do of an open preview; whether `playwright` itself should be that is to decide.
    - A repository with no ESLint config is held to the editor's own style rules (`object-shorthand` on its tests).
    **Done when** two weeks' work is done there, its gaps listed here.
-4. **Runtime evidence, used** (after item 3; packages/editor/RUNTIME-EVIDENCE.md). Built: values, branches and types on
+3. **Runtime evidence, used** (after item 2; packages/editor/RUNTIME-EVIDENCE.md). Built: values, branches and types on
    hover, what could go, coverage, previews' evidence, time. But none is kept for this repository (no `.silo/evidence`),
-   so nothing it says has been read in real work. In order: run this repository's own programs in it as item 3 goes;
+   so nothing it says has been read in real work. In order: run this repository's own programs in it as item 2 goes;
    decide from the diffs whether evidence is committed by default (its *Open questions*, the first); then the evidence
    diff (*Not built*: what an edit changed at runtime, a view first). **Done when** a week's evidence of this repository
    has been read and that default decided.
-5. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
+4. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
    (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s `why`,
    the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). CI's specs aren't selected by
    reach: each boots the whole workbench (silo README, *Built*). Target, decided 2026-11-24: fewer than 10 of 80 commits
    run everything. Replayed 2026-11-24 over the last 80 by file, against `.silo/last-run/reach.json`: 26, from 34
    on 2026-11-16 — 20 for code nothing there reaches (types alone, as the debugger's protocol is, and modules that only
    re-export: run by no test, though their importers are; build and dev scripts), 3 a package.json, 3 a workflow.
-   Waits behind item 3. **Done when** the same replay says under 10; taking a file no test runs by its importers is
+   Waits behind item 2. **Done when** the same replay says under 10; taking a file no test runs by its importers is
    most of what's left.
-6. **Every test in the editor** (the end goal; the user, 2026-11-03). What's left stays outside, each for its reason
+5. **Every test in the editor** (the end goal; the user, 2026-11-03). What's left stays outside, each for its reason
    (RUNNING.md, *Tests*); decided 2026-11-24 to leave it there. 141 of 176 unit test files pass in its debugger (2026-11-23).
    Four browser suites stay out: worker-realms.mjs (dist/ in fresh workers on the editor's origin), test/agent-tools/ (the
    agents' requests, no UI), test/workbench/ (what a page can't do to its own window) and performance.mjs (budgets).
+
+6. **What silo's removals left** (2026-11-25; the user had the dormant check, the weekly cleanup and `silo coverage` taken
+   out). lib's `util/silo` keeps what only they used: `ledger.ts`'s `dormant`, `dormantWays` and `reachedFromRecords`, and
+   `coverage.ts`. `silo features --score`'s "by tests" row reads the same missing record and never shows. `silo remove` can't
+   take out a feature whose only file is a workflow. **Done when** each is taken out, fixed or kept with why; lib's is a push
+   to lib, the user's to OK.
 
 ## Watching
 
@@ -230,12 +218,12 @@ packages/editor (`--all`, `--runs N`, `--json`).
 
 ## Decisions
 
-- **Code from strings in a run** (queue item 6). Decided 2026-11-23: a debug run gives a program `eval`, as Node does —
+- **Code from strings in a run** (queue item 5). Decided 2026-11-23: a debug run gives a program `eval`, as Node does —
   compiled in the run's scope (RUNNING.md, *Deterministic*); a direct eval's own scope isn't modeled, so it's global code.
-- **Item 6's verdicts** (item 4 until 2026-11-24). Decided 2026-11-23, as proposed: what stays outside, the host its subject (in
+- **Item 5's verdicts** (item 4 until 2026-11-24). Decided 2026-11-23, as proposed: what stays outside, the host its subject (in
   RUNNING.md, *Tests*); the tests that lacked only scaffolding change; the gaps a person's program would hit are fixed;
   a run has a `BroadcastChannel` of its own, Node's being the process's.
-- **How few tests is enough** (queue item 5). Decided 2026-11-24: fewer than 10 of 80 commits run everything.
+- **How few tests is enough** (queue item 4). Decided 2026-11-24: fewer than 10 of 80 commits run everything.
 - **Several owners** (a queue item until 2026-11-24). Decided 2026-11-22: a file may be several features' if and only if real coverage
   shows it — each owner's tests running it, as the last run's reach has it (`.silo/last-run/reach.json`, kept by
   `silo observed`), not static reach; otherwise it's split, or one feature's.
