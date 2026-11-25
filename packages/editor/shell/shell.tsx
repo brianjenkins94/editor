@@ -85,7 +85,7 @@ function RailContent({ items }: { "items": RailItem[] }) {
 	);
 }
 
-function Shell() {
+function Shell({ controlled }: { "controlled": Promise<void> }) {
 	const [rhsCollapsed, setRhsCollapsed] = useState(true);
 	const [asideWidth, setAsideWidth] = useState(() => loadPaneWidth("asideWidth", PANE.asideDefault));
 	const [shell, setShell] = useState<ShellContext | undefined>(undefined);
@@ -107,11 +107,13 @@ function Shell() {
 
 		const shellHub = createHub({ "id": "shell" });
 
-		performance.mark("shell/app-iframe");
 		const appAddress = new URL(location.href);
 
 		appAddress.searchParams.delete("instance");
-		appFrame.src = appAddress.href;
+		void controlled.then(() => {
+			performance.mark("shell/app-iframe");
+			appFrame.src = appAddress.href;
+		});
 
 		reportArchitecture(shellHub);
 		relayLoggerToHub(shellHub, "shell");
@@ -284,8 +286,8 @@ function Shell() {
 	);
 }
 
-export function renderShell(): void {
+export function renderShell(controlled: Promise<void>): void {
 	performance.mark("shell/render");
 	injectGlobals();
-	render(<Shell />, document.body);
+	render(<Shell controlled={controlled} />, document.body);
 }

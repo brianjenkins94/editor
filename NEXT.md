@@ -21,10 +21,21 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    before that since 2026-11-03; work kept in the old editor was checked to come through (be7d512a's message). Going
    back isn't the switch: it's deploying `full-editor`'s build again, not tried. **Done when** it's been used signed in
    (the user's own sign-in), a commit pushed from it.
-2. **The editor, used** (the user, 2026-11-24): for two weeks, work on this repository happens in the editor, and on one
-   other repository (the user's to name); no new test machinery meanwhile. What it lacks, and the worst of *Watching*, is
-   the queue after. A push from it needs the user signed in there. **Done when** two weeks' work is done there, its
-   gaps listed here.
+2. **The editor, used** (the user, 2026-11-24): for two weeks, to 2026-12-08, work on this repository happens in the
+   editor, and on example-consumer (the user's choice); no new test machinery meanwhile. What it lacks, and the worst of
+   *Watching*, is the queue after. A push from it needs the user signed in there. example-consumer's first session
+   (2026-11-24, the live site): it loads with no problems, `npm install` and `npm run dev` work, and its previews didn't;
+   fixed the same day — a page's script by an absolute path (its own imports went outside its server), a package's
+   stylesheet imported, two files of one package (each its own copy of what they share), an inline module's imports, and a
+   preview's frame refused on a first load (the app's frame opened before the service worker, so nothing reached the
+   server). Its gaps, from its README's own commands:
+   - `npm run build` is `tsc && vite build`. `tsc` isn't a gap (the user, 2026-11-24: no need to call it, Problems has what
+     it would say); `vite build` isn't one `vite` takes (it serves only).
+   - `npm test`: its test launches `playwright`'s Chromium and Vite's `preview`, and stops at unenv's
+     `net.getDefaultAutoSelectFamilyAttemptTimeout`. What it checks, a page in a browser, the editor's own Playwright can
+     do of an open preview; whether `playwright` itself should be that is to decide.
+   - A repository with no ESLint config is held to the editor's own style rules (`object-shorthand` on its tests).
+   **Done when** two weeks' work is done there, its gaps listed here.
 3. **Runtime evidence, used** (after item 2; packages/editor/RUNTIME-EVIDENCE.md). Built: values, branches and types on
    hover, what could go, coverage, previews' evidence, time. But none is kept for this repository (no `.silo/evidence`),
    so nothing it says has been read in real work. In order: run this repository's own programs in it as item 2 goes;
@@ -260,8 +271,8 @@ packages/editor (`--all`, `--runs N`, `--json`).
   needs a hook where it's set, and the editor runs as bundled code with no DevTools Protocol attached: it would take
   the coverage build's instrumentation (a hook at every statement, `COVERAGE=1`) carrying an expression to evaluate,
   in a dev build only. Meanwhile `editor_trace`, the logs and spans, and `page_eval` cover most of it.
-- **The terminal's first-hour commands and the tools agents expect** (2026-10-24: until someone asks for one): `tsc`,
-  `eslint`, `silo features|history`, `curl`/`wget`, `man`, `date`, `ln -s`; `code_definition`,
+- **The terminal's first-hour commands and the tools agents expect** (2026-10-24: until someone asks for one; not
+  `tsc`, the user, 2026-11-24): `eslint`, `silo features|history`, `curl`/`wget`, `man`, `date`, `ln -s`; `code_definition`,
   `code_hover`, `code_symbols`, `editor_open`, `silo_features`, `silo_history` (`runs_tests` and `code_references` are
   done). Conventions when one is
   asked for: workbench/terminal/catalog.ts, app/tools/host.ts.

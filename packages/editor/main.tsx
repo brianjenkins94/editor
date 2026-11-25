@@ -4,7 +4,7 @@ import "./shared/hidden-timers";
 import { createHub, createRpcClient, serve, windowTransport } from "@brianjenkins94/hub";
 import { consoleCollector, installHubCollector, installWindowMessageProbe, linkDebugMcp, linkServiceWorkerHub, servePageTools, tapConsoleAndErrors } from "@brianjenkins94/observability";
 import moduleVersions from "editor:versions";
-import { ensureCrossOriginIsolated } from "./app/coi";
+import { ensureCrossOriginIsolated, serviceWorkerActive } from "./app/coi";
 import { hostLog } from "./app/logging";
 import { createVscodeWindow } from "./app/vscode";
 import { reportArchitecture } from "./shared/architecture";
@@ -22,7 +22,7 @@ if (reset === "wait") {
 	followResets();
 	performance.mark("shell/import");
 	void import("./shell/shell.tsx").then(({ renderShell }) => {
-		renderShell();
+		renderShell(hostLog.span("editor.main.controlled", {}, async () => serviceWorkerActive()));
 	});
 } else if (isolated) {
 	const seeded = seedFiles(location.search);

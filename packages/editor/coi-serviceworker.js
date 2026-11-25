@@ -431,7 +431,7 @@ async function handleVirtualRequest(request, tab, port, path) {
 		span.error("dev server unreachable", { "error": String(error) });
 		span.end();
 
-		return new Response(`dev server unreachable: ${error.message}`, { "status": 502, "headers": { "content-type": "text/plain" } });
+		return new Response(`dev server unreachable: ${error.message}`, { "status": 502, "headers": virtualHeaders({ "content-type": "text/plain" }) });
 	}
 }
 
@@ -509,14 +509,17 @@ globalThis.addEventListener("fetch", (event) => {
 	}
 
 	// A same-origin request with no address, but a referer from a page of a server: the app used an absolute path or
-	// navigated. Keep it inside its server. Origin-guarded, so a cross-origin import (react from the CDN) is never hijacked.
+	// navigated. Keep it inside its server: sent to its address there, so a module's own imports are its server's too
+	// (one answered here would resolve them against the address it was asked by). Origin-guarded, so a cross-origin import (react from the CDN) is never hijacked.
 	if (requestUrl.origin === globalThis.location.origin && request.referrer) {
 		const from = parseVirtual(new URL(request.referrer).pathname);
 
 		if (from !== undefined) {
 			const target = pathname + requestUrl.search;
 
-			event.respondWith(request.mode === "navigate" ? Response.redirect(requestUrl.origin + from.prefix + target, 302) : handleVirtualRequest(request, from.tab, from.port, target));
+			const follows = request.mode === "navigate" || (request.method === "GET" && request.redirect === "follow");
+
+			event.respondWith(follows ? Response.redirect(requestUrl.origin + from.prefix + target, 302) : handleVirtualRequest(request, from.tab, from.port, target));
 
 			return;
 		}

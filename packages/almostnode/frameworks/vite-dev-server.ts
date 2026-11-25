@@ -16,7 +16,7 @@ import { addReactRefresh as _addReactRefresh, shiftInlineSourceMap } from "./cod
 import type { InstrumentLevel } from "./instrument";
 import { instrument } from "./instrument";
 import type { Manifest } from "./packages";
-import { isRegistrySpec, PACKAGE_PREFIX, PackageResolver, pinnedDependencies, registryUrl } from "./packages";
+import { isRegistrySpec, PACKAGE_PREFIX, PackageResolver, pinnedDependencies, registryUrl, STYLESHEET_PATH, stylesheetModule } from "./packages";
 
 // Check if we're in a real runtime that should transpile (not jsdom or a Node test).
 // A real browser has window + navigator.serviceWorker (jsdom has window but not that); a Web Worker (where the
@@ -401,8 +401,17 @@ export class ViteDevServer extends DevServer {
 		const urlObj = new URL(url, "http://localhost");
 		let { pathname } = urlObj;
 
+		// A package's stylesheet, imported by a module (see packages.ts).
+		if (pathname === STYLESHEET_PATH) {
+			return this.javascript(stylesheetModule(JSON.stringify(urlObj.searchParams.get("href") ?? "")));
+		}
+
 		// A file of a URL/tarball dependency (see packages.ts).
 		if (pathname.startsWith(PACKAGE_PREFIX)) {
+			if (pathname.endsWith(".css") && urlObj.searchParams.has("import")) {
+				return this.javascript(stylesheetModule(`new URL(${JSON.stringify("./" + pathname.split("/").at(-1)!)}, import.meta.url).href`));
+			}
+
 			return this.servePackageFile(pathname);
 		}
 
@@ -480,7 +489,7 @@ export class ViteDevServer extends DevServer {
 
     // Check if it's HTML that needs HMR client injection
 		if (pathname.endsWith(".html")) {
-			return this.serveHtmlWithHMR(filePath);
+			return this.serveHtmlWithHMR(filePath, pathname);
 		}
 
     // Plain JS modules get their bare imports rewritten too (see packages.ts); anything else is served as is.
@@ -901,9 +910,24 @@ export default css;
 		return `<script type="importmap">\n${JSON.stringify({ "imports": imports }, null, 2)}\n</script>`;
 	}
 
-	private serveHtmlWithHMR(filePath: string): ResponseData {
+	/** A page's inline modules (`<script type="module">import "pkg"</script>`), their bare imports rewritten as a file's are. */
+	private async rewriteInlineModules(html: string, urlPath: string): Promise<string> {
+		let result = html;
+
+		// Back to front, so earlier positions stay valid.
+		for (const match of [...html.matchAll(/(<script\b(?=[^>]*\btype\s*=\s*["']module["'])(?![^>]*\bsrc\s*=)[^>]*>)([\s\S]*?)<\/script>/giu)].toReversed()) {
+			const [, open, code] = match;
+			const start = match.index + open!.length;
+
+			result = result.slice(0, start) + await this.packages.rewriteImports(code!, urlPath, ts) + result.slice(start + code!.length);
+		}
+
+		return result;
+	}
+
+	private async serveHtmlWithHMR(filePath: string, urlPath: string): Promise<ResponseData> {
 		try {
-			let content = this.vfs.readFileSync(filePath, "utf8");
+			let content = await this.rewriteInlineModules(this.vfs.readFileSync(filePath, "utf8"), urlPath);
 
       // Inject an import map if the HTML doesn't already have one, built from the workspace package.json so any
       // declared dependency resolves from esm.sh at runtime — no `npm install` needed. This lets seed HTML omit

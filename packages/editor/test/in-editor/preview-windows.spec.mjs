@@ -104,3 +104,16 @@ test("past the room for it, the cascade of windows starts again rather than goin
 		await expect(shown).toHaveCount(left);
 	}
 });
+
+test("a page's script by an absolute path is its server's: what it imports comes, a file beside it and a package's stylesheet", async ({ page }) => {
+	const workbench = await openEditor(page, {
+		...devApp("winapp3", "unused"),
+		"winapp3/package.json": "{\n  \"type\": \"module\",\n  \"dependencies\": {\n    \"modern-normalize\": \"3.0.1\"\n  }\n}\n",
+		"winapp3/src/said.ts": "export const said = \"from beside it\";\n",
+		"winapp3/src/main.ts": "import \"modern-normalize/modern-normalize.css\";\nimport { said } from \"./said\";\n\ndocument.querySelector(\"#app\")!.textContent = said + \", margin \" + getComputedStyle(document.body).margin;\n"
+	});
+	const { input } = await openTerminal(workbench);
+
+	await input.pressSequentially("cd winapp3 && vite\n");
+	await expect(previewWindows(page).frameLocator("iframe").locator("#app")).toHaveText("from beside it, margin 0px", { "timeout": 90_000 });
+});

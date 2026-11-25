@@ -37,3 +37,27 @@ for (const root of ["/", "/workspace/apps/war2"]) {
 		assert.equal((await server.handleRequest("GET", "/src/assets/missing.json", {})).statusCode, 404);
 	});
 }
+
+test("an imported package stylesheet's module: the stylesheet's address in a link, waited for", async () => {
+	const server = serverAt("/");
+	const module = await server.handleRequest("GET", `/@css?href=${encodeURIComponent("https://esm.sh/x@1.0.0/x.css?external=react")}`, {});
+
+	assert.equal(module.statusCode, 200);
+	assert.match(module.headers["Content-Type"]!, /^application\/javascript/u);
+	assert.match(String(module.body), /link\.href = "https:\/\/esm\.sh\/x@1\.0\.0\/x\.css\?external=react";/u);
+
+	const own = await server.handleRequest("GET", "/@pkg/@x/look/dist/look.css?import", {});
+
+	assert.match(String(own.body), /link\.href = new URL\("\.\/look\.css", import\.meta\.url\)\.href;/u);
+});
+
+test("a page's inline modules have their bare imports rewritten, its other scripts left as they are", async () => {
+	const vfs = new VirtualFS();
+
+	vfs.writeFileSync("/package.json", JSON.stringify({ "dependencies": { "left-pad": "1.3.0" } }));
+	vfs.writeFileSync("/index.html", "<!doctype html><html><head><script type=\"module\">import pad from \"left-pad\";\nimport \"./own.js\";</script><script>const said = \"import pad from 'left-pad'\";</script></head><body></body></html>");
+
+	const page = String((await new ViteDevServer(vfs, { "port": 5173, "root": "/" }).handleRequest("GET", "/", {})).body);
+
+	assert.match(page, /<script type="module">import pad from "https:\/\/esm\.sh\/left-pad@1\.3\.0[^"]*";\nimport "\.\/own\.js";<\/script><script>const said = "import pad from 'left-pad'";<\/script>/u);
+});

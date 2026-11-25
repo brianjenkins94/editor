@@ -198,4 +198,19 @@ test("a pinned package's esm.sh URL pins what it depends on, all the way down â€
 	assert.equal(registryUrl("react-dom", "18.3.1", "/client", reactDom), "https://esm.sh/react-dom@18.3.1/client?dev&deps=js-tokens@4.0.0,loose-envify@1.4.0,react@18.3.1,scheduler@0.23.2");
 	assert.equal(registryUrl("ui", "1.0.0", "/", pinnedDependencies(pins, "ui", "1.0.0")), "https://esm.sh/ui@1.0.0&external=react,react-dom&deps=js-tokens@4.0.0,loose-envify@1.4.0,react@18.3.1/");
 	assert.equal(registryUrl("ui", "1.0.0", ""), "https://esm.sh/ui@1.0.0?external=react,react-dom");
+	// (a file of it, so it shares what it shares with the package's other files; an entry is its own build)
+	assert.equal(registryUrl("ui", "1.0.0", "/dist/button.js"), "https://esm.sh/ui@1.0.0/dist/button.js?external=react,react-dom&bundle=false");
+	assert.equal(registryUrl("ui", "1.0.0", "/button"), "https://esm.sh/ui@1.0.0/button?external=react,react-dom");
+});
+
+test("a package's stylesheet, imported, is a module of the server's that puts it in the page; one named in code isn't touched", async () => {
+	packages["https://pages.example/look@latest.tgz"] = { "package.json": JSON.stringify({ "name": "@x/look", "exports": { "./look.css": "./dist/look.css" } }), "dist/look.css": "a { color: red }" };
+
+	const { packages: found } = resolver({ "dependencies": { "normalize.css": "^8.0.0", "@x/look": "https://pages.example/look@latest.tgz" } });
+	const rewritten = await found.rewriteImports("import \"normalize.css/normalize.css\";\nimport \"@x/look/look.css\";\nimport \"./own.css\";\nconst name = \"normalize.css/normalize.css\";\n", "/src/main.ts", ts);
+
+	assert.equal(rewritten, `import "../@css?href=${encodeURIComponent("https://esm.sh/normalize.css@^8.0.0/normalize.css")}";\nimport "../@pkg/@x/look/dist/look.css?import";\nimport "./own.css";\nconst name = "normalize.css/normalize.css";\n`);
+
+	// (a package named for a stylesheet isn't one: its own entry is a module)
+	assert.equal(await found.rewriteImports("import \"normalize.css\";\n", "/src/main.ts", ts), "import \"https://esm.sh/normalize.css@^8.0.0\";\n");
 });

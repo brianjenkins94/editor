@@ -18,6 +18,28 @@ import { exports as resolveExports } from "resolve.exports";
 /** Where a served package file lives: `/@pkg/<name>/<file>`. */
 export const PACKAGE_PREFIX = "/@pkg/";
 
+/** Where the module is that puts a registry package's stylesheet in the page: `/@css?href=<its address>`. */
+export const STYLESHEET_PATH = "/@css";
+
+/** Whether a resolved import is of a stylesheet: its file's, whatever its query. */
+const isStylesheet = (target: string): boolean => /\.css(?:\?|$)/u.test(target);
+
+/** The module an imported stylesheet stands for (`import "pkg/styles.css"`): it puts the stylesheet in the page, and is
+ *  done once it's loaded, so the modules after it run with it applied. `href`: a JavaScript expression of its address. */
+export function stylesheetModule(href: string): string {
+	return `if (typeof document !== "undefined") {
+	const link = document.createElement("link");
+	link.rel = "stylesheet";
+	link.crossOrigin = "anonymous";
+	link.href = ${href};
+	const loaded = new Promise((resolve) => { link.onload = link.onerror = resolve; });
+	document.head.appendChild(link);
+	await loaded;
+}
+export default "";
+`;
+}
+
 export interface Manifest {
 	"name"?: string;
 	"main"?: string;
@@ -77,7 +99,11 @@ export function registryUrl(name: string, version: string, subpath: string, deps
 		return `https://esm.sh/${name}@${version}&${query}${pinned(deps.filter((each) => !each.startsWith("@")))}/`;
 	}
 
-	return `https://esm.sh/${name}@${version}${subpath}?${query}${pinned(deps)}`;
+	// A file inside the package, rather than one of its entries (`pkg/dist/button.js`): not bundled, so what two of them
+	// share is one module, as it is installed (bundled, each has its own copy, and a custom element is defined twice).
+	const whole = /\.m?js$/u.test(subpath) ? "&bundle=false" : "";
+
+	return `https://esm.sh/${name}@${version}${subpath}?${query}${whole}${pinned(deps)}`;
 }
 
 /** Each pinned package (name → its version and the names it depends on) → `name`'s dependencies all the way down, each
@@ -279,7 +305,8 @@ export class PackageResolver {
 			const target = await this.resolve(file.fileName, importer);
 
 			if (target !== undefined) {
-				const replacement = target.startsWith("/") ? relativeUrl(importer, target) : target;
+				const served = !isStylesheet(target) ? target : target.startsWith("/") ? `${target}?import` : `${STYLESHEET_PATH}?href=${encodeURIComponent(target)}`;
+				const replacement = served.startsWith("/") ? relativeUrl(importer, served) : served;
 
 				result = result.slice(0, start) + replacement + result.slice(start + file.fileName.length);
 			}
