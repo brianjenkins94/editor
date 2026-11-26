@@ -276,9 +276,9 @@ export function create({ hub }: CommandHost): Record<string, Handler> {
 			}
 
 			const branch = config.get("branch") as string;
-			const fetched = await createRpcClient(hub).request("git.fetch", { ...branch === "" ? {} : { "ref": branch }, ...deepen === "" ? {} : { "deepen": Number(deepen) }, "unshallow": config.get("unshallow") === true }, { "timeoutMs": 300_000 }) as { "ref": string; "tip": string; "commits": number; "shallow": boolean; "url": string };
+			const fetched = await createRpcClient(hub).request("git.fetch", { ...branch === "" ? {} : { "ref": branch }, ...deepen === "" ? {} : { "deepen": Number(deepen) }, "unshallow": config.get("unshallow") === true }, { "timeoutMs": 300_000 }) as { "ref": string; "tip": string; "commits": number; "shallow": boolean; "behind": number; "url": string };
 
-			return { "stdout": "", "stderr": `From ${fetched.url}\n * branch            ${fetched.ref} -> origin/${fetched.ref} (${fetched.tip.slice(0, 7)})\n${String(fetched.commits)} commit${fetched.commits === 1 ? "" : "s"} from HEAD here${fetched.shallow ? ", where the clone's history ends" : ", all of its history"}\n`, "exitCode": 0 };
+			return { "stdout": "", "stderr": `From ${fetched.url}\n * branch            ${fetched.ref} -> origin/${fetched.ref} (${fetched.tip.slice(0, 7)})\n${String(fetched.commits)} commit${fetched.commits === 1 ? "" : "s"} from HEAD here${fetched.shallow ? ", where the clone's history ends" : ", all of its history"}\n${fetched.behind > 0 ? `Your branch is behind 'origin/${fetched.ref}' by ${String(fetched.behind)} commit${fetched.behind === 1 ? "" : "s"}: git pull brings them in.\n` : ""}`, "exitCode": 0 };
 		},
 		"pull": async (config) => {
 			if (config.get("remote") !== "origin") {

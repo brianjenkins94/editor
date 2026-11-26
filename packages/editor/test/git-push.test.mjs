@@ -143,6 +143,32 @@ test("a pull brings the branch up to the repository's: its commit here, its file
 	assert.equal((await rpc.request("git.pull", {}, { "timeoutMs": 30_000 })).outcome, "up to date");
 });
 
+test("a fetch says how many commits the repository's branch has that this one doesn't, for a person to bring in", async () => {
+	const { rpc } = editor();
+
+	await rpc.request("git.push", {}, { "timeoutMs": 30_000 });
+
+	const clone = path.join(root, "clone");
+
+	rmSync(clone, { "recursive": true, "force": true });
+	git("clone", "--quiet", bare, clone);
+
+	for (const each of ["two", "three"]) {
+		execFileSync("sh", ["-c", `echo ${each} >> a.txt`], { "cwd": clone });
+		git("-C", clone, "commit", "--quiet", "-am", each);
+	}
+
+	git("-C", clone, "push", "--quiet", "origin", "main");
+
+	const head = await engine.headCommit();
+	const fetched = await rpc.request("git.fetch", {}, { "timeoutMs": 30_000 });
+
+	assert.equal(fetched.behind, 2);
+	assert.equal(await engine.headCommit(), head, "a fetch leaves the branch where it was");
+	assert.equal((await rpc.request("git.pull", {}, { "timeoutMs": 30_000 })).outcome, "fast-forwarded");
+	assert.equal((await rpc.request("git.fetch", {}, { "timeoutMs": 30_000 })).behind, 0);
+});
+
 test("a branch made at HEAD, then switched to; a push of it makes it there", async () => {
 	const { rpc } = editor();
 
@@ -182,7 +208,7 @@ test("a clone one commit deep: fetch deepens its history by as many as asked, un
 
 	const deepened = await rpc.request("git.fetch", { "deepen": 2 }, { "timeoutMs": 30_000 });
 
-	assert.deepEqual(deepened, { "ref": "main", "tip": head, "commits": 3, "shallow": true, "url": ORIGIN });
+	assert.deepEqual(deepened, { "ref": "main", "tip": head, "commits": 3, "shallow": true, "behind": 0, "url": ORIGIN });
 	assert.deepEqual((await engine.history()).map((entry) => entry.message.trim()), ["four", "three", "two"]);
 
 	const all = await rpc.request("git.fetch", { "unshallow": true }, { "timeoutMs": 30_000 });

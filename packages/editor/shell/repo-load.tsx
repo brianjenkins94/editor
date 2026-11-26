@@ -7,7 +7,9 @@ import { envRepo, showRepo } from "./address";
 import { createStore, errText, githubLog, shared, statusOf, useStore } from "./feature";
 import { signInSettled } from "./sign-in";
 
-const state = createStore<{ "input": string; "loading": boolean; "error"?: string }>({ "input": "", "loading": false });
+const state = createStore<{ "input": string; "loading": boolean; "error"?: string; "behind"?: { "ref": string; "count": number }; "catching"?: boolean; "caught"?: string }>({ "input": "", "loading": false });
+
+interface Pulled { "outcome": string; "files"?: string[]; "conflicts"?: string[] }
 
 let shell: ShellContext | undefined;
 
@@ -127,6 +129,10 @@ async function fromAddressNow(rpc: ShellContext["rpc"]): Promise<void> {
 	shared.set({ "boundRepo": bound });
 
 	if (wanted === undefined || `${bound?.owner}/${bound?.repo}`.toLowerCase() === `${wanted.owner}/${wanted.repo}`.toLowerCase()) {
+		if (bound !== undefined) {
+			await behindGitHub(rpc, bound);
+		}
+
 		return;
 	}
 
@@ -141,12 +147,70 @@ async function fromAddressNow(rpc: ShellContext["rpc"]): Promise<void> {
 	await loadRepo(`${wanted.owner}/${wanted.repo}`);
 }
 
+async function behindGitHub(rpc: ShellContext["rpc"], bound: RepoBinding): Promise<void> {
+	await githubLog.span("editor.shell.repo-load.behind", { "repo": `${bound.owner}/${bound.repo}` }, async (span) => {
+		const fetched = await rpc.request("git.fetch", {}, { "timeoutMs": 120_000 }).then((reply) => reply as { "ref": string; "behind": number }, (error: unknown) => {
+			span.warn("couldn't fetch: no offer", { "error": errText(error) });
+
+			return undefined;
+		});
+
+		span.end({ "behind": fetched?.behind ?? 0 });
+
+		if (fetched !== undefined && fetched.behind > 0) {
+			state.set({ "behind": { "ref": fetched.ref, "count": fetched.behind }, "caught": undefined });
+			shared.set({ "githubOpen": true });
+		}
+	});
+}
+
+async function fastForward(): Promise<void> {
+	state.set({ "catching": true, "error": undefined });
+
+	await githubLog.span("editor.shell.repo-load.fastForward", {}, async (span) => {
+		try {
+			const pulled = await (shell?.rpc.request("git.pull", {}, { "timeoutMs": 300_000 }) as Promise<Pulled> | undefined);
+
+			if (pulled === undefined) {
+				return;
+			}
+
+			span.end({ "outcome": pulled.outcome, "count": pulled.files?.length ?? 0 });
+
+			if (pulled.outcome === "conflicts") {
+				state.set({ "error": `GitHub changed files you've changed here, so it can't catch up: ${(pulled.conflicts ?? []).join(", ")}` });
+			} else if (pulled.outcome === "merge conflicts") {
+				state.set({ "behind": undefined, "error": `GitHub and this workspace changed the same lines of ${(pulled.conflicts ?? []).join(", ")}: both are marked in the file${pulled.conflicts?.length === 1 ? "" : "s"}. Settle them and commit.` });
+			} else {
+				state.set({ "behind": undefined, "caught": `${pulled.outcome === "merged" ? "Merged" : "Caught up with"} GitHub (${String(pulled.files?.length ?? 0)} files).` });
+			}
+		} catch (error) {
+			state.set({ "error": errText(error) });
+			span.end({ "error": errText(error) });
+		} finally {
+			state.set({ "catching": false });
+		}
+	});
+}
+
 export function LoadSection() {
 	const { githubUser } = useStore(shared);
-	const { input, loading, error } = useStore(state);
+	const { input, loading, error, behind, catching, caught } = useStore(state);
 
 	return (
 		<>
+			{behind !== undefined && (
+				<>
+					<span class="wa-caption-2xs">{`GitHub's ${behind.ref} has ${String(behind.count)} commit${behind.count === 1 ? "" : "s"} this workspace doesn't.`}</span>
+
+					<div class="wa-cluster wa-gap-xs">
+						<wa-button variant="brand" size="small" aria-label="Fast-forward" disabled={catching === true} onClick={() => { void fastForward(); }}>{catching === true ? "Fast-forwarding…" : "Fast-forward"}</wa-button>
+					</div>
+				</>
+			)}
+
+			{caught !== undefined && <span class="wa-caption-2xs">{caught}</span>}
+
 			<span class="wa-font-weight-semibold wa-font-size-s">{githubUser === undefined ? "Load a public repo" : "Load a repo"}</span>
 
 			<span class="wa-caption-2xs">Its files open in the workspace.</span>

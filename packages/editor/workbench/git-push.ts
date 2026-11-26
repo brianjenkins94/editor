@@ -80,7 +80,7 @@ export function installGitPush(hub: Hub, log: Logger): HttpClient {
 		const fetched = await engine.fetchBranch(remote, url, typeof ref === "string" && ref !== "" ? ref : undefined, unshallow === true ? Infinity : deepen as number | undefined).catch(said);
 
 		hub.publish("git.changed");
-		log.info("git fetch", { "ref": fetched.ref, "commits": fetched.commits, "shallow": fetched.shallow });
+		log.info("git fetch", { "ref": fetched.ref, "commits": fetched.commits, "shallow": fetched.shallow, "behind": fetched.behind });
 
 		return { ...fetched, "url": url };
 	});

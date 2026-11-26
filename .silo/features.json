@@ -2019,8 +2019,9 @@
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "what": "Type owner/repo, or open an env/<owner>/<repo> address, and that GitHub repo is cloned into the workspace, history and all, and the address bar shows it.",
+    "what": "Type owner/repo, or open an env/<owner>/<repo> address, and that GitHub repo is cloned into the workspace, history and all, and the address bar shows it; a workspace kept from before that GitHub has moved on from is offered a fast-forward.",
     "ways": [
+      "button|Fast-forward",
       "hub request|git.origin",
       "hub subscription|project.openFiles"
     ],

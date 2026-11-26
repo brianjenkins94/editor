@@ -403,6 +403,22 @@ export interface Fetched {
 	"tip": string;
 	"commits": number;
 	"shallow": boolean;
+	"behind": number;
+}
+
+const BEHIND_MOST = 1000;
+
+async function behindBy(tip: string): Promise<number> {
+	const head = await resolveRef({ "fs": fs, "dir": DIR, "ref": "HEAD" }).catch(() => undefined);
+
+	if (head === undefined || head === tip) {
+		return 0;
+	}
+
+	const theirs = await log({ "fs": fs, "dir": DIR, "ref": tip, "depth": BEHIND_MOST }).catch(() => []);
+	const at = theirs.findIndex((entry) => entry.oid === head);
+
+	return at === -1 ? theirs.length : at;
 }
 
 const ALL = 2_147_483_647;
@@ -420,7 +436,7 @@ export async function fetchBranch(http: HttpClient, url: string, ref?: string, d
 		throw new Error(`the remote has no branch ${branchName}`);
 	}
 
-	return { "ref": branchName, "tip": fetched.fetchHead, "commits": (await history()).length, "shallow": (await shallowEnds()).length > 0 };
+	return { "ref": branchName, "tip": fetched.fetchHead, "commits": (await history()).length, "shallow": (await shallowEnds()).length > 0, "behind": await behindBy(fetched.fetchHead) };
 }
 
 async function changedBetween(from: string, to: string): Promise<{ "path": string; "oid"?: string; "mode"?: number }[]> {
