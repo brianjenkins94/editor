@@ -84,9 +84,11 @@ export function QueuePage({ query }: { "query": URLSearchParams }) {
 						<tr key={item.id}>
 							<td><When at={item.at} /></td>
 							<td><wa-badge appearance="outlined" variant={item.kind === "error" ? "danger" : "brand"}>{KIND[item.kind]}</wa-badge></td>
-							<td class="wa-stack wa-gap-3xs">
-								{item.kind === "error" && item.ref !== null ? <a href={`#/errors/${item.ref}`}><strong>{item.title}</strong></a> : <strong>{item.title}</strong>}
-								<Lines text={item.detail} />
+							<td>
+								<div class="wa-stack wa-gap-3xs">
+									{item.kind === "error" && item.ref !== null ? <a href={`#/errors/${item.ref}`}><strong>{item.title}</strong></a> : <strong>{item.title}</strong>}
+									<Lines text={item.detail} />
+								</div>
 							</td>
 							{closed
 								? (
