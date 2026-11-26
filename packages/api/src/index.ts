@@ -29,6 +29,7 @@ import { maintenance, maintenanceGate, pausable, switches } from "./maintenance.
 import { checkSpend } from "./spend.ts";
 import { Breach, ensureCanary, unwatched } from "./tripwire.ts";
 import { expireErrors, recordError } from "./errors.ts";
+import { dailyQueue } from "./queue.ts";
 import { editorErrorEndpoint, sessionEventsEndpoint } from "./session-events.ts";
 
 export { Attempt } from "./attempt.ts";
@@ -302,6 +303,10 @@ export default {
 			await expireErrors(env.DB);
 			// Emails to the owner (src/mail.ts): kept 90 days.
 			await env.DB.prepare("DELETE FROM alerts WHERE at < ?").bind(Date.now() - 90 * 86_400_000).run();
+		}));
+		// The queue (src/queue.ts): the week's review of agents' tool use, and closed items a year on.
+		context.waitUntil(log.span("api.queueDaily", {}, async () => {
+			await dailyQueue(env.DB);
 		}));
 		// Not while the kill switch is on: the API is down on purpose, and a sign-in through it would only fail.
 		context.waitUntil(log.span("api.smokeEmail", {}, async () => {

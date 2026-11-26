@@ -27,6 +27,7 @@
     "typecheck": "tsc --noEmit",
     "audit": "node scripts/audit.ts",
     "maintenance": "node scripts/maintenance.ts",
+    "queue": "node scripts/queue.ts",
     "harness": "node harness/harness.ts"
   }
 }

@@ -16,6 +16,7 @@ import { trafficEndpoint } from "./traffic.ts";
 import { down, isSwitch, maintenance, setMaintenance, setSwitch, switches, SWITCHES } from "./maintenance.ts";
 import { spendEndpoint } from "./spend.ts";
 import { errorGroupEndpoint, errorOccurrenceEndpoint, errorsEndpoint, sourceMapEndpoint } from "./errors.ts";
+import { closeItemEndpoint, queueEndpoint } from "./queue.ts";
 import { timelineEndpoint } from "./timeline.ts";
 
 /**
@@ -200,6 +201,11 @@ admin.get("/errors/occurrence/:id", requires("errors:read"), errorOccurrenceEndp
 admin.get("/errors/maps/:release/:path{.+\\.map}", requires("errors:read"), sourceMapEndpoint);
 
 admin.get("/errors/:fingerprint", requires("errors:read"), errorGroupEndpoint);
+
+/** The queue (src/queue.ts): what was found that someone should look into, open until closed with its outcome. */
+admin.get("/queue", requires("queue:read"), queueEndpoint);
+
+admin.post("/queue/:id/close", requires("queue:close"), closeItemEndpoint);
 
 /** The emails to the owner (src/mail.ts, `tellOwner`): each, and what Cloudflare says became of it; and a test one. */
 admin.get("/alerts", requires("mail:read"), alertsEndpoint);

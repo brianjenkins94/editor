@@ -346,6 +346,15 @@ Defence in depth for "should they figure out how": it checks what a request read
   production, since a release is a commit), never served by the site. About 90 maps and 28 MB a release; with a 45-day
   lifecycle, ~13 GB at ten deploys a day, cents a month. Not fatal if the step fails.
 
+### The queue
+
+What was found that someone should look into, so it isn't left unnoticed (the user, 2026-11-26): each new error group
+as it's first recorded, and every week, from the daily cron, a review of agents' tool use (debug-mcp's `agent_usage`).
+An item stays open until it's closed with what was done about it, and who closed it. The admin app's Queue page shows
+them (`queue:read`) and closes one (`queue:close`, the owner's); asked to address the queue, an agent works through
+them with `npm run queue` here (wrangler's D1, as `npm run audit`), production by default. Closed items are kept a
+year. There's no token for an agent to call the admin API: wrangler, logged in as you, is how it reads and writes.
+
 ### Open questions
 
 - The price table's rates, and whether to subtract the plan's included amounts (more accurate, less early).

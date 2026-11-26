@@ -85,6 +85,10 @@ export async function recordError(env: Bindings, occurrence: Occurrence): Promis
 	const where = `${occurrence.source === "api" ? "The API" : "The editor"} · ${occurrence.route} · release ${occurrence.release}`;
 
 	if (first) {
+		const { addItem } = await import("./queue.ts");
+
+		await addItem(env.DB, { "kind": "error", "ref": fingerprint, "title": `New error: ${occurrence.name.slice(0, 100)}`, "detail": `${where}\n${message}\n\nFirst occurrence: ${id}. Its group: the admin app's #/errors/${fingerprint}.` }, now);
+
 		const recent = await env.DB.prepare("SELECT COUNT(*) AS n FROM errors WHERE first_seen > ?").bind(now - 3_600_000).first<{ "n": number }>();
 
 		if ((recent?.n ?? 0) <= 1) {

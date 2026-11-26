@@ -60,6 +60,15 @@ features, and `silo check` (CI's `silo` job, `.github/workflows/silo.yml`) holds
   default, and `silo check` says so.
 
 
+## The queue
+
+What was found that someone should look into (new error groups, the weekly review of agents' tool use) is queued in the
+API, shown on the admin app's Queue page (packages/api/README.md, *The queue*). Asked to address the queue:
+`npm run queue` in packages/api lists what's open; for each, find out what happened and do what it needs (an error
+group: its occurrences and stack, `#/errors/<ref>`; the weekly review: debug-mcp's `agent_usage` and its findings), then
+`npm run queue -- --close <id> --outcome "<what was done, with the commit if any>"`. Something found that needs
+deciding, not doing, goes in NEXT.md's *Decisions* and the item closes saying so.
+
 ## Agent tools
 
 An agent's tool (`packages/editor/app/tools/<family>`, debug-mcp's) lets an agent do what a person already can in the

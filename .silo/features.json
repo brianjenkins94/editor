@@ -853,6 +853,22 @@
       "packages/api/test/errors-scrub.test.ts"
     ]
   },
+  "The queue": {
+    "status": "active",
+    "why": "the user, 2026-11-26: a mailbox or queue so that discovered items don't go unnoticed or uninvestigated — agent usage findings and the editor's reported errors, which had generally gone uninvestigated — with an agent-usage item added weekly, so asking Claude to address the queue addresses them; kept in the admin console (the user's choice)",
+    "since": "2026-11-26",
+    "what": "What was found that someone should look into is queued in the API: each new error group as it's first recorded, and every week a review of agents' tool use. An item stays open until it's closed with what was done; the admin app's Queue page shows and closes them, and `npm run queue` in packages/api does the same from a terminal, for an agent asked to address the queue.",
+    "docs": "packages/api/README.md, *The queue*",
+    "paths": [
+      "packages/api/migrations/0019_queue.sql",
+      "packages/api/src/queue.ts",
+      "packages/api/scripts/queue.ts",
+      "packages/admin/src/queue.tsx"
+    ],
+    "tests": [
+      "packages/api/test/queue.test.ts"
+    ]
+  },
   "Event Sheet": {
     "status": "removed",
     "why": "out until reintroduced: the rewrite reduced the editor to its core (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
