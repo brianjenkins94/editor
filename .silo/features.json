@@ -3192,14 +3192,31 @@
     "since": "2026-11-02",
     "in": "e16b2b75"
   },
+  "Agents' tool use, counted and audited": {
+    "status": "active",
+    "why": "the user, 2026-11-26: see which tools exist and how often each is used, and audit the use for patterns (a tool used where a better one is there, or where one could be written); first said 2026-11-02, the agent's tool use monitored so its tools get better",
+    "since": "2026-11-26",
+    "what": "Every tool call an agent makes is counted per tool, through the editor's MCP or around it (Claude Code's own, from its hooks): calls, failures, time, answer sizes, and the shell's programs while an editor was linked, kept across restarts in .silo/local/agent-tools.json. What that says is audited: bypasses (an editor tool does it), candidates (a program run often that no tool does), workarounds, friction and oversize answers. Features and Tests shows each feature's agent tools with their use, those never called, and the findings; agent_usage answers the same to an agent.",
+    "ways": [
+      "agent tool|agent_usage",
+      "hub request|agent.tools"
+    ],
+    "paths": [
+      "packages/debug-mcp/agent-hook.mjs",
+      "packages/debug-mcp/src/agent.ts",
+      "packages/debug-mcp/src/agent-audit.ts",
+      "packages/debug-mcp/src/tools/agent.ts"
+    ],
+    "tests": [
+      "packages/debug-mcp/test/agent.test.ts"
+    ]
+  },
   "debug-mcp server": {
     "status": "active",
     "why": "moved from the manifest (decision 21), area Observability and debug-mcp: outside the editor's reduction, kept as it was",
     "since": "2026-11-03",
     "what": "Runs a local collector that the editor's hubs connect to over a WebSocket, and offers what they send to an agent as MCP tools over stdio; every agent session on the machine gets them, a second through the one holding the port, taking it when that one goes.",
     "paths": [
-      "packages/debug-mcp/agent-hook.mjs",
-      "packages/debug-mcp/src/agent.ts",
       "packages/debug-mcp/src/bin.ts",
       "packages/debug-mcp/src/mcp.ts",
       "packages/debug-mcp/src/relay.ts",

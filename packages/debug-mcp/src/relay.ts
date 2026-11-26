@@ -9,10 +9,13 @@
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage, JSONRPCRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { DebugMcp } from "./server.ts";
+import * as fs from "@brianjenkins94/util/fs";
+import { LOCAL_DIR } from "@brianjenkins94/util/silo/layout";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import * as path from "node:path";
 import { createMcpServer } from "./mcp.ts";
 import { createDebugMcp } from "./server.ts";
 import { HERE, MCP_PATH } from "./sessions.ts";
@@ -67,6 +70,20 @@ export interface Port {
 	"owned": () => DebugMcp | undefined;
 }
 
+/** Where each tool's use is kept: DEBUG_MCP_USAGE_FILE (`none`, nowhere), else where silo keeps what's this machine's, in
+ *  the repository it was started in (its root's .silo/local), else the folder itself. */
+function usageFile(): { "usageFile"?: string } {
+	const asked = process.env["DEBUG_MCP_USAGE_FILE"];
+
+	if (asked !== undefined && asked !== "") {
+		return asked === "none" ? {} : { "usageFile": path.resolve(asked) };
+	}
+
+	const git = fs.closest(process.cwd(), ".git");
+
+	return { "usageFile": path.join(git === undefined ? process.cwd() : path.dirname(git), LOCAL_DIR, "agent-tools.json") };
+}
+
 /** `port`, for a session to be served on: taken, or relayed to. */
 export function portOf(port: number): Port {
 	let owned: DebugMcp | undefined;
@@ -76,7 +93,7 @@ export function portOf(port: number): Port {
 			return owned;
 		}
 
-		const debugMcp = createDebugMcp({ "port": port });
+		const debugMcp = createDebugMcp({ "port": port, ...usageFile() });
 
 		try {
 			await debugMcp.whenListening;

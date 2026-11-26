@@ -12,7 +12,7 @@ import type { Hub, RpcClient } from "@brianjenkins94/hub";
 import type { WebSocket } from "ws";
 
 import type { HubLogRecord } from "./store.ts";
-import { createHub, createRpcClient, websocketTransport } from "@brianjenkins94/hub";
+import { createHub, createRpcClient, serve, websocketTransport } from "@brianjenkins94/hub";
 // From source (not a package dependency): the architecture plane's collector side has no runtime deps.
 import type { ArchReport } from "../../observability/src/arch.ts";
 import { tagBySubject } from "../../observability/src/log-subject.ts";
@@ -25,6 +25,7 @@ import { discoverTabs, markOutdated, TAB_HERE, TAB_LEAVING } from "../../observa
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { agentCalls } from "./agent.ts";
+import { withFindings } from "./agent-audit.ts";
 import { cdpMemory } from "./cdp-memory.ts";
 import { mcpSessions } from "./sessions.ts";
 import { RecordStore } from "./store.ts";
@@ -155,11 +156,13 @@ function agentReport(agent: AgentCalls, request: IncomingMessage, response: Serv
 /** Start the debug-mcp WS server on `port` and return its hub, store, rpc client, and a close handle. */
 /** `cdp`: the browser's DevTools endpoint to read each realm's memory through (cdp-memory.ts) — default DEBUG_MCP_CDP, else
  *  Chromium's usual port, looked for while a tab is linked; `false`, none. */
-export function createDebugMcp(options: { "port": number; "max"?: number; "origins"?: string[]; "cdp"?: string | false } = { "port": 7378 }): DebugMcp {
+export function createDebugMcp(options: { "port": number; "max"?: number; "origins"?: string[]; "cdp"?: string | false; "usageFile"?: string } = { "port": 7378 }): DebugMcp {
 	const hub = createHub({ "id": "debug-mcp" });
 	const store = new RecordStore({ "max": options.max });
 	const links = new Set<WebSocket>();
-	const agent = agentCalls(store, () => links.size > 0);
+	const agent = agentCalls(store, () => links.size > 0, { "usageFile": options.usageFile });
+
+	serve(hub, "agent.tools", () => withFindings(agent.usage()));
 	// (another agent session's MCP, relayed: sessions.ts; else a hook's report)
 	const sessions = mcpSessions(() => debugMcp);
 	const http = createServer((request, response) => {

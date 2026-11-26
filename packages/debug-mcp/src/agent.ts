@@ -9,7 +9,9 @@ import type { Logger, Span } from "@brianjenkins94/util/logger";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import type { HubLogRecord, RecordStore } from "./store.ts";
+import * as fs from "@brianjenkins94/util/fs";
 import { logger, sinks } from "@brianjenkins94/util/logger";
+import * as path from "node:path";
 
 export const AGENT_SOURCE = "agent";
 
@@ -26,8 +28,31 @@ export interface AgentToolCall {
 	"bytes"?: number;
 }
 
+/** How much one tool has been used: through the editor's MCP (`editor`) or around it (`around`, its client's own). */
+export interface ToolUse {
+	"tool": string;
+	"via": "editor" | "around";
+	"calls": number;
+	"failures": number;
+	"ms": number;
+	/** Its answers' size, all told, and the largest. */
+	"bytes": number;
+	"largest": number;
+	/** Around the editor: how many while an editor was linked, so it could have been done there. */
+	"linked"?: number;
+	/** The shell's, while an editor was linked: each command's own program (`git` of `cd a && git log | head`), how often. */
+	"programs"?: Record<string, number>;
+	"first": number;
+	"last": number;
+}
+
+/** Every tool's use, most used first, kept since `since` (across restarts, when there's a file to keep it in). */
+export interface ToolUses { "since"?: number; "tools": ToolUse[] }
+
 export interface AgentCalls {
 	"log": Logger;
+	/** Each tool's calls, failures and time so far (`agent.tools`, for the editor's Features and Tests). */
+	"usage": () => ToolUses;
 	/** `transport` with each `tools/call` across it spanned — with its `session` when it's one of several (sessions.ts). */
 	"observe": (transport: Transport, session?: () => string | undefined) => Transport;
 	/** One the agent's client reported. */
@@ -35,13 +60,19 @@ export interface AgentCalls {
 	"dispose": () => void;
 }
 
+/** What a command starts with that isn't what it does. */
+const PRELUDES = new Set(["cd", "export", "source", ".", "set", "env", "time", "caffeinate", "sudo", "nohup", "command", "builtin"]);
+
+/** A command's own program, of its programs in order (the hook's `target`). */
+export const commandOf = (programs: string): string | undefined => programs.split(" ").find((program) => program !== "" && !PRELUDES.has(program));
+
 function sizeOf(value: unknown): number {
 	return JSON.stringify(value ?? null).length;
 }
 
 /** The agent's tool calls, filed in `store`. `editorLinked` says whether an editor tab is linked now: a call around the
  *  editor while one is, is work it could have done. */
-export function agentCalls(store: RecordStore, editorLinked: () => boolean): AgentCalls {
+export function agentCalls(store: RecordStore, editorLinked: () => boolean, { usageFile }: { "usageFile"?: string } = {}): AgentCalls {
 	const sink = (record: HubLogRecord): void => {
 		if (record.context?.["source"] === AGENT_SOURCE) {
 			store.add(record);
@@ -51,19 +82,76 @@ export function agentCalls(store: RecordStore, editorLinked: () => boolean): Age
 	sinks.push(sink as (typeof sinks)[number]);
 
 	const log = logger({ "source": AGENT_SOURCE });
-	const reported = new Map<string, Span>();
-	const close = (span: Span, ok: boolean, bytes: number | undefined, failure?: string): void => {
+	const uses = new Map<string, ToolUse>();
+	let since: number | undefined;
+	let saving: ReturnType<typeof setTimeout> | undefined;
+
+	if (usageFile !== undefined && fs.existsSync(usageFile)) {
+		try {
+			const kept = JSON.parse(fs.readFileSync(usageFile, "utf8")) as ToolUses;
+
+			since = kept.since;
+
+			for (const use of kept.tools ?? []) {
+				uses.set(`${use.via} ${use.tool}`, use);
+			}
+		} catch (error) {
+			log.warn("couldn't read the tools' use so far: it starts again", { "error": String(error) });
+		}
+	}
+
+	const save = (): void => {
+		clearTimeout(saving);
+		saving = undefined;
+
+		if (usageFile !== undefined) {
+			fs.mkdirSync(path.dirname(usageFile), { "recursive": true });
+			fs.writeFileSync(usageFile, JSON.stringify({ "since": since, "tools": [...uses.values()] }, null, "\t") + "\n");
+		}
+	};
+
+	interface Open { "span": Span; "tool": string; "via": ToolUse["via"]; "started": number; "linked"?: boolean; "program"?: string }
+
+	const opened = (tool: string, via: ToolUse["via"], attrs: Record<string, unknown>, around: Pick<Open, "linked" | "program"> = {}): Open => ({ "span": log.span("debug-mcp.agent.call", { "tool": tool, "via": via, ...attrs }), "tool": tool, "via": via, "started": Date.now(), ...around });
+	const reported = new Map<string, Open>();
+	const close = ({ span, tool, via, started, linked, program }: Open, ok: boolean, bytes: number | undefined, failure?: string): void => {
 		if (!ok) {
 			span.error("tool failed", failure === undefined ? {} : { "message": failure });
 		}
 
 		span.end(bytes === undefined ? {} : { "bytes": bytes });
+
+		const now = Date.now();
+		const use = uses.get(`${via} ${tool}`) ?? { "tool": tool, "via": via, "calls": 0, "failures": 0, "ms": 0, "bytes": 0, "largest": 0, "first": started, "last": now };
+
+		use.calls += 1;
+		use.failures += ok ? 0 : 1;
+		use.ms += now - started;
+		use.bytes = (use.bytes ?? 0) + (bytes ?? 0);
+		use.largest = Math.max(use.largest ?? 0, bytes ?? 0);
+		use.last = now;
+
+		if (linked === true) {
+			use.linked = (use.linked ?? 0) + 1;
+		}
+
+		if (program !== undefined) {
+			use.programs = { ...use.programs, [program]: (use.programs?.[program] ?? 0) + 1 };
+		}
+		uses.set(`${via} ${tool}`, use);
+		since ??= started;
+
+		if (usageFile !== undefined) {
+			saving ??= setTimeout(save, 1000);
+			saving.unref?.();
+		}
 	};
 
 	return {
 		"log": log,
+		"usage": () => ({ ...since === undefined ? {} : { "since": since }, "tools": [...uses.values()].toSorted((one, other) => other.calls - one.calls) }),
 		"observe": (inner, session) => {
-			const open = new Map<string | number, Span>();
+			const open = new Map<string | number, Open>();
 			const outer: Transport = {
 				"start": async () => inner.start(),
 				"close": async () => inner.close(),
@@ -90,7 +178,7 @@ export function agentCalls(store: RecordStore, editorLinked: () => boolean): Age
 					const params = (message.params ?? {}) as { "name"?: unknown; "arguments"?: Record<string, unknown> };
 					const tab = params.arguments?.["tab"];
 
-					open.set(message.id, log.span("debug-mcp.agent.call", { "tool": String(params.name), "via": "editor", "argBytes": sizeOf(params.arguments), ...typeof tab === "string" ? { "tab": tab } : {}, ...session?.() === undefined ? {} : { "session": session() } }));
+					open.set(message.id, opened(String(params.name), "editor", { "argBytes": sizeOf(params.arguments), ...typeof tab === "string" ? { "tab": tab } : {}, ...session?.() === undefined ? {} : { "session": session() } }));
 				}
 
 				outer.onmessage?.(message, extra);
@@ -105,10 +193,12 @@ export function agentCalls(store: RecordStore, editorLinked: () => boolean): Age
 			return outer;
 		},
 		"report": (call) => {
-			const attrs = { "tool": call.tool ?? "?", "via": "around", "editorLinked": editorLinked(), ...call.target === undefined ? {} : { "target": call.target } };
+			const attrs = { "editorLinked": editorLinked(), ...call.target === undefined ? {} : { "target": call.target } };
+			const program = call.tool === "Bash" && call.target !== undefined && attrs.editorLinked ? commandOf(call.target) : undefined;
+			const around = { "linked": attrs.editorLinked, ...program === undefined ? {} : { "program": program } };
 
 			if (call.phase === "start" && call.id !== undefined) {
-				reported.set(call.id, log.span("debug-mcp.agent.call", attrs));
+				reported.set(call.id, opened(call.tool ?? "?", "around", attrs, around));
 
 				return;
 			}
@@ -119,9 +209,13 @@ export function agentCalls(store: RecordStore, editorLinked: () => boolean): Age
 				reported.delete(call.id);
 			}
 
-			close(started ?? log.span("debug-mcp.agent.call", attrs), call.ok !== false, call.bytes);
+			close(started ?? opened(call.tool ?? "?", "around", attrs, around), call.ok !== false, call.bytes);
 		},
 		"dispose": () => {
+			if (saving !== undefined) {
+				save();
+			}
+
 			sinks.splice(sinks.indexOf(sink as (typeof sinks)[number]), 1);
 		}
 	};

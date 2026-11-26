@@ -42,6 +42,79 @@ interface Model {
 	"ci": { "byFile": Map<string, TestStanding[]>; "runs": number; "refused"?: string };
 	"coverage": Map<string, FeatureCoverage>;
 	"capabilities": Map<string, FeatureCapabilities>;
+	"tools"?: ToolUses;
+}
+
+interface ToolUse { "tool": string; "via": "editor" | "around"; "calls": number; "failures": number; "ms": number; "last": number }
+
+interface Finding { "kind": "bypass" | "candidate" | "workaround" | "friction" | "oversize"; "tool": string; "count": number; "said": string }
+
+interface ToolUses { "since"?: number; "tools": ToolUse[]; "findings"?: Finding[] }
+
+const FINDING_VARIANT: Record<Finding["kind"], "warning" | "danger" | "neutral" | "brand"> = { "bypass": "warning", "candidate": "brand", "workaround": "warning", "friction": "danger", "oversize": "neutral" };
+
+const FINDING_TITLE: Record<Finding["kind"], string> = {
+	"bypass": "Done around the editor while it was linked, though an editor tool does it: use that one, or say why it wasn't enough.",
+	"candidate": "Run often in the shell while the editor was linked, and no editor tool does it: a tool to write, its UI first.",
+	"workaround": "A page's eval standing in for something: what was missing?",
+	"friction": "A tool that fails often: what it's asked for, or how it answers, needs fixing.",
+	"oversize": "An answer bigger than is read whole: it needs paging, a summary, or a narrower ask."
+};
+
+const AGENT_TOOL = "agent tool|";
+
+const toolsOf = (entry: LedgerEntry): string[] => (entry.ways ?? []).filter((way) => way.startsWith(AGENT_TOOL)).map((way) => way.slice(AGENT_TOOL.length));
+
+const useLine = ({ tool, calls, failures, ms, last }: ToolUse): string => `${tool}: ${String(calls)} ${calls === 1 ? "call" : "calls"}${failures === 0 ? "" : `, ${String(failures)} failed`}, ${lasted(ms / calls)} each, last ${new Date(last).toLocaleString()}`;
+
+function AgentTools({ entry, uses }: { "entry": LedgerEntry; "uses": ToolUses | undefined }): JSX.Element | null {
+	const tools = toolsOf(entry);
+
+	if (tools.length === 0) {
+		return null;
+	}
+
+	if (uses === undefined) {
+		return <span title={`Its agent tools: ${tools.join(", ")}. How they're used is debug-mcp's to say, and none is linked.`}>{`${String(tools.length)} agent ${tools.length === 1 ? "tool" : "tools"}`}</span>;
+	}
+
+	const byTool = new Map(uses.tools.filter((use) => use.via === "editor").map((use) => [use.tool, use]));
+	const used = tools.flatMap((tool) => byTool.get(tool) ?? []);
+	const never = tools.filter((tool) => !byTool.has(tool));
+	const calls = used.reduce((total, use) => total + use.calls, 0);
+	const failures = used.reduce((total, use) => total + use.failures, 0);
+
+	return (
+		<span class="wa-cluster wa-gap-3xs">
+			<span title={used.toSorted((one, other) => other.calls - one.calls).map(useLine).join("\n") || "None of its agent tools has been called."}>{`${String(tools.length)} agent ${tools.length === 1 ? "tool" : "tools"} · ${String(calls)} ${calls === 1 ? "call" : "calls"}`}</span>
+			{failures === 0 ? null : <wa-badge appearance="outlined" variant="danger" title={used.filter((use) => use.failures > 0).map(useLine).join("\n")}>{`${String(failures)} failed`}</wa-badge>}
+			{never.length === 0 ? null : <wa-badge appearance="outlined" variant="warning" title={`Never called by an agent: ${never.join(", ")}. Not needed, or not found when it would help.`}>{`${String(never.length)} never called`}</wa-badge>}
+		</span>
+	);
+}
+
+function Unnamed({ features, uses }: { "features": [string, LedgerEntry][]; "uses": ToolUses | undefined }): JSX.Element | null {
+	if (uses === undefined || uses.tools.length === 0) {
+		return null;
+	}
+
+	const named = new Set(features.flatMap(([, entry]) => toolsOf(entry)));
+	const unnamed = uses.tools.filter((use) => use.via === "around" || !named.has(use.tool));
+	const since = uses.since === undefined ? "" : ` since ${new Date(uses.since).toLocaleDateString()}`;
+
+	return (
+		<div class="wa-stack wa-gap-3xs">
+			<div class="wa-caption-s" title={unnamed.map(useLine).join("\n")}>
+				{`Agents' tool calls${since}: ${String(uses.tools.reduce((total, use) => total + use.calls, 0))}. Called, in no feature: ${unnamed.length === 0 ? "none" : unnamed.slice(0, 8).map((use) => `${use.tool} ${String(use.calls)}`).join(", ")}${unnamed.length > 8 ? ", …" : ""}`}
+			</div>
+			{(uses.findings ?? []).slice(0, 8).map((finding) => (
+				<div key={`${finding.kind} ${finding.tool}`} class="wa-cluster wa-gap-2xs wa-caption-s">
+					<wa-badge appearance="outlined" variant={FINDING_VARIANT[finding.kind]} title={FINDING_TITLE[finding.kind]}>{finding.kind}</wa-badge>
+					<span>{finding.said}</span>
+				</div>
+			))}
+		</div>
+	);
 }
 
 interface FeatureCapabilities { "can": string[]; "used": string[] }
@@ -283,7 +356,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 
 		return matches(name) || matches(entry.what) ? files : files.filter((file) => matches(file));
 	};
-	const shown = model.features.filter(([name, entry]) => (all || (model.files.get(name) ?? []).length > 0) && (wanted === "" || matches(name) || matches(entry.what) || filesOf(name, entry).length > 0));
+	const shown = model.features.filter(([name, entry]) => (all || (model.files.get(name) ?? []).length > 0) && (wanted === "" || matches(name) || matches(entry.what) || toolsOf(entry).some(matches) || filesOf(name, entry).length > 0));
 
 	return (
 		<div class="fv">
@@ -297,6 +370,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 			<Unchecked label="No test here ran the lines changed in" title="Tests here run these files, but none ran the lines changed since the last commit." paths={model.unchecked["lines not run"]} />
 			<Unchecked label="Changed, under every test" title="What every test runs under (its packages, its compiler's settings, what its program may do): any test may come out differently." paths={model.unchecked.config} />
 			{model.ci.refused === undefined ? null : <div class="wa-caption-s">{`CI's outcomes: ${model.ci.refused}`}</div>}
+			<Unnamed features={model.features} uses={model.tools} />
 			<table class="fv-table">
 				<thead>
 					<tr><th>Test</th><th>Type</th><th>Can't run in parallel</th><th>Effects</th><th>Reach</th><th>Last passed</th><th>Last failed</th><th>Typical</th><th title={`How its tests have come out in CI, over the branch's last ${String(model.ci.runs)} runs that ran tests.`}>CI</th><th /></tr>
@@ -317,6 +391,7 @@ function Table({ model, running, onRun, onOpen }: { "model": Model; "running": S
 										{failing === 0 ? null : <wa-badge variant="danger">{`${String(failing)} failing`}</wa-badge>}
 										<Covered coverage={model.coverage.get(name)} />
 										<Capabilities of={model.capabilities.get(name)} />
+										<AgentTools entry={entry} uses={model.tools} />
 									</span>
 								</td>
 								<td />
@@ -449,9 +524,11 @@ export function installFeaturesView(vscode: typeof vscodeApi, hub: Hub, log: Log
 		const { "tests": affected, why } = await rpc.request("tests.affected", { "glance": true }, { "timeoutMs": 60_000 }) as { "tests": { "file": string; "stale": boolean }[]; "why": { "path": string; "why": Why }[] };
 		const changesThat = (reason: Why): string[] => why.filter((each) => each.why === reason).map((each) => each.path);
 
-		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "unchecked": { "not run": changesThat("not run"), "lines not run": changesThat("lines not run"), "config": changesThat("config") }, "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25), "titles": new Map([...texts].map(([file, text]) => [file, titlesOf(text)])), "ci": model.ci, "coverage": coverageByFeature(ledger, code, coverage, featuresOfTests(files)), "capabilities": capabilitiesByFeature(ledger, canOf, history, files) };
+		const tools = await rpc.request("agent.tools", undefined, { "timeoutMs": 5000, "waitForResponderMs": 1500 }).then((answer) => answer as ToolUses, () => undefined);
+
+		model = { "features": features, "files": files, "kinds": kinds, "history": history, "reach": reachOf(reach), "touched": new Set(affected.filter((test) => test.stale).map((test) => test.file)), "unchecked": { "not run": changesThat("not run"), "lines not run": changesThat("lines not run"), "config": changesThat("config") }, "slowerBy": vscode.workspace.getConfiguration("run.tests").get<number>("slowerBy", 25), "titles": new Map([...texts].map(([file, text]) => [file, titlesOf(text)])), "ci": model.ci, "coverage": coverageByFeature(ledger, code, coverage, featuresOfTests(files)), "capabilities": capabilitiesByFeature(ledger, canOf, history, files), ...tools === undefined ? {} : { "tools": tools } };
 		model.ci = { ...model.ci, "byFile": joined(standings) };
-		span.end({ "count": features.length, "tests": kinds.size, "runs": history.length, "files": code.length, "read": capabilitiesRead });
+		span.end({ "count": features.length, "tests": kinds.size, "runs": history.length, "files": code.length, "read": capabilitiesRead, "toolUses": tools?.tools.length ?? -1 });
 		redraw();
 	});
 

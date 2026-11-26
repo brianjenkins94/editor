@@ -66,3 +66,69 @@ test("a hook's report of a tool around the editor is a span, from a program and 
 		await debugMcp.close();
 	}
 });
+
+test("each tool's use is counted, through the editor and around it, kept across a restart, and asked for as agent.tools", async () => {
+	const { mkdtempSync, readFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const path = await import("node:path");
+	const { createRpcClient } = await import("@brianjenkins94/hub");
+	const usageFile = path.join(mkdtempSync(path.join(tmpdir(), "agent-tools-")), "local", "agent-tools.json");
+	const first = createDebugMcp({ "port": 0, "usageFile": usageFile });
+
+	try {
+		const port = await first.whenListening;
+		const inner = fakeTransport();
+		const outer = first.agent.observe(inner);
+
+		outer.onmessage = () => {};
+
+		for (const [id, isError] of [[1, false], [2, true]] as const) {
+			inner.receive({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": "files_read", "arguments": {} } });
+			await outer.send({ "jsonrpc": "2.0", "id": id, "result": { "isError": isError, "content": [] } });
+		}
+
+		await fetch(`http://127.0.0.1:${String(port)}/agent/tool`, { "method": "POST", "body": JSON.stringify({ "phase": "end", "tool": "Bash", "ok": true }) });
+
+		const asked = await createRpcClient(first.hub).request("agent.tools", undefined, { "timeoutMs": 5000 }) as { "since"?: number; "tools": { "tool": string; "via": string; "calls": number; "failures": number }[] };
+
+		assert.deepEqual(asked.tools.map(({ tool, via, calls, failures }) => [tool, via, calls, failures]), [["files_read", "editor", 2, 1], ["Bash", "around", 1, 0]]);
+		assert.equal(typeof asked.since, "number");
+	} finally {
+		await first.close();
+	}
+
+	assert.equal(JSON.parse(readFileSync(usageFile, "utf8")).tools.length, 2, "kept, as it closed");
+
+	const again = createDebugMcp({ "port": 0, "usageFile": usageFile });
+
+	try {
+		await again.whenListening;
+		assert.deepEqual(again.agent.usage().tools.map(({ tool, calls }) => [tool, calls]), [["files_read", 2], ["Bash", 1]], "what was kept, counted on from");
+	} finally {
+		await again.close();
+	}
+});
+
+test("what the use says about the tools: bypasses, candidates, workarounds, friction and oversize, each only past its bar", async () => {
+	const { auditUse } = await import("../src/agent-audit.ts");
+	const { commandOf } = await import("../src/agent.ts");
+	const use = (tool: string, via: "editor" | "around", more: Record<string, unknown> = {}) => ({ "tool": tool, "via": via, "calls": 10, "failures": 0, "ms": 100, "bytes": 1000, "largest": 100, "first": 0, "last": 0, ...more });
+	const findings = auditUse([
+		use("Read", "around", { "linked": 7 }),
+		use("Edit", "around", { "linked": 2 }),
+		use("Bash", "around", { "linked": 30, "programs": { "git": 12, "curl": 6, "wc": 9, "lsof": 2 } }),
+		use("page_eval", "editor", { "calls": 4 }),
+		use("git_push", "editor", { "calls": 5, "failures": 3 }),
+		use("runs_affected", "editor", { "largest": 95_000 })
+	]);
+
+	assert.deepEqual(findings.map(({ kind, tool, instead }) => [kind, tool, instead]), [
+		["bypass", "Bash git", "git_status, git_diff, git_log, git_show, git_commit, git_push…"],
+		["oversize", "runs_affected", undefined],
+		["bypass", "Read", "files_read"],
+		["candidate", "Bash curl", undefined],
+		["workaround", "page_eval", undefined],
+		["friction", "git_push", undefined]
+	]);
+	assert.equal(commandOf("cd caffeinate git head"), "git", "a command's own program, past what it starts with");
+});

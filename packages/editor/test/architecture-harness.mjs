@@ -152,10 +152,10 @@ async function reachable(url) {
 }
 
 /** Spawn `command` and resolve once its output contains `ready`. */
-async function startProcess(command, args, cwd, ready, { echoStdout = true } = {}) {
+async function startProcess(command, args, cwd, ready, { echoStdout = true, env = {} } = {}) {
 	// Its own process group, so close() can stop what npx starts under it (tsx → the dev server), not just npx: an
 	// orphaned dev server keeps :5173, and the next session's starts beside it on another port.
-	const child = spawn(command, args, { "cwd": cwd, "stdio": ["pipe", "pipe", "pipe"], "detached": true });
+	const child = spawn(command, args, { "cwd": cwd, "stdio": ["pipe", "pipe", "pipe"], "detached": true, "env": { ...process.env, ...env } });
 
 	// In CI there's no one to watch it: what the dev server / debug-mcp says is the only clue when a session won't boot.
 	// (`echoStdout: false`: a stdout that's a protocol — debug-mcp's is MCP's, a JSON-RPC message per line — isn't.)
@@ -274,7 +274,8 @@ export async function startSession(options = {}) {
 	const debugMcpPort = options.debugMcpPort ?? DEBUG_MCP_PORT;
 
 	if (options.debugMcp === true) {
-		processes.push(await startProcess("npx", ["tsx", "src/bin.ts", "--port", String(debugMcpPort)], new URL("../../debug-mcp/", import.meta.url), "listening", { "echoStdout": false }));
+		// (its tools' use kept nowhere: a test's calls aren't an agent's)
+		processes.push(await startProcess("npx", ["tsx", "src/bin.ts", "--port", String(debugMcpPort)], new URL("../../debug-mcp/", import.meta.url), "listening", { "echoStdout": false, "env": { "DEBUG_MCP_USAGE_FILE": "none" } }));
 	}
 
 	// (`chromium`: Playwright launch options for the browser — the performance suite's full build and eager measurement.)
