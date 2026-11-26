@@ -65,11 +65,10 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    agents' requests, no UI), test/workbench/ (what a page can't do to its own window) and performance.mjs (budgets).
 
 7. **silo's command line, cut to what a file can't do** (the user, 2026-11-25; packages/silo/README.md, *The files are the
-   interface*). In order: the contract made true (`layout.ts` right, a version where a meaning can change, writers that keep
-   what they don't know; then a small program that reads each file without `util/silo`); `features`, `history`, `vouch`,
-   `remove` and `restore` out, with what in lib only they use, checked one by one; `observed` a script of this repository's,
-   until item 4 says what it becomes; `init` into `install`, which stays (the user, 2026-11-25); `test` kept as CI's until
-   there's a `run`. **Done when** `silo --help` lists `check`, `status`, `install` and `test`.
+   interface*). The contract is true (2026-11-25: *Versions, and what a writer keeps*). Left, in order: `features`,
+   `history`, `vouch`, `remove` and `restore` out, with what in lib only they use, checked one by one; `observed` a script
+   of this repository's, until item 4 says what it becomes; `init` into `install`, which stays (the user, 2026-11-25);
+   `test` kept as CI's until there's a `run`. **Done when** `silo --help` lists `check`, `status`, `install` and `test`.
 
 ## Watching
 

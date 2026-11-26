@@ -7,7 +7,7 @@ import { tarballUrl } from "@brianjenkins94/editor-api/runtime";
 import { add, consumerOf, surfaceEntries } from "@brianjenkins94/util/silo/detect";
 import { JOIN, joinedBefore, joinsWanted, syncConsumer, syncPackages } from "@brianjenkins94/util/silo/evidence";
 import { resolvedSince } from "./resolved";
-import { baselinePath, LOCAL_DIR, versionsPath } from "@brianjenkins94/util/silo/layout";
+import { baselinePath, checked, LOCAL_DIR, versioned, VERSIONS, versionsPath } from "@brianjenkins94/util/silo/layout";
 import * as vscode from "vscode";
 
 const PARALLEL = 4;
@@ -241,7 +241,7 @@ async function syncBaseline(context: vscode.ExtensionContext, root: vscode.Uri, 
 	}
 
 	const uri = vscode.Uri.joinPath(root, await keptAt(baselinePath(), there));
-	const existing = await readJson(uri) as BaselineFile | undefined;
+	const existing = checked(baselinePath(), await readJson(uri) as BaselineFile | undefined, VERSIONS.baseline);
 	const known = existing?.packages ?? {};
 	const resolved = Object.fromEntries(Object.entries(versions.packages).filter(([, each]) => each.platform !== true && each.link === undefined));
 
@@ -270,7 +270,7 @@ async function syncBaseline(context: vscode.ExtensionContext, root: vscode.Uri, 
 
 	const sorted = Object.fromEntries(Object.entries(packages).toSorted(([one], [other]) => one.localeCompare(other)));
 
-	await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify({ "consumer": consumer, "packages": sorted, ...join === undefined ? {} : { "join": join } }, undefined, 2) + "\n"));
+	await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(JSON.stringify(versioned({ ...existing, "consumer": consumer, "packages": sorted, "join": join }, VERSIONS.baseline), undefined, 2) + "\n"));
 
 	tell(log, existing === undefined ? `made ${baselinePath()}: ${String(Object.keys(sorted).length)} packages, from ${versions.from}` : `synced ${baselinePath()}${consumerChanged ? " (the code's use of its dependencies changed)" : ""}`, packages, changed, unread);
 

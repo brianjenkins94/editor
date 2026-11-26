@@ -690,7 +690,7 @@ export const app = subcommands({
 				const now = new Set(made.map((vouch) => vouch.test));
 
 				fs.mkdirSync(path.dirname(kept), { "recursive": true });
-				fs.writeFileSync(kept, vouchesText([...before.filter((vouch) => !now.has(vouch.test)), ...made]));
+				fs.writeFileSync(kept, vouchesText([...before.filter((vouch) => !now.has(vouch.test)), ...made], fs.existsSync(kept) ? fs.readFileSync(kept) : ""));
 				process.stdout.write(`vouched for ${String(made.length)} of ${String(ran.outcomes.length)} tests (${path.relative(cwd, kept)})\n`);
 				process.exitCode = ran.status;
 			}

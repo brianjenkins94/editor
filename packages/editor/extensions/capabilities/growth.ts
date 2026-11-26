@@ -4,7 +4,7 @@ import type { BaselinePackages } from "@brianjenkins94/util/silo/evidence";
 import type { Rule } from "@brianjenkins94/util/silo/policy";
 import { keptAt, localOf } from "@brianjenkins94/editor-api/git";
 import { loadPolicyFiles, replaceRule } from "@brianjenkins94/editor-api/policy";
-import { baselinePath, versionsPath } from "@brianjenkins94/util/silo/layout";
+import { baselinePath, checked, VERSIONS, versionsPath } from "@brianjenkins94/util/silo/layout";
 import * as policy from "@brianjenkins94/util/silo/policy";
 import * as vscode from "vscode";
 import { POLICY_FILES } from "./decisions";
@@ -68,7 +68,7 @@ export function warnGrowth(context: vscode.ExtensionContext, log?: ObservedExten
 	const readJson = async (path: string): Promise<unknown> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, path))).then((bytes) => JSON.parse(new TextDecoder().decode(bytes)) as unknown, () => undefined);
 
 	const check = async (): Promise<void> => {
-		const baseline = await readJson(await keptAt(baselinePath(), there)) as BaselineFile | undefined;
+		const baseline = checked(baselinePath(), await readJson(await keptAt(baselinePath(), there)) as BaselineFile | undefined, VERSIONS.baseline);
 		const files = await loadPolicyFiles();
 		const all = { ...policy.EMPTY_POLICY, "rules": [...files?.mine.rules ?? [], ...files?.shared.rules ?? []] };
 		const undecided = (name: string, capability: string): boolean => policy.effectiveDisposition(all, capability, "", true, { "package": name }) === "review";

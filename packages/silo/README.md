@@ -100,7 +100,7 @@ Paths are lib `layout.ts`'s, the shapes its modules'. *Trust* is what a reader m
 | `policy.json`, `policy/<user>.json` | the rules: everyone's, then one person's over them | `policy.ts` `Policy` | by hand; Always allow, at a call | decision |
 | `notes/<user>/<file>.jsonl` (any collection of annotations) | a person's notes, each on a span | `annotations.ts` `Annotation` | the editor | decision |
 | `baseline.json` | what each package can do, what the code uses of it, and what that can reach | `audit.ts` `Baseline` | `silo install`; the editor's capabilities extension | derived |
-| `versions.json` | the version each dependency loads at, where no lockfile says | `layout.ts` `versionsPath` | the editor's resolver | derived |
+| `versions.json` | the version each dependency loads at, where no lockfile says | the editor's `workbench/versions.ts` `VersionsFile` | the editor's resolver | derived |
 | `last-run/reach.json` | what each test ran, by file | `observed.ts` `ReachRecord` | `silo observed`, by hand | derived |
 | `runs/<user>.jsonl` | each run: who, where, on what code, what it did and was stopped from doing | `evidence.ts` `RunEnvelope` | the editor, as a run ends; util/mcp (kept local unless shared) | claim |
 | `evidence/<user>/<environment>/<file>.jsonl` | what those runs observed, by span: reached, values, branches, purity, time | `evidence.ts` `Observation` | the editor, as a run ends | claim |
@@ -133,20 +133,23 @@ one depends on which of three it is:
   while everything it reached is as it was. A pull request and the weekly run weigh nothing: they run everything. So a wrong
   one costs at most the time until CI next runs the test itself, a week at the longest.
 
-### What the contract still needs
+### Versions, and what a writer keeps (built 2026-11-25)
 
-What's written above is what the code does. To be something another program can rely on:
+What's written above is what the code does, and another program can rely on it:
 
-1. **A version where a meaning can change.** `policy.json` and `reach.json` have one; evidence and annotations name how
-   their span ids are made (`"key": "bablr1"`); `runs`, `vouches`, `features.json` and `baseline.json` have none.
-2. **Writers that keep what they don't know.** Readers skip a line or a kind they don't know, but writers drop it: the
-   ledger is written with the fields its writer lists, and evidence is read, folded and written back without a kind it
-   hasn't heard of. An older silo loses a newer one's.
-3. **`layout.ts` right.** It lists `capabilities.json` and `capabilities/<user>.json`, gone since 2026-11-22 with their
-   path functions still there, and leaves out `vouches/` and `last-run/`.
-4. **A reader that isn't silo.** Nearly everything that reads these goes through `util/silo` (the debugger's reading of
-   `versions.json` is one that doesn't), so the shapes are only as clear as their types. The test of the
-   contract is a small program, not importing `util/silo`, that reads each.
+- **A version where a meaning can change** (lib `layout.ts` `VERSIONS`). Each line of `runs` and `vouches` says
+  `"version": 1`; `baseline.json` says it once, and `features.json` as `"$version": 1`, a key no feature is named.
+  `policy.json` (1), `last-run/reach.json` (2) and `versions.json` (`"format": 3`) already had one. Evidence and annotations
+  name how their spans are made instead (`"key": "bablr1"`). None, in a file from before, is the first. A version changes
+  only when a reader of the old one would misread the new; a new field or kind doesn't change it.
+- **A reader meeting a version it doesn't know** skips the line, or refuses the whole file. A whole file is one it would
+  otherwise write over.
+- **A writer keeps what it doesn't know.** The ledger keeps a field it doesn't list, after those it does. Evidence keeps
+  a kind it hasn't heard of, and a field on one it has, when a run is folded in. A vouch file keeps a line it can't read.
+  Runs are only ever added to.
+- **A reader that isn't silo**: `test/reader.mjs`, plain JavaScript with no `util/silo`, reads each file from what this
+  section says of it (`node test/reader.mjs <repo>`). `test/files.test.ts` writes each with `util/silo` and checks that
+  the reader reads the same back, and that a newer version is skipped or refused.
 
 ### The four jobs
 

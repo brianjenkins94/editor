@@ -225,9 +225,9 @@ export function activate(context: vscode.ExtensionContext): void {
 		const { vouches, unsure } = vouchesOf(file, event.tests, ranOf, (path) => blobs.get(path), { "by": by, "at": new Date().toISOString() });
 		const pending = vscode.Uri.joinPath(root, PENDING_VOUCHES);
 		const write = async (span?: Span): Promise<void> => {
-			const kept = parseVouches(await Promise.resolve(vscode.workspace.fs.readFile(pending)).then((bytes) => new TextDecoder().decode(bytes), () => ""));
+			const before = await Promise.resolve(vscode.workspace.fs.readFile(pending)).then((bytes) => new TextDecoder().decode(bytes), () => "");
 
-			await vscode.workspace.fs.writeFile(pending, new TextEncoder().encode(vouchesText(latestVouches(kept, vouches))));
+			await vscode.workspace.fs.writeFile(pending, new TextEncoder().encode(vouchesText(latestVouches(parseVouches(before), vouches), before)));
 			span?.end({ "count": vouches.length, "unsure": unsure.length });
 		};
 

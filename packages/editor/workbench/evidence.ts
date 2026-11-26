@@ -371,9 +371,10 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		const branches = sites.filter((site) => site.site === "branch").map((site) => ({ "span": site.span, "arms": site.arms ?? [] }));
 		const path = evidencePath(envelope.user, envelope.environment, file);
 		const run = { "id": envelope.id, "at": envelope.endedAt };
-		const folded = foldBranches(foldValues(foldReached(parseEvidence(await text(path)), reached, run), values, run), branches, run);
+		const before = await text(path);
+		const folded = foldBranches(foldValues(foldReached(parseEvidence(before), reached, run), values, run), branches, run);
 
-		await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(folded)));
+		await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(folded, before)));
 
 		const samples = sites.flatMap((site) => (site.samples === undefined
 			? []
@@ -429,8 +430,9 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 
 		if (reports.length > 0) {
 			const path = evidencePath(taken.user, taken.environment, file);
+			const before = await text(path);
 
-			await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(foldTimes(parseEvidence(await text(path)), reports, { "id": taken.id, "at": taken.endedAt }))));
+			await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(foldTimes(parseEvidence(before), reports, { "id": taken.id, "at": taken.endedAt }), before)));
 		}
 
 		return reports.length;

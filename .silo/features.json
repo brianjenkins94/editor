@@ -3279,7 +3279,9 @@
       "cli command|init"
     ],
     "tests": [
-      "packages/silo/test/cli.test.ts"
+      "packages/silo/test/cli.test.ts",
+      "packages/silo/test/files.test.ts",
+      "packages/silo/test/reader.mjs"
     ]
   },
   "silo install": {

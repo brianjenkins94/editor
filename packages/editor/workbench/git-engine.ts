@@ -228,7 +228,9 @@ async function stageVouches(): Promise<boolean> {
 	const path = vouchesPath(user);
 
 	await fs.promises.mkdir(`${DIR}/${path.slice(0, path.lastIndexOf("/"))}`, { "recursive": true });
-	await fs.promises.writeFile(`${DIR}/${path}`, vouchesText(latestVouches(parseVouches(await readText(path) ?? ""), pending.map((vouch) => ({ ...vouch, "by": user })))));
+	const before = await readText(path) ?? "";
+
+	await fs.promises.writeFile(`${DIR}/${path}`, vouchesText(latestVouches(parseVouches(before), pending.map((vouch) => ({ ...vouch, "by": user }))), before));
 	await add({ "fs": fs, "dir": DIR, "filepath": path });
 
 	return true;
