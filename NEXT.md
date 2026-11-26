@@ -34,7 +34,8 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    - `npm test`: its test launches `playwright`'s Chromium and Vite's `preview`, and stops at unenv's
      `net.getDefaultAutoSelectFamilyAttemptTimeout`. What it checks, a page in a browser, the editor's own Playwright can
      do of an open preview; whether `playwright` itself should be that is to decide.
-   - A repository with no ESLint config is held to the editor's own style rules (`object-shorthand` on its tests).
+   - A repository with no ESLint config is held to the editor's own style rules (`object-shorthand` on its tests). Left as
+     it is (the user, 2026-11-26): it belongs to a bigger decision about sensible defaults.
    **Done when** two weeks' work is done there, its gaps listed here.
 3. **Runtime evidence, used** (after item 2; packages/editor/RUNTIME-EVIDENCE.md). Built: values, branches and types on
    hover, what could go, coverage, previews' evidence, time. But none is kept for this repository (no `.silo/evidence`),
