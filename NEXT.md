@@ -31,7 +31,8 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      (the user, 2026-11-26, an exception to no new test machinery): it runs in preview windows in the editor. In the
      debugger, `playwright` is the editor's (each page a preview window, its colorScheme the frame's, `evaluate`,
      `pageerror`) and vite's `preview()` the in-browser dev server, serving the pages as they are, not built
-     (playwright-library.spec). Not yet run on example-consumer itself.
+     (playwright-library.spec). example-consumer's own `npm test` passes there unchanged, 4 of 4 (2026-11-26, 8295d2a0,
+     its dev server locally).
    - A repository with no ESLint config is held to the editor's own style rules (`object-shorthand` on its tests). Left as
      it is (the user, 2026-11-26): it belongs to a bigger decision about sensible defaults.
    From the first push from it (2026-11-26, 18aae5a0):
