@@ -1,7 +1,7 @@
 /**
  * History TypeScript Server Plugin — reads the program the in-browser TypeScript server already holds, edits as they're
  * typed included, with the server's own `ts`: each file's ways in and its part of the declaration graph (util/silo's
- * ts-analysis, the same reading `silo history --analyzer typescript` does with TypeScript 7). No copy of TypeScript, no
+ * ts-analysis, the same reading silo's `typescript.ts` does with TypeScript 7). No copy of TypeScript, no
  * oxc: the engine (history-engine.js, served beside this file) is built with `typescript` external, and we hand it ours.
  *
  * One request (through `typescript.tsserverRequest`), `_history.read`: the extension says which reading of each file it

@@ -92,16 +92,6 @@ test("a carried standing goes on with what its own run and the later ones did: a
 	assert.equal(known([runOf(1, carried + reported("sums")), runOf(2, reported("adds"))])?.streak.runs, 1);
 });
 
-test("a pass vouched for with what its file reaches, as fingerprinted now; a failure vouches for nothing", async () => {
-	const { vouchesFor } = await import("../src/test.ts");
-	const { digest } = await import("@brianjenkins94/util/silo/graph");
-	const edges: Record<string, string[]> = { "a.test.mjs#(top)": ["a.mjs#a"] };
-	const graph = { "fingerprints": new Map([["a.test.mjs#(top)", "t"], ["a.mjs#a", "f1"], ["b.mjs#b", "f2"]]), "nodes": () => Object.keys(edges), "edges": (id: string) => edges[id] ?? [] };
-	const made = vouchesFor([{ "titles": ["a.test.mjs", "adds"], "outcome": "pass" }, { "titles": ["a.test.mjs", "fails"], "outcome": "fail" }], graph, { "by": "brian", "runtime": "node", "at": "2026-11-22T18:00:00.000Z" });
-
-	assert.deepEqual(made, [{ "test": "a.test.mjs › adds", "outcome": "pass", "by": "brian", "at": "2026-11-22T18:00:00.000Z", "runtime": "node", "reached": { "a.test.mjs#(top)": digest("t"), "a.mjs#a": digest("f1") } }]);
-});
-
 test("another runtime's vouch counts for a test CI passed after it was made (decision 19), not before, nor one CI failed", async () => {
 	const { agreedOn } = await import("../src/test.ts");
 	const standing = (id: string, verdict: "pass" | "fail", at: string) => [id, { "id": id, "runs": 3, "last": { "verdict": verdict, "run": "1", "commit": "c", "at": at }, "flakes": 0, "streak": { "verdict": verdict, "runs": 3 } }] as const;

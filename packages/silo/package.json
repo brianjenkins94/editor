@@ -1,7 +1,7 @@
 {
   "name": "@brianjenkins94/silo",
   "version": "0.0.0",
-  "description": "silo's command line: what a program's code says about it, derived and never kept by hand — its features (every way in, found in the code) and their history (told from the code's snapshots, not commit messages). The logic is @brianjenkins94/util/silo; this is the desktop front end, and the editor uses the same internals.",
+  "description": "silo's command line: what a file under .silo/ can't do — install (nothing under a week old, and the baseline of what each package can do), status (a decision about a feature), check (the code held to the ledger and the baseline) and test (CI's: the tests a change needs). The logic is @brianjenkins94/util/silo; the editor uses the same internals.",
   "type": "module",
   "bin": {
     "silo": "./cli.js"

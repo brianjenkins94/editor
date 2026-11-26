@@ -50,8 +50,8 @@ features, and `silo check` (CI's `silo` job, `.github/workflows/silo.yml`) holds
 - **Everything is attributed** — the rewrite's outcome is every code file owned by a feature, tests, scripts and vendored
   code included. A check covering less than that means the work isn't finished. One owner per file is where it starts,
   not a rule: how to handle sharing is reassessed from runs and traces, once silo can ingest them.
-- **Replacing an approach removes the old one in the same change** — `silo remove "<name>" "<why>"` (what only it
-  reaches, its package manifests' entries, a tombstone), or delete it and `silo status` it removed with where it went.
+- **Replacing an approach removes the old one in the same change** — delete what only it reaches (the editor's *What …
+  reaches* on its way in lists it, with its package manifests' entries) and `silo status` it removed with where it went.
 - **The ledger declares the features** — an entry holds what a feature is for (`what`, `docs`) and what it owns (`ways`,
   `paths`, `tests`). `silo check` fails on a way in no feature owns, so a new command, view, setting, tool or hub
   request goes in the `ways` of the feature it serves, in the same change.

@@ -700,7 +700,7 @@ ranges in a text that ran place nothing yet.
 doesn't fit*). The rewrite settles each one: the job it serves, where it lives (lib `util/silo`, pure; the command
 line; the editor), and what supersedes what. Where it starts:
 - **The manifest is gone** (2026-11-03): its entries moved into the ledger, and what read it reads the ledger's declared
-  features (`silo check`'s drift, `silo features --score`, `removalOf`, `history.decisions`, `history.reach`, back
+  features (`silo check`'s drift, `removalOf`, `history.decisions`, `history.reach`, back
   2026-11-07). `history.features`, and what it fed (the features map, `git_review`'s features per hunk, focus), come back
   on the ledger with their features.
 - **Code no feature owns is an error** (decided 2026-11-02; packages/silo/README.md, decision 22): owned by
@@ -710,7 +710,7 @@ line; the editor), and what supersedes what. Where it starts:
 - **One attribution of runs to features**: the ledger's (lib `ownersOf`). `coverage` tells what ran by owning feature, and
   `exercise` went (*What doesn't fit* 4).
 - **History's three features** (above) are split (checked 2026-11-22): what each reads of the program and decides is lib's
-  (`ledger`, `history`, `graph`, `features`), what `silo check` and `silo history` run too; extensions/history holds where
+  (`ledger`, `history`, `graph`, `features`), what `silo check` runs too; extensions/history holds where
   it shows (Problems, the lightbulb, its Output).
 - **The rest of *What doesn't fit*** answered or carried with a reason (2026-11-22; decision 21 was already): one store
   of what code can do (the stored static surface and the observed rollup went, neither read), the ten subcommands under
@@ -793,7 +793,7 @@ tools*). What the code doesn't say:
   *What … reaches*, and *History: What a Way In Reaches…* asks for the one at the cursor or one picked: a quick pick titled by
   the ledger's feature owning it, saying what only it reaches (what removing it frees), with every place it's registered, left
   by hand in files it shares, and named in code, tests and docs, each opening it. `code_reach` asks the same `history.reach`.
-  It's `silo remove`'s plan against History's reading of the program, nothing written.
+  It's lib's `removalOf` against History's reading of the program, nothing written: a person carries it out.
 - **How a commit did in CI is in the status bar** (workbench/ci-status.ts): HEAD's GitHub Actions runs on the workspace's
   github.com origin, passed, failed (naming what) or going, asked again when HEAD changes, while a run goes, and a few times
   while a commit has none yet; hidden with no such origin. Clicking it (or *CI: How HEAD Did in CI*, which takes a commit

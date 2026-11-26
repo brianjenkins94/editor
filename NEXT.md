@@ -64,12 +64,6 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    Four browser suites stay out: worker-realms.mjs (dist/ in fresh workers on the editor's origin), test/agent-tools/ (the
    agents' requests, no UI), test/workbench/ (what a page can't do to its own window) and performance.mjs (budgets).
 
-7. **silo's command line, cut to what a file can't do** (the user, 2026-11-25; packages/silo/README.md, *The files are the
-   interface*). The contract is true (2026-11-25: *Versions, and what a writer keeps*). Left, in order: `features`,
-   `history`, `vouch`, `remove` and `restore` out, with what in lib only they use, checked one by one; `observed` a script
-   of this repository's, until item 4 says what it becomes; `init` into `install`, which stays (the user, 2026-11-25);
-   `test` kept as CI's until there's a `run`. **Done when** `silo --help` lists `check`, `status`, `install` and `test`.
-
 ## Watching
 
 How each architecture test has gone in CI lately, failing and flaky first: `node test/outcomes.mjs` in
@@ -234,7 +228,7 @@ packages/editor (`--all`, `--runs N`, `--json`).
 - **How few tests is enough** (queue item 5). Decided 2026-11-24: fewer than 10 of 80 commits run everything.
 - **Several owners** (a queue item until 2026-11-24). Decided 2026-11-22: a file may be several features' if and only if real coverage
   shows it — each owner's tests running it, as the last run's reach has it (`.silo/last-run/reach.json`, kept by
-  `silo observed`), not static reach; otherwise it's split, or one feature's.
+  packages/editor/build/reach-record.ts), not static reach; otherwise it's split, or one feature's.
 - **Tests by feature**, silo's for any repository, the editor's rewrite first (packages/silo/README.md, *Tests by
   feature, in your face*). Decided 2026-10-29: the list view; touched tests run in the background, and before the
   commit what hasn't; declared tests only in the rewrite, best-effort attribution meanwhile; rest after 20 green runs,
@@ -283,7 +277,7 @@ packages/editor (`--all`, `--runs N`, `--json`).
   the coverage build's instrumentation (a hook at every statement, `COVERAGE=1`) carrying an expression to evaluate,
   in a dev build only. Meanwhile `editor_trace`, the logs and spans, and `page_eval` cover most of it.
 - **The terminal's first-hour commands and the tools agents expect** (2026-10-24: until someone asks for one; not
-  `tsc`, the user, 2026-11-24): `eslint`, `silo features|history`, `curl`/`wget`, `man`, `date`, `ln -s`; `code_definition`,
-  `code_hover`, `code_symbols`, `editor_open`, `silo_features`, `silo_history` (`runs_tests` and `code_references` are
+  `tsc`, the user, 2026-11-24): `eslint`, `curl`/`wget`, `man`, `date`, `ln -s`; `code_definition`,
+  `code_hover`, `code_symbols`, `editor_open` (`runs_tests` and `code_references` are
   done). Conventions when one is
   asked for: workbench/terminal/catalog.ts, app/tools/host.ts.

@@ -34,7 +34,7 @@ older section says otherwise of them, that section is how it got here.
 ## The model
 
 - **Baseline: static facts.** When a library is added, its code is analyzed and what it can do is recorded. The
-  baseline is made when silo starts keeping `.silo/` (`silo init`; in the editor, as a project opens), recomputed after
+  baseline is made when silo starts keeping `.silo/` (the first `silo install`; in the editor, as a project opens), recomputed after
   each install (in the editor, as the dependencies change), and spot-checked at each call: an entry of another version
   than the one running says nothing of it. It changes when dependencies change, never because of runs.
 - **Optional.** A project can go without one. Then the policy decides every package call, and what's lost is tracking:
@@ -75,9 +75,9 @@ happens to have, and lives in `util/silo`, where the editor and a test call it.
 | `silo run <command>` | witnesses the program, and stops its calls | the policy at each call; the run's envelope and evidence. For tests: which to run, what each reached, and the pass as evidence for the next time |
 
 `run` isn't built, and what makes it worth building is a program run where nothing else gates it, on a desktop. Until then
-`silo test` does its part for CI's tests and stays, as CI's alone. The others have no place of their own:
+`silo test` does its part for CI's tests and stays, as CI's alone. The others had no place of their own:
 
-| Today | Goes |
+| Was | Went |
 |---|---|
 | `init` | into `install`: the first install starts `.silo/` |
 | `vouch` | under the hood: the editor's commit adds its test runs to the corpus; from a terminal, `run` would |
@@ -88,7 +88,11 @@ happens to have, and lives in `util/silo`, where the editor and a test call it.
 
 Decided with the direction: what a command is for. `install` stays, `init` folded into it (the user, 2026-11-25): the
 command line keeps Anticipate and Track for a repository worked on outside the editor, though this one has no baseline.
-Not yet cut: any of it.
+Cut 2026-11-25, and with each what in lib only it used: `features --score`'s `derive.ts`, `history`'s narration (the
+sentences, the markdown) and git walk (`gitSnapshots`), `remove`'s report (`removalText`), and `vouch`'s helpers. `remove`
+went though nothing else carries out a removal yet (the user: "Cut it anyway"): the editor shows the plan on a way in
+(*What … reaches*), a person makes the edit and `silo status` it removed. `observed` is the editor's
+`build/reach-record.ts`.
 
 ### The files
 
@@ -101,10 +105,10 @@ Paths are lib `layout.ts`'s, the shapes its modules'. *Trust* is what a reader m
 | `notes/<user>/<file>.jsonl` (any collection of annotations) | a person's notes, each on a span | `annotations.ts` `Annotation` | the editor | decision |
 | `baseline.json` | what each package can do, what the code uses of it, and what that can reach | `audit.ts` `Baseline` | `silo install`; the editor's capabilities extension | derived |
 | `versions.json` | the version each dependency loads at, where no lockfile says | the editor's `workbench/versions.ts` `VersionsFile` | the editor's resolver | derived |
-| `last-run/reach.json` | what each test ran, by file | `observed.ts` `ReachRecord` | `silo observed`, by hand | derived |
+| `last-run/reach.json` | what each test ran, by file | `observed.ts` `ReachRecord` | the editor's `build/reach-record.ts`, by hand | derived |
 | `runs/<user>.jsonl` | each run: who, where, on what code, what it did and was stopped from doing | `evidence.ts` `RunEnvelope` | the editor, as a run ends; util/mcp (kept local unless shared) | claim |
 | `evidence/<user>/<environment>/<file>.jsonl` | what those runs observed, by span: reached, values, branches, purity, time | `evidence.ts` `Observation` | the editor, as a run ends | claim |
-| `vouches/<user>.jsonl` | a test that passed, and the fingerprint of all it reached | `select.ts` `Vouch` | the editor's commit; `silo vouch` | claim (evidence for which tests run) |
+| `vouches/<user>.jsonl` | a test that passed, and the fingerprint of all it reached | `select.ts` `Vouch` | the editor's commit | claim (evidence for which tests run) |
 
 Beside them, `.gitignore` (`/local/`) and `.gitattributes` (`*.jsonl merge=union`), which silo seeds and adds to.
 `local/` is this machine's, never in git, and nobody's contract: runs kept local, value samples, traces, recorded
@@ -157,7 +161,7 @@ What's written above is what the code does, and another program can rely on it:
 |---|---|---|---|---|---|
 | Anticipate | What could this package do? | `install` | the capabilities extension's `baseline.ts`, reading packages in its worker | `detect`, `audit`, `slice`; `packages`, `deobfuscate` (unused, see below) | `baseline.json` |
 | Track | Has a package started doing something new? | `install`, `check` | the resolver takes nothing under a week old; what grew, where it's imported | `audit`, `install`, `evidence` (`syncPackages`, `settledCaps`, `beyondBaseline`) | `baseline.json`, `versions.json`, `runs/` |
-| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `status`; `run`, as what it leaves | coverage and what went through code, notes, the Margin's kept runs, the ledger's drift in Problems | `evidence`, `runs`, `features`, `graph`, `history`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `derive`, `cost`, `observed` | `runs/`, `evidence/`, `features.json`, `notes/`, `last-run/` |
+| Remember | What does my program do, what ran, how has it grown? What's been decided about it? | `status`; `run`, as what it leaves | coverage and what went through code, notes, the Margin's kept runs, the ledger's drift in Problems | `evidence`, `runs`, `features`, `graph`, `history`, `ts-analysis`, `typescript`, `git-snapshots`, `annotations`, `traces`, `layout`, `ledger`, `cost`, `observed` | `runs/`, `evidence/`, `features.json`, `notes/`, `last-run/` |
 | Gate | Should this call happen? Does the code keep to what's decided? Which tests must run? | `check`, `run` (`test`) | the bridge's `decide` (the prompt), the debugger's capability stops | `policy`, `enforce`, `reach`, `select`; util/mcp's broker for MCP tools | `policy.json`, `policy/<user>.json`, `vouches/` |
 
 ## What the prototype had, and where it is now
@@ -197,7 +201,7 @@ Both came over from the `silo` prototype. (`provenance` and `review`, the AI-app
 
 1. ~~**The baseline analyzes packages more coarsely than the prototype did.**~~ Half back (2026-11-22): the code's use of a
    package is sliced again — each use's members tree-shaken out of the package's tarball by rolldown and scanned
-   (lib `slice.ts` `sliceCaps`, the baseline's `join`), in the editor's package worker and `silo init`/`install` alike.
+   (lib `slice.ts` `sliceCaps`, the baseline's `join`), in the editor's package worker and `silo install` alike.
    Carried, with its reason: deobfuscation (`deobfuscate`, `packages`). A package whose calls the scan can't see is still
    caught where it matters, at the call — the gate decides it, and the run's effects keep it — so it waits for a
    package the scan is shown to miss.
@@ -530,7 +534,7 @@ to build on it (*Dogfooding in the editor*, at the end).
   lately, it's new, or nothing has recorded what it reaches. Otherwise it **rests**: skipped, and run again by a
   scheduled full run (weekly; a test rests after 20 green runs in a row) that refreshes every test's reach and
   outcome. Retiring a test outright is a decision with a
-  reason, in the feature ledger, as `silo remove` is; a test never retires itself. Ambient code (what nearly every
+  reason, in the feature ledger, as a feature's removal is; a test never retires itself. Ambient code (what nearly every
   test reaches) selects a project's smoke tests, not all of them.
 - **The states**, one word each, wherever a test or a feature is shown:
   - **passing**, **failing** and **flaky**;
@@ -548,7 +552,7 @@ commit (decision 12). Two rows are never hidden:
 - **Unattributed**: tests no feature claims and files no feature owns, counted. With features declared first it's
   empty: code no feature explicitly owns is an error (decision 22).
 - **Declared against observed**: a test that declares one feature but whose reach is mostly another's code. That's how
-  a boundary drawn in the wrong place shows itself. `silo observed <reach>`, from a folder of each suite's reach
+  a boundary drawn in the wrong place shows itself. The editor's `build/reach-record.ts <reach>`, from a folder of each suite's reach
   (`COVERAGE=1` locally, a dispatched architecture run in CI, as artifacts). By statement, among those few tests ran: by
   file, a session loading nearly everything makes nearly everything look shared (a test's median share of its own features'
   code was 6% by file, 40% by statement, 2026-11-03). Much of what it shows is a dependency (ESLint's tests run almostnode),
@@ -592,8 +596,8 @@ a vouch's reach the digests of the fingerprints of the declarations it reached, 
 changes). `silo test
 --files <globs> --run <runner>` is the CI step: it selects from the change since `--base` (the push's `before`; none
 runs everything), the vouches and the workflow's own runs, runs the runner on the files selected with silo's node:test
-reporter beside its own, and reads each test's outcomes back from earlier runs' logs. `silo vouch` runs tests and
-vouches for the passes, for a commit to carry. Reach is static for now: what a test's file reaches in the declaration
+reporter beside its own, and reads each test's outcomes back from earlier runs' logs. (`silo vouch`, which ran tests in
+Node and vouched for the passes, was cut 2026-11-25: the editor's commit vouches.) Reach is static for now: what a test's file reaches in the declaration
 graph, dynamic imports followed (a test reaches all of a module it loads), so a test runs for any change to code it
 could run. The editor vouches too (2026-11-22): each passing tsval test, held to every file of the program's it ran (its own
 included) by its contents' git id — not by declaration: the editor's TypeScript and CI's (7, in Node) needn't
@@ -604,9 +608,7 @@ whose last run is older than a file it ran, each file's run vouching as any does
 isn't reached in two minutes, is left to CI, and the commit says what ran and how it came out (the Source Control view's
 message, the commit button's, `git_commit`'s `tests`). The terminal's `git commit` doesn't, as `--no-verify` wouldn't.
 A dependency's upgrade lapses a vouch (2026-11-22): the editor's holds each package its run loaded by that package's
-installed package.json, whose bytes change with its version; `silo vouch`'s, which run in Node and see no packages, hold
-the lockfiles over the test (`lockfilesOver`), so any dependency's change lapses them. CI reads both back as files, by
-git id. A test is held to what ran as its modules loaded too, before any test (a constant it reads, whose file runs
+installed package.json, whose bytes change with its version. CI reads it back as a file, by git id. A test is held to what ran as its modules loaded too, before any test (a constant it reads, whose file runs
 nothing in its window), as well as what ran in its own window. And CI selects by each test's reach from a run, finer
 than its file's static reach (`ranReach`, 2026-11-22): the files of its latest editor vouch that still held of the
 code at the push's base (the base's vouches read too, a vouches file keeping only each test's latest), and the push's
@@ -621,7 +623,7 @@ standing as its selection found it (`silo:standing`, a line a test) and the next
 **Would it fail if its subject broke** (built 2026-11-23, the editor's front end: RUNNING.md, *What a file's tests notice
 broken*). A test that stays green may be guarding or may not look. The editor breaks what a file's tests ran, a
 statement at a time (skipped, as if deleted, by tsval: no file is written), and keeps, per statement, which tests failed
-for it; a test that noticed none of those tried is listed as a drop candidate, decided as `silo remove` is. The command
+for it; a test that noticed none of those tried is listed as a drop candidate, decided as a feature's removal is. The command
 line has none yet: a mutant there is a file rewritten under the runner.
 
 The editor's in-editor specs aren't selected by reach (measured 2026-11-22, the specs' reach from a dispatched
@@ -766,10 +768,11 @@ Three layers, each a pure function of the code's snapshots and the runs against 
    subscription, a core module) plus the code it reaches. Introduced when its way in appears, changed when code it
    reaches changes semantically, exercised when a run reaches it, removed when its way in goes.
 3. **The story**: fixed sentences grouped by feature ("Added command *Rules: New Rule*", "Renamed setting
-   `tsval.liveRuns` → `run.liveRuns`", "Tried the TestController coverage UI: added Oct 1, removed Oct 3").
+   `tsval.liveRuns` → `run.liveRuns`", "Tried the TestController coverage UI: added Oct 1, removed Oct 3"). Cut
+   2026-11-25 with `silo history`, which nothing else read; the events it told from are still `history.ts`'s.
 
 **The first replay** (2026-10-12): 706 first-parent commits in 12 seconds, each file version parsed once and cached by
-blob, no commit message read; its timeline wasn't kept (`silo history` writes it again). Oct 5–11's 116 commits became
+blob, no commit message read; its timeline wasn't kept. Oct 5–11's 116 commits became
 89 sentences by area; 33 groups of "tried and removed" told this repo's experiments, which no commit message lists
 (Preflight, comment annotations, the TestController coverage UI, the running status bar, Run with Inputs); the
 `packages/vscode` → `packages/editor` rename read as "Moved 111 features".
@@ -792,9 +795,8 @@ Built since:
   output channel what changed. **Nothing derived from edits is kept** (decided 2026-10-12): once you commit, the commit
   tells it; tries undone before any commit leave no trace.
 
-Where: lib's `util/silo` — `features.ts`, `graph.ts`, `history.ts`, `ts-analysis.ts`, and in Node
-`typescript.ts` and `git-snapshots.ts`; the command line's `silo features [repo]` and `silo history [repo] [--since]
-[--until]` (`--json`); the editor's `extensions/history`.
+Where: lib's `util/silo` — `features.ts`, `graph.ts`, `history.ts`, `ts-analysis.ts`, and in Node `typescript.ts`;
+the editor's `extensions/history`. The command line's `silo features` and `silo history` were cut 2026-11-25.
 
 Not built: a feature's status and drift (the ledger, below); a history view by feature in place of the commit list;
 the derived sentences as the message of whatever commit the tooling needs.
@@ -858,14 +860,14 @@ computed facts, no model. It's Remember (what was decided) and Gate (the checks 
   time it's idle, decoded, from each frame's and worker's resource timing — the shell, the workbench, the extension
   host, TypeScript's servers, ESLint, cSpell held to budgets about a tenth over what they were, warning past 5% over
   the last green run.
-- **`silo remove` / `silo restore`:** remove takes out what only the entry reaches, its package manifests' entries and the
-  tombstone, lists the docs that name it, and leaves a change for review; restore runs the tombstone.
+- **Removal:** what only the entry reaches, its package manifests' entries and the tombstone, and the docs that name it
+  (lib `removalOf`), as a change for review; the tombstone's restore is a checkout.
 - **Agents:** replacing an approach removes the old one in the same change; an experiment starts with an entry, so it
   expires by default.
 - **In the editor:** drift in Problems.
 
-Where it lives: lib's `util/silo` (`ledger.ts` for the file, the drift rules; `cost.ts` for prices — not
-`reach.ts`, which is capability reach); the subcommands here; `silo check` in the lint workflow.
+Where it lives: lib's `util/silo` (`ledger.ts` for the file, the drift rules, a removal's plan; `cost.ts` for prices —
+not `reach.ts`, which is capability reach); `silo status` and `silo check` here, `check` in CI's `silo` job.
 
 Build order, each step useful alone: (1) the ledger and the checks that need no reach; (2) prices per area from the
 import graph; (3) realm budgets; (4) leases; (5) `remove` and `restore`; (6) the agent rules and the weekly run.
@@ -878,13 +880,13 @@ import graph; (3) realm budgets; (4) leases; (5) `remove` and `restore`; (6) the
   parked derived history frees 478 lines in 4 files; the capability engine 44 lines).
 - **Realm budgets**: above, in the editor's performance suite.
 - **Leases** (lib `ledger.ts`, drift's `lease expired`): above.
-- **`silo remove` / `silo restore`**: remove deletes the files only the entry reaches and, since 2026-11-25, its files that
-  aren't code (a workflow, a page; never a package.json or a migration) that nothing staying names, takes its way in out of the
-  manifests (lib `features.ts` `withoutWayIn`: a command with its menus and keybindings, a view, a setting), writes the
-  tombstone (`restore`: a checkout of the files from the commit before), and lists what's left by hand — its code in
-  files it shares, where its way in is registered, the docs that name it — leaving the change uncommitted. When it can
-  take out nothing on its own it writes nothing and says what to do (exit 2). restore runs the tombstone, a checkout
-  only, and sets the entry active.
+- **A removal's plan** (lib `ledger.ts` `removalOf`; `silo remove` and `silo restore`, which carried it out, were cut
+  2026-11-25): the files only the entry reaches and, since 2026-11-25, its files that aren't code (a workflow, a page;
+  never a package.json or a migration) that nothing staying names; its manifests without its way in (lib `features.ts`
+  `withoutWayIn`: a command with its menus and keybindings, a view, a setting); the ledger with its tombstone (`restore`:
+  a checkout of the files from the commit before); and what's left by hand — its code in files it shares, where its way
+  in is registered, the docs that name it. `nothing` when it can take out nothing on its own. The editor shows it on a
+  way in (*What … reaches*).
 - **Agents**: CLAUDE.md's *Features* (replacing an approach removes the old one; an experiment starts with an entry).
 
 Open: **off isn't stopped** (a flag off by default ships but doesn't run: its own status, checked by "never reached");
@@ -923,8 +925,8 @@ in owned once.
 - a path that isn't there;
 - a feature that owns nothing.
 
-A repository without a manifest has none of these checks. `silo remove`, and History's Remove, take what they remove
-out of it: the key out of its feature, and the files they delete out of its paths. A feature left owning nothing goes
+A repository without a manifest has none of these checks. A removal's plan (`removalOf`) takes what it removes out of
+it: the key out of its feature, and the files it deletes out of its paths. A feature left owning nothing goes
 too, so the removal passes its own check once what it leaves by hand is done.
 
 **Written by hand isn't the goal.** The goal is a manifest derived from the code alone, knowing nothing about the
@@ -939,7 +941,7 @@ are 49 of them, mostly where it has no shape to look for:
 - in the editor, the spell checker, `node --test` in the debugger and the game generator, which register nothing it
   knows.
 
-**Scored (2026-10-26): what the code alone gets.** `silo features --score` groups the ways in five ways and scores
+**Scored (2026-10-26): what the code alone gets.** `silo features --score` (cut 2026-11-25, with `derive.ts`) grouped the ways in five ways and scored
 each grouping against the manifest's 87 features that own ways in (lib `util/silo/derive.ts`, `scoreGrouping` in
 `manifest.ts`). A feature comes out *whole* (one group, nothing else in it), *split* (several groups), *merged* (a group
 shared with another feature) or both. Precision and recall are B-cubed: how much of a way in's group is its feature, and
@@ -1022,7 +1024,7 @@ registrations is written in, and what that declaration's own code reaches, and e
 (`codeOwners`, lib `manifest.ts`). And a
 handler's code is its way's alone: the analyzer leaves what a registration's handler uses out of the declaration around
 it (lib `ts-analysis.ts`), so an `install…` that registers many features leads to its setup, not into all of theirs.
-`silo features --score` shows the result:
+`silo features --score` showed the result:
 
 | Who owns it | Before | Setup owned, handlers not split | Both |
 |---|---|---|---|
@@ -1070,8 +1072,8 @@ its `why` says why it has none (`no tests: …`): *Plug an interpreter into Run*
 active. The reason is in `why`, not a field of its own, so `silo status` writes it. An experiment or a parked one isn't held
 to it, and naming a test doesn't show that it fails when the feature's broken. `untested`, in the command line.
 
-Where: lib `util/silo/ledger.ts` (`declaredFeatures`, `declaredDrift`, `withoutRemoved`), read by `silo check`;
-`derive.ts` (`scoreGrouping`, `codeOwners`), read by `silo features --score`. Not built: declared features' drift in the
+Where: lib `util/silo/ledger.ts` (`declaredFeatures`, `declaredDrift`, `withoutRemoved`), read by `silo check`.
+`derive.ts`, which scored derivations, went with `silo features --score` (2026-11-25). Not built: declared features' drift in the
 editor's Problems (only CI's `silo check` reports it).
 
 ### Decided
@@ -1161,7 +1163,7 @@ From *Tests by feature* (above), for the rewrite:
     which rolled this out a folder at a time, went when the editor's files were all attributed). One owner per file is
     where it starts, not a rule (user, 2026-11-03), and several owners are allowed if and only if real coverage shows
     them (user, 2026-11-22): a file in several features' `paths` is `owned twice` unless the last run's reach shows each
-    one's tests running it. `silo observed <reach>` keeps what it reads in `.silo/last-run/reach.json` (each test, and
+    one's tests running it. The editor's `build/reach-record.ts <reach>` keeps what it reads in `.silo/last-run/reach.json` (each test, and
     each file with the tests that ran any of it), committed, which `silo check` and the editor's Problems hold the ledger
     to; reach from static analysis doesn't count. No allowance for code not yet declared: the editor's
     rebuild reduces to a declared core first and reintroduces features one at a time (packages/editor/ARCHITECTURE.md,

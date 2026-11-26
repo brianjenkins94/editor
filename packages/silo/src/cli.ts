@@ -1,42 +1,31 @@
 /**
- * silo — the command line. What a program's code says about it, derived and never kept by hand:
+ * silo — the command line: what a file can't do (README, *The files are the interface*). Everything else silo knows is
+ * in .silo/'s files, which any program can read.
  *
- *   silo init [repo]                                   start keeping .silo/: the baseline, synced with what's installed
  *   silo install [package…] [--min-age 7] [--project …] install — nothing newer than a week but what's pinned exactly —
- *                                                        and sync the baseline
- *   silo features [repo] [--json]                      every way into the program, found in its code
+ *                                                        then start or sync .silo/'s baseline
  *   silo status <entry> <status> [why] [--key …] [--paths …] [--until …]
  *                                                      a decision about a feature, in the ledger (.silo/features.json)
  *   silo check [repo] [--prices] [--json]              the ledger's drift from the code (each with what deleting its
  *                                                        feature would free), and what the runs' packages did
  *                                                        beyond the baseline
  *   silo test --files <globs> --run <runner> [--base …] [--full] [--audit …] [--dry] [--json]
- *                                                      the tests a change needs, run: what it reaches, less what's vouched
- *                                                        for or resting, more what failed lately in CI (decision 20)
- *   silo vouch --files <globs> --run <runner>         run the tests; vouch for each that passes, with what it reaches
- *   silo observed <reach> [--repo …] [--json]          each test against the features its file declares: what its reach
- *                                                        (a folder of `<suite>.json`) says of the ledger's boundaries
- *   silo remove <entry> [why] [--key …] [--paths …]    take a feature out: what only it reaches, its package manifests' entries,
- *                                                        and a tombstone in the ledger — left for review
- *   silo restore <entry>                               bring a removed feature back, from its tombstone
- *   silo history [repo] [--since …] [--until …] [--json] what changed, told from the code's snapshots — not from
- *                                                        commit messages, which are never read
+ *                                                      CI's: the tests a change needs, run: what it reaches, less what's
+ *                                                        vouched for or resting, more what failed lately in CI (decision 20)
  *
  * The code is read by TypeScript — the one silo bundles (7.1), whatever the project has: its ways in, its declaration
  * graph, its import surface. Its native compiler, or where nothing can be spawned (the editor's debugger, where this
  * runs as `node packages/silo/src/cli.ts`) the same compiler's WebAssembly build; and git the same way (./git).
  *
- * The logic is @brianjenkins94/util/silo (features, history, git-snapshots): pure, so the editor runs the same code in
- * the browser over its own workspace. This file is only the command line's way to ask: git, the disk, and stdout.
+ * The logic is @brianjenkins94/util/silo: pure, so the editor runs the same code in the browser over its own workspace.
+ * This file is only the command line's way to ask: git, the disk, and stdout.
  */
 import type { Price } from "@brianjenkins94/util/silo/cost";
 import type { Analyzer, DeclarationGraph } from "@brianjenkins94/util/silo/graph";
 import type { Drift, Ledger, LedgerStatus } from "@brianjenkins94/util/silo/ledger";
-import type { Step } from "@brianjenkins94/util/silo/history";
-import type { GroupingScore } from "@brianjenkins94/util/silo/derive";
 import type { Rolldown } from "@brianjenkins94/util/silo/slice";
 import type { TypeScriptModules } from "@brianjenkins94/util/silo/typescript";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import * as path from "node:path";
 import { isEntry } from "@brianjenkins94/util/env";
 import * as fs from "@brianjenkins94/util/fs";
@@ -45,19 +34,17 @@ import { command, run, subcommands } from "@brianjenkins94/util/juvy/cli";
 import { ensureBaseline, ensureSiloDir, loadBaseline, siloPaths } from "@brianjenkins94/util/silo/audit";
 import { priceOf, priceText } from "@brianjenkins94/util/silo/cost";
 import { installCommand, packageManagerOf, pinOfRequest, workspacePins } from "@brianjenkins94/util/silo/install";
-import { observedAgainstDeclared, observedText, parseReach, ranByFile, reachRecord } from "@brianjenkins94/util/silo/observed";
-import { byFile, byFolder, byReach, codeOwners, linkedBySubjects, scoreGrouping } from "@brianjenkins94/util/silo/derive";
 import { beyondBaseline } from "@brianjenkins94/util/silo/evidence";
 import { featuresOf } from "@brianjenkins94/util/silo/features";
-import { gitObjects, gitSnapshots } from "@brianjenkins94/util/silo/git-snapshots";
-import { featuresMarkdown, historyMarkdown, includeByDefault, replay } from "@brianjenkins94/util/silo/history";
+import { includeByDefault } from "@brianjenkins94/util/silo/history";
 import { lastRunReachPath, ledgerPath } from "@brianjenkins94/util/silo/layout";
-import { declaredDrift, declaredFeatures, drift, isOwnedCode, ledgerText, ownedByOthers, parseLedger, removalOf, removalText, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
+import { declaredDrift, declaredFeatures, drift, isOwnedCode, ledgerText, ownedByOthers, parseLedger, STATUSES, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { loadRuns } from "@brianjenkins94/util/silo/runs";
 import { typescriptAnalyzer, typescriptModules } from "@brianjenkins94/util/silo/typescript";
-import { filesOf, headOf, repoOf } from "./git.ts";
+import { filesOf, repoOf } from "./git.ts";
+import { ranByFile } from "@brianjenkins94/util/silo/observed";
 
-/** rolldown, for the baseline's slices (the two commands that make one): loaded when one's asked for, not as the CLI
+/** rolldown, for the baseline's slices (`install`, which makes one): loaded when one's asked for, not as the CLI
  *  starts — its native binding doesn't load where there's no native code (the editor's debugger), and nothing else needs it. */
 async function rolldownForSlices(): Promise<Rolldown> {
 	return (await import("rolldown")).rolldown as unknown as Rolldown;
@@ -130,11 +117,6 @@ export async function currentProgram(repo: string): Promise<{ "features": Return
 	}
 }
 
-/** The program's features now. */
-export async function currentFeatures(repo: string): Promise<ReturnType<typeof featuresOf>> {
-	return (await currentProgram(repo)).features;
-}
-
 /** What deleting each of the ledger's entries would free (lib util/silo/cost): the code only it reaches, from every
  *  way in and from what the other features own. */
 export function prices(repo: string, ledger: Ledger, program: Awaited<ReturnType<typeof currentProgram>>): Map<string, Price> {
@@ -181,99 +163,6 @@ export async function ledgerDrift(repo: string, today = new Date().toISOString()
 	}), ...declaredDrift(ledger, { "ways": ways, "exists": exists }), ...untested(ledger)];
 }
 
-/** How many of the declared features own each declaration (lib util/silo/derive `codeOwners`). */
-interface Ownership {
-	"declarations": number;
-	"one": number;
-	/** Two to five features. */
-	"shared": number;
-	/** More than five: setup, the hub, logging. */
-	"ambient": number;
-	"none": number;
-	/** The folders (three deep) with the most declarations no feature owns. */
-	"unowned": { "folder": string; "declarations": number }[];
-}
-
-/** Each derivation of features from `repo`'s code (lib util/silo/derive), scored against the features its ledger
- *  declares, and who owns the code. Throws when it declares none. */
-export async function derivationScores(repo: string): Promise<{ "derivations": { "derivation": string; "features": GroupingScore }[]; "ownership": Ownership }> {
-	const declared = declaredFeatures(ledgerOf(repo));
-
-	if (declared.length === 0) {
-		throw new Error(`no declared features to score against (${ledgerPath()}: silo README, *The feature ledger*)`);
-	}
-
-	const { features, graph } = await currentProgram(repo);
-	const ways = [...features.values()];
-	const textOf = (file: string): string | undefined => (fs.existsSync(path.join(repo, file)) ? fs.readFileSync(path.join(repo, file)) : undefined);
-	const groupings: [string, Map<string, string>][] = [
-		["by file", byFile(ways)],
-		["by folder", byFolder(ways)],
-		["by reach", byReach(ways, graph)],
-		["by file, linked by subjects", linkedBySubjects(byFile(ways), ways, textOf)],
-		["subject links alone", linkedBySubjects(new Map(ways.map((way) => [way.key, way.key])), ways, textOf)]
-	];
-
-	const owners = codeOwners(declared, features, graph);
-	const declarations = [...graph.fingerprints.keys()];
-	const unowned = new Map<string, number>();
-
-	for (const id of declarations.filter((each) => !owners.has(each))) {
-		const folder = id.split("/").slice(0, 3).join("/");
-
-		unowned.set(folder, (unowned.get(folder) ?? 0) + 1);
-	}
-
-	const counted = (test: (count: number) => boolean): number => declarations.filter((id) => test(owners.get(id)?.size ?? 0)).length;
-
-	return {
-		"derivations": groupings.map(([derivation, grouping]) => ({ "derivation": derivation, "features": scoreGrouping(declared, grouping) })),
-		"ownership": { "declarations": declarations.length, "one": counted((count) => count === 1), "shared": counted((count) => count > 1 && count <= 5), "ambient": counted((count) => count > 5), "none": counted((count) => count === 0), "unowned": [...unowned].sort((left, right) => right[1] - left[1]).slice(0, 8).map(([folder, count]) => ({ "folder": folder, "declarations": count })) }
-	};
-}
-
-/** The scores, as a table. */
-function scoresText({ "derivations": scored, ownership }: Awaited<ReturnType<typeof derivationScores>>): string {
-	const first = scored[0]?.features;
-	const share = (count: number): string => `${count} (${Math.round(100 * count / ownership.declarations)}%)`;
-	const row = (each: GroupingScore): string => [`${each.groups}`, `${each.placed}/${each.ways}`, `${each.whole}`, `${each.split}`, `${each.merged}`, `${each.splitAndMerged}`, `${each.partly + each.unseen}`, each.precision.toFixed(2), each.recall.toFixed(2), each.f.toFixed(2)].join(" | ");
-
-	return [
-		first === undefined ? "" : `Features from the code alone, against the ${first.features} declared features with ways in:`,
-		"",
-		"| Derivation | Groups | Ways in placed | Whole | Split | Merged | Both | Partly or unseen | Precision | Recall | F |",
-		"|---|---|---|---|---|---|---|---|---|---|---|",
-		...scored.map((each) => `| ${each.derivation} | ${row(each.features)} |`),
-		"",
-		`Who owns the code: of its ${ownership.declarations} declarations, what the declared features reach from their ways in and from what registers them:`,
-		"",
-		"| One feature | Shared (2–5) | Ambient (more) | None |",
-		"|---|---|---|---|",
-		`| ${[ownership.one, ownership.shared, ownership.ambient, ownership.none].map(share).join(" | ")} |`,
-		"",
-		`Most unowned: ${ownership.unowned.map((each) => `${each.folder} ${each.declarations}`).join(", ")}.`,
-		""
-	].join("\n");
-}
-
-/** The steps of a span of the history (its baseline, the commit before it, comes first and tells nothing). */
-export async function historyOf(repo: string, options: { "since"?: string; "until"?: string; "ref"?: string } = {}): Promise<Step[]> {
-	const analyzer = await analyzerOf(repo);
-	const objects = gitObjects(repo);
-	const steps: Step[] = [];
-
-	try {
-		for await (const step of replay(gitSnapshots(repo, options), objects.read, { "analyzer": analyzer })) {
-			steps.push(step);
-		}
-	} finally {
-		objects.close();
-		analyzer.close?.();
-	}
-
-	return steps;
-}
-
 const repoArgument = { "format": String, "default": ".", "positional": true, "doc": "A directory in the repository (default: the current one)." } as const;
 const projectFlag = { "format": String, "default": ".", "doc": "The project — the folder of its package.json (default: the current one); in a monorepo, the package's own." } as const;
 
@@ -318,29 +207,8 @@ export const app = subcommands({
 	"description": "What a program's code says about it — derived, never kept by hand.",
 	"commands": [
 		command({
-			"name": "init",
-			"description": "Start keeping .silo/ in a repository: its .gitignore and .gitattributes, and the baseline — what the code imports and what each installed package can do — as it is now; once it's there, synced with what's installed (a library added is taken as it is; what a new version can do more is recorded with the version that grew it, and what the code's use of a package reaches more with the members that brought it in; either asks at the call unless the policy allows it).",
-			"config": juvy({ "repo": repoArgument }),
-			"handler": async (config) => {
-				const paths = siloPaths(await repoOf(config.get("repo")));
-
-				await ensureSiloDir(paths);
-
-				const { created, baseline, changed, used } = await ensureBaseline(paths, paths.root, await bundledTypeScript(), await rolldownForSlices());
-				const packages = Object.keys(baseline.packages).length;
-				const imports = Object.values(baseline.consumer).reduce((count, workspace) => count + Object.keys(workspace).length, 0);
-				const relative = path.relative(process.cwd(), paths.baseline);
-				const where = relative.startsWith("..") ? paths.baseline : relative;
-
-				process.stdout.write(created
-					? `Made ${where}: ${imports} imports, ${packages} packages. Commit it: a change to what they can do is drift from here.\n`
-					: `${where} is there (${imports} imports, ${packages} packages) — synced with what's installed: ${changed.added.length} added, ${changed.updated.length} updated, ${changed.grew.length} grew.\n`);
-				usedGrew(baseline, used);
-			}
-		}),
-		command({
 			"name": "install",
-			"description": "Install with the project's package manager, taking nothing published in the last week (--min-age days) — so `latest` means the latest a week old — but a version pinned exactly (`\"1.2.3\"` in a package.json of the workspace, or `name@1.2.3` here) however young, then sync the baseline with what's installed: a library added is taken as it is; what a new version can do more is recorded with the version that grew it, and what the code's use of a package reaches more (its join: the part it uses, tree-shaken) with the members that brought it in — each said, and each asks at the call unless the policy allows it. Exits 1 when the install fails.",
+			"description": "Install with the project's package manager, taking nothing published in the last week (--min-age days) — so `latest` means the latest a week old — but a version pinned exactly (`\"1.2.3\"` in a package.json of the workspace, or `name@1.2.3` here) however young, then sync the baseline with what's installed — the first time, start keeping .silo/ (its .gitignore and .gitattributes) and make it: a library added is taken as it is; what a new version can do more is recorded with the version that grew it, and what the code's use of a package reaches more (its join: the part it uses, tree-shaken) with the members that brought it in — each said, and each asks at the call unless the policy allows it. Exits 1 when the install fails. With yarn, not supported yet, it only syncs the baseline.",
 			"config": juvy({
 				"packages": { "format": Array, "default": [], "positional": "rest", "doc": "What to add (none: the project's own dependencies), as the package manager takes them: name, name@range, name@tag." },
 				"min-age": { "format": Number, "default": 7, "doc": "The youngest a version may be, in days." },
@@ -351,26 +219,25 @@ export const app = subcommands({
 				const repo = projectOf(config.get("project"));
 				const manager = packageManagerOf(repo);
 
+				// (yarn: installed with it, its npmMinimalAgeGate holding the week; what's installed is synced all the same)
 				if (manager === "yarn") {
-					process.stderr.write("silo install: yarn isn't supported yet — set its npmMinimalAgeGate and run it yourself, then `silo init` to sync the baseline.\n");
-					process.exitCode = 1;
+					process.stderr.write("silo install: yarn isn't supported yet — install with it (its npmMinimalAgeGate holds the week); the baseline is synced with what's installed.\n");
+					process.exitCode = (config.get("packages") as string[]).length > 0 ? 1 : 0;
+				} else {
+					const args = installArgs(manager, repo, config.get("packages") as string[], config.get("min-age"));
 
-					return;
+					process.stdout.write(`${manager} ${args.join(" ")}\n`);
+
+					const installed = spawnSync(manager, args, { "cwd": repo, "stdio": "inherit", "shell": process.platform === "win32" });
+
+					if (installed.status !== 0) {
+						process.exitCode = installed.status ?? 1;
+
+						return;
+					}
 				}
 
-				const args = installArgs(manager, repo, config.get("packages") as string[], config.get("min-age"));
-
-				process.stdout.write(`${manager} ${args.join(" ")}\n`);
-
-				const installed = spawnSync(manager, args, { "cwd": repo, "stdio": "inherit", "shell": process.platform === "win32" });
-
-				if (installed.status !== 0) {
-					process.exitCode = installed.status ?? 1;
-
-					return;
-				}
-
-				// What was installed, against the baseline.
+				// What was installed, against the baseline (made, and .silo/ started, the first time).
 				const paths = siloPaths(repo);
 
 				await ensureSiloDir(paths);
@@ -380,7 +247,7 @@ export const app = subcommands({
 				const where = relative.startsWith("..") ? paths.baseline : relative;
 
 				if (created) {
-					process.stdout.write(`Made ${where}: ${Object.keys(baseline.packages).length} packages, as they are. Commit it.\n`);
+					process.stdout.write(`Made ${where}: ${Object.values(baseline.consumer).reduce((count, workspace) => count + Object.keys(workspace).length, 0)} imports, ${Object.keys(baseline.packages).length} packages, as they are. Commit it: a change to what they can do is drift from here.\n`);
 
 					return;
 				}
@@ -396,14 +263,14 @@ export const app = subcommands({
 		}),
 		command({
 			"name": "status",
-			"description": "Write a decision about a feature into the ledger (.silo/features.json, shared — commit it): its status (active, experiment, parked, stopped, removed) and why, stamped with today when the status changes; what it is by a way in's key (as `silo features` names it) and/or paths; what it's for and where it's written up; the ways in, code and tests it owns (each list in place of its own, or with --add, added to it — a new command into the ways of the feature it serves); an experiment's end; a removal's commit and how to restore it. An entry there keeps its status and why when they're left out. `silo check` holds the code to it.",
+			"description": "Write a decision about a feature into the ledger (.silo/features.json, shared — commit it): its status (active, experiment, parked, stopped, removed) and why, stamped with today when the status changes; what it is by a way in's key (as `silo check` names one no feature owns) and/or paths; what it's for and where it's written up; the ways in, code and tests it owns (each list in place of its own, or with --add, added to it — a new command into the ways of the feature it serves); an experiment's end; a removal's commit and how to restore it. An entry there keeps its status and why when they're left out. `silo check` holds the code to it.",
 			"config": juvy({
 				"entry": { "format": String, "default": "", "positional": true, "doc": "Its name, as people call it (\"capability engine\")." },
 				"status": { "format": String, "default": "", "positional": true, "doc": `One of ${STATUSES.join(", ")}.` },
 				"why": { "format": String, "default": "", "positional": true, "doc": "Why: what the decision rests on." },
-				"key": { "format": String, "default": "", "doc": "The way in it is, as `silo features` keys it (command|tsval.explore)." },
+				"key": { "format": String, "default": "", "doc": "The way in it is, by its key, as `silo check` names one (command|tsval.explore)." },
 				"paths": { "format": Array, "default": [], "doc": "Its files or folders, from the repository's root." },
-				"ways": { "format": Array, "default": [], "doc": "The ways in it owns, as `silo features` keys them (agent tool|git_fetch)." },
+				"ways": { "format": Array, "default": [], "doc": "The ways in it owns, by their keys, as `silo check` names them (agent tool|git_fetch)." },
 				"tests": { "format": Array, "default": [], "doc": "Its tests' files or folders, from the repository's root." },
 				"add": { "format": Boolean, "default": false, "doc": "Add --paths, --ways and --tests to the entry's own, rather than replace them." },
 				"what": { "format": String, "default": "", "doc": "What it's for, in a sentence." },
@@ -486,7 +353,7 @@ export const app = subcommands({
 				}
 
 				if (found === undefined) {
-					process.stdout.write("No baseline yet, so no package calls to check: `silo init` makes one.\n");
+					process.stdout.write("No baseline yet, so no package calls to check: `silo install` makes one.\n");
 
 					return;
 				}
@@ -504,99 +371,6 @@ export const app = subcommands({
 				if (found.length > 0) {
 					process.exitCode = 1;
 				}
-			}
-		}),
-		command({
-			"name": "remove",
-			"description": "Take a feature out (silo README, *The feature ledger*): the files only it reaches, its manifest entries (a command with its menus and keybindings, a view, a setting), and a tombstone in the ledger saying why and how to restore it — and the docs that still name it, and any of its code that shares a file with something else, to see to by hand. Nothing is committed: the change is left for review.",
-			"config": juvy({
-				"entry": { "format": String, "default": "", "positional": true, "doc": "Its name: the ledger's, or a way in's id." },
-				"why": { "format": String, "default": "", "positional": true, "doc": "Why it goes." },
-				"key": { "format": String, "default": "", "doc": "The way in it is (default: its ledger entry's)." },
-				"paths": { "format": Array, "default": [], "doc": "Its files or folders (default: its ledger entry's)." },
-				"repo": { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." }
-			}),
-			"handler": async (config) => {
-				const repo = await repoOf(config.get("repo"));
-				const name = config.get("entry") as string;
-				const ledger = ledgerOf(repo);
-				const entry = ledger[name];
-				const key = (config.get("key") as string) || entry?.key;
-				const given = config.get("paths") as string[];
-				const paths = given.length > 0 ? given : entry?.paths ?? [];
-
-				if (name === "" || (key === undefined && paths.length === 0)) {
-					process.stderr.write("silo remove: say which feature — its ledger entry, or a way in's --key, or --paths\n");
-					process.exitCode = 1;
-
-					return;
-				}
-
-				const program = await currentProgram(repo);
-				const textOf = (file: string): string | undefined => (fs.existsSync(path.join(repo, file)) ? fs.readFileSync(path.join(repo, file)) : undefined);
-				const head = await headOf(repo);
-				const tracked = (await filesOf(repo)).filter((file) => fs.existsSync(path.join(repo, file)));
-				const removal = removalOf({ "name": name, "why": config.get("why") as string, ...key === undefined ? {} : { "key": key }, "paths": paths, "ledger": ledger, "features": program.features, "graph": program.graph, "tracked": tracked, "textOf": textOf, "head": head, "today": new Date().toISOString().slice(0, 10) });
-
-				// (nothing it can take out on its own — its code shares files, its way in has no manifest entry: no tombstone for
-				// what's still there; what to do is said)
-				if (removal.nothing) {
-					process.stdout.write(removalText(name, removal) + "\n");
-					process.exitCode = 2;
-
-					return;
-				}
-
-				for (const file of removal.files) {
-					await fs.rm(path.join(repo, file));
-				}
-
-				for (const { file, text } of removal.manifests) {
-					fs.writeFileSync(path.join(repo, file), text);
-				}
-
-				await ensureSiloDir(siloPaths(repo));
-				fs.writeFileSync(path.join(repo, ledgerPath()), removal.ledger);
-				process.stdout.write(removalText(name, removal) + "\n");
-			}
-		}),
-		command({
-			"name": "restore",
-			"description": "Bring a removed feature back: run its tombstone — the files as they were (`git checkout <commit> -- <files>`) — and set it active again. Its manifest entries, taken out beside it, are said where to find.",
-			"config": juvy({
-				"entry": { "format": String, "default": "", "positional": true, "doc": "Its name, as the ledger has it." },
-				"repo": { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." }
-			}),
-			"handler": async (config) => {
-				const repo = await repoOf(config.get("repo"));
-				const name = config.get("entry") as string;
-				const ledger = ledgerOf(repo);
-				const entry = ledger[name];
-
-				if (entry?.status !== "removed") {
-					process.stderr.write(`silo restore: "${name}" isn't removed in the ledger\n`);
-					process.exitCode = 1;
-
-					return;
-				}
-
-				// (only a checkout: a tombstone is the repository's text, and silo runs nothing else out of it)
-				const restore = entry.restore ?? (entry.in === undefined || (entry.paths ?? []).length === 0 ? undefined : `git checkout ${entry.in}^ -- ${(entry.paths ?? []).join(" ")}`);
-				const checkout = /^git checkout ([\w.^~/-]+) -- (\S+(?: \S+)*)$/u.exec(restore ?? "");
-
-				if (checkout === null) {
-					process.stderr.write(`silo restore: "${name}"'s tombstone says ${restore === undefined ? "nothing to run" : `\`${restore}\``} — restore it by hand\n`);
-					process.exitCode = 1;
-
-					return;
-				}
-
-				execFileSync("git", ["checkout", checkout[1], "--", ...checkout[2].split(" ")], { "cwd": repo, "stdio": "inherit" });
-
-				const { restore: _restore, in: _in, ...rest } = entry;
-
-				fs.writeFileSync(path.join(repo, ledgerPath()), ledgerText(withStatus({ ...ledger, [name]: rest }, name, "active", `restored: ${entry.why}`, new Date().toISOString().slice(0, 10))));
-				process.stdout.write(`Restored "${name}" from ${checkout[1]}: ${checkout[2]}. It's active again.${entry.key === undefined ? "" : ` Its manifest entries (${entry.key}) came out beside it: \`git show ${checkout[1]}:<manifest>\` has them.`}\n`);
 			}
 		}),
 		command({
@@ -654,137 +428,6 @@ export const app = subcommands({
 				}
 
 				process.exitCode = await runSelected(selected, config.get("run").split(/\s+/u).filter((part) => part !== ""), { "repo": repo, "cwd": cwd, "say": (text) => { process.stdout.write(text + "\n"); } });
-			}
-		}),
-		command({
-			"name": "vouch",
-			"description": "Run the tests and vouch for those that pass (`.silo/vouches/<you>.jsonl`): each with what it reaches in the code as it is now, so CI can take the pass rather than run the test again, while that code stays as it was. What a commit flow or a pre-commit hook calls; commit the file with the change.",
-			"config": juvy({
-				"files": { "format": String, "default": "", "doc": "The test files: globs, from the working folder, comma-separated." },
-				"run": { "format": String, "default": "", "doc": "The runner's command (`node --import tsx --test`): the files and silo's reporter are added." },
-				"runtime": { "format": String, "default": "node", "doc": "What the runner runs tests on." }
-			}),
-			"handler": async (config) => {
-				const { graphAt, lockfilesOver, runWithReporter, vouchesFor } = await import("./test.ts");
-				const { gitUser } = await import("@brianjenkins94/util/silo/runs");
-				const { parseVouches, vouchesText } = await import("@brianjenkins94/util/silo/select");
-				const { vouchesPath } = await import("@brianjenkins94/util/silo/layout");
-				const cwd = process.cwd();
-				const repo = await repoOf(cwd);
-				const files = await globbed(config.get("files"), cwd, repo);
-				const ran = runWithReporter(files, config.get("run").split(/\s+/u).filter((part) => part !== ""), { "repo": repo, "cwd": cwd });
-				const analyzer = await analyzerOf(repo);
-				let graph;
-
-				try {
-					graph = await graphAt(repo, analyzer, files);
-				} finally {
-					analyzer.close?.();
-				}
-
-				const user = gitUser(repo) ?? "local";
-				const made = vouchesFor(ran.outcomes, graph!, { "by": user, "runtime": config.get("runtime"), "held": (file) => lockfilesOver(repo, file) });
-				const kept = path.join(repo, vouchesPath(user));
-				// (a test's latest vouch is the one kept: the file grows by what changed, not by every run)
-				const before = fs.existsSync(kept) ? parseVouches(fs.readFileSync(kept)) : [];
-				const now = new Set(made.map((vouch) => vouch.test));
-
-				fs.mkdirSync(path.dirname(kept), { "recursive": true });
-				fs.writeFileSync(kept, vouchesText([...before.filter((vouch) => !now.has(vouch.test)), ...made], fs.existsSync(kept) ? fs.readFileSync(kept) : ""));
-				process.stdout.write(`vouched for ${String(made.length)} of ${String(ran.outcomes.length)} tests (${path.relative(cwd, kept)})\n`);
-				process.exitCode = ran.status;
-			}
-		}),
-		command({
-			"name": "observed",
-			"description": "Each test against the features its file declares, by the statements few tests ran: where what runs shows disagrees with what the ledger says, and what sharing there is to reassess. Reads a folder of each test file's reach: the editor's (`.silo/local/reach/`, each at its test file's path, `<path>.json`, as its runs keep them), or `<suite>.json`, as COVERAGE=1 writes them and a dispatched architecture run uploads them. What each test ran is kept in .silo/last-run/reach.json, by file, to commit: `silo check` lets a file be several features' only when it shows each one's tests running it.",
-			"config": juvy({
-				"reach": { "format": String, "default": "", "positional": true, "doc": "The folder of each test file's reach." },
-				"repo": { "format": String, "default": ".", "doc": "A directory in the repository (default: the current one)." },
-				"json": jsonFlag
-			}),
-			"handler": async (config) => {
-				const repo = await repoOf(config.get("repo"));
-				const folder = path.resolve(config.get("reach"));
-				const tracked = await filesOf(repo);
-				const kept = new Set(tracked);
-				const tests = (fs.readdirSync(folder, { "recursive": true }) as string[]).filter((file) => file.endsWith(".json")).flatMap((file) => {
-					const suite = file.replace(/\.json$/u, "");
-
-					// (the editor's: kept at its test file's own path, each test by its file and titles — named here by its titles —
-					// and what it ran as ranges of lines, each line one here, so tests whose ranges differ still meet on a line)
-					if (kept.has(suite)) {
-						const lines = (ranges: unknown[]): number[][] => ranges.flatMap((range) => {
-							const [from, to] = range as [number, number];
-
-							return Array.from({ "length": to - from + 1 }, (_, index) => [from + index]);
-						});
-
-						return parseReach(suite, fs.readFileSync(path.join(folder, file))).map((test) => ({ ...test, "name": test.name.replace(`${suite} › `, ""), "reach": Object.fromEntries(Object.entries(test.reach).map(([ran, ranges]) => [ran, lines(ranges)])) }));
-					}
-
-					const candidates = tracked.filter((each) => new RegExp(`(^|/)test/(.*/)?${suite.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\.[cm]?[jt]s$`, "u").test(each));
-
-					if (candidates.length !== 1) {
-						throw new Error(`${file}: expected one test file named ${suite}, found ${String(candidates.length)}`);
-					}
-
-					// (a suite that runs other test files, each its test, named by it — the editor's test/in-editor.mjs and its
-					// specs: each test is its file's, the one the ledger names, under the suite's folder)
-					const under = path.posix.dirname(candidates[0]!) + "/";
-
-					return parseReach(candidates[0]!, fs.readFileSync(path.join(folder, file))).map((test) => {
-						const runs = tracked.filter((each) => each.startsWith(under) && each.endsWith(`/${test.name}`));
-
-						return runs.length === 1 ? { ...test, "file": runs[0]! } : test;
-					});
-				});
-				const observed = observedAgainstDeclared(ledgerOf(repo), tests);
-				const record = path.join(repo, lastRunReachPath());
-
-				// (what it read, kept for `silo check`: a file several features own is held to it)
-				fs.mkdirSync(path.dirname(record), { "recursive": true });
-				fs.writeFileSync(record, JSON.stringify(reachRecord(tests, new Date().toISOString().slice(0, 10))) + "\n");
-				process.stdout.write(config.get("json") ? JSON.stringify(observed, undefined, "\t") + "\n" : observedText(observed) + `\nWhat each test ran is kept in ${lastRunReachPath()}, for \`silo check\`: commit it.\n`);
-			}
-		}),
-		command({
-			"name": "features",
-			"description": "Every way into the program — commands, views, settings, buttons, agent tools, hub requests… — found in its code. With --score, what they add up to instead: the ways in grouped from the code alone (by file and by folder, the baselines; by reach; by file joined where a registration quotes a hub subject), each grouping scored against the ledger's declared features: how many of its features each finds whole, splits or merges, and its precision and recall; and who owns the code: how many of the manifest's features reach each declaration, from their ways in and what registers them.",
-			"config": juvy({ "repo": repoArgument, "json": jsonFlag, "score": { "format": Boolean, "default": false, "doc": "Score each derivation of features from the code against the ledger's declared features (silo README, *The feature manifest*)." } }),
-			"handler": async (config) => {
-				const repo = await repoOf(config.get("repo"));
-
-				if (config.get("score")) {
-					const scored = await derivationScores(repo);
-
-					process.stdout.write(config.get("json") ? JSON.stringify(scored, undefined, "\t") + "\n" : scoresText(scored));
-
-					return;
-				}
-
-				const features = [...(await currentFeatures(repo)).values()];
-
-				process.stdout.write(config.get("json") ? JSON.stringify(features, undefined, "\t") + "\n" : featuresMarkdown(features, { "title": "Features of " + path.basename(repo) }));
-			}
-		}),
-		command({
-			"name": "history",
-			"description": "What changed, told from the code's snapshots (git's first-parent history) — never from commit messages.",
-			"config": juvy({
-				"repo": repoArgument,
-				"since": { "format": String, "default": "", "doc": "Start of the span: anything git's --since takes (\"7 days ago\", 2026-10-05). Default: the whole history." },
-				"until": { "format": String, "default": "", "doc": "End of the span, as git's --until takes it. Default: now." },
-				"ref": { "format": String, "default": "HEAD", "doc": "The branch or commit to walk back from." },
-				"json": jsonFlag
-			}),
-			"handler": async (config) => {
-				const repo = await repoOf(config.get("repo"));
-				const since = config.get("since"), until = config.get("until");
-				const steps = await historyOf(repo, { "ref": config.get("ref"), ...since === "" ? {} : { "since": since }, ...until === "" ? {} : { "until": until } });
-				const span = since === "" ? steps : steps.slice(1); // the baseline only gives the first commit something to compare with
-
-				process.stdout.write(config.get("json") ? JSON.stringify(span, undefined, "\t") + "\n" : historyMarkdown(span, { "title": "History of " + path.basename(repo) }));
 			}
 		})
 	]

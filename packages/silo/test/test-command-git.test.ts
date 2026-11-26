@@ -1,6 +1,5 @@
 /**
- * `silo test` against real git (src/test.ts): a vouch's file held to its git id as the checkout has it, the lockfiles
- * over a test, and a test's reach from the vouches at a push's base — each over a repository it makes with git. Real
+ * `silo test` against real git (src/test.ts): a vouch's file held to its git id as the checkout has it, and a test's reach from the vouches at a push's base — each over a repository it makes with git. Real
  * git is the reference, so this runs in Node, not in the editor's debugger (packages/editor/RUNNING.md, *Tests*).
  */
 import assert from "node:assert/strict";
@@ -27,26 +26,6 @@ test("a vouch's file outside the graph is held to its contents' git id as the ch
 	const oid = (file: string): string => execFileSync("git", ["hash-object", file], { "cwd": repo, "encoding": "utf8" }).trim();
 
 	assert.deepEqual([...named], [["a.test.mjs", oid("a.test.mjs")], ["node_modules/twice/package.json", oid("node_modules/twice/package.json")]]);
-});
-
-test("silo vouch holds a test to the lockfiles over it, so a dependency's upgrade lapses it", async () => {
-	const { lockfilesOver } = await import("../src/test.ts");
-	const { digest } = await import("@brianjenkins94/util/silo/graph");
-	const { execFileSync } = await import("node:child_process");
-	const { mkdirSync, mkdtempSync, writeFileSync } = await import("node:fs");
-	const { tmpdir } = await import("node:os");
-	const path = await import("node:path");
-	const repo = mkdtempSync(path.join(tmpdir(), "silo-locks-"));
-
-	execFileSync("git", ["init", "-q"], { "cwd": repo });
-	mkdirSync(path.join(repo, "packages", "a", "test"), { "recursive": true });
-	writeFileSync(path.join(repo, "package-lock.json"), "{}\n");
-	writeFileSync(path.join(repo, "packages", "a", "pnpm-lock.yaml"), "lockfileVersion: 9\n");
-
-	const oid = (file: string): string => digest(execFileSync("git", ["hash-object", file], { "cwd": repo, "encoding": "utf8" }).trim());
-
-	assert.deepEqual(lockfilesOver(repo, "packages/a/test/a.test.mjs"), { "packages/a/pnpm-lock.yaml": oid("packages/a/pnpm-lock.yaml"), "package-lock.json": oid("package-lock.json") });
-	assert.deepEqual(lockfilesOver(repo, "b.test.mjs"), { "package-lock.json": oid("package-lock.json") });
 });
 
 test("a test's reach from a run: the files of its latest editor vouch that held at the push's base, and what the push changed by file", async () => {
@@ -77,7 +56,7 @@ test("a test's reach from a run: the files of its latest editor vouch that held 
 	// (a vouch made of the code as it is: what it ran; one of a.mjs before it changed: held to an id a.mjs no longer has)
 	const now = vouch("a.test.mjs › adds", "2026-11-22T10:00:00Z", held(["a.test.mjs", "a.mjs"]));
 	const stale = vouch("a.test.mjs › other", "2026-11-22T10:00:00Z", { ...held(["a.test.mjs"]), "a.mjs": digest("an older a.mjs") });
-	// (a declaration-held vouch, silo vouch's, says nothing of what ran)
+	// (a declaration-held vouch, as silo vouch made them, says nothing of what ran)
 	const declared = vouch("a.test.mjs › declared", "2026-11-22T10:00:00Z", { "a.mjs#a": "f1" });
 
 	write(".silo/vouches/brian.jsonl", [now, stale, declared].map((each) => JSON.stringify(each) + "\n").join(""));

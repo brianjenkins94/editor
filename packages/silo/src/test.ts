@@ -229,26 +229,6 @@ export function filesNamedIn(repo: string, vouches: readonly Vouch[]): Map<strin
 	return new Map(files.flatMap((file, index) => oids[index] === undefined || oids[index] === "" ? [] : [[file, oids[index]] as const]));
 }
 
-const LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock"];
-
-/** The lockfiles over `file` (from the repository's top), each held by its contents' git id kept as its digest: a
- *  vouch holding them lapses when a dependency's version changes, as `filesNamedIn` reads them back. */
-export function lockfilesOver(repo: string, file: string): Record<string, string> {
-	const found: string[] = [];
-
-	for (let dir = path.posix.dirname(file); ; dir = path.posix.dirname(dir)) {
-		found.push(...LOCKFILES.map((name) => (dir === "." ? name : `${dir}/${name}`)).filter((each) => fs.existsSync(path.join(repo, each))));
-
-		if (dir === "." || dir === "/") {
-			break;
-		}
-	}
-
-	const oids = found.length === 0 ? [] : (git(repo, ["hash-object", "--", ...found]) ?? "").trim().split("\n");
-
-	return Object.fromEntries(found.flatMap((each, index) => (oids[index] === undefined || oids[index] === "" ? [] : [[each, digest(oids[index])]])));
-}
-
 /** The ids each file had at `ref`, of `files` git has there. */
 export function idsAt(repo: string, ref: string, files: readonly string[]): Map<string, string> {
 	const tree = files.length === 0 ? "" : git(repo, ["ls-tree", "-r", ref, "--", ...files]) ?? "";
@@ -350,29 +330,6 @@ export async function selectFor(options: TestOptions): Promise<Standing[]> {
 	});
 
 	return selected.map((test) => ({ ...test, ...known.has(test.id) ? { "standing": known.get(test.id)! } : {} }));
-}
-
-/** Vouches for the tests that passed in `outcomes` (silo's reporter's, read back: `reportedIn`), each with the fingerprints
- *  of what its file reaches in `graph`, the code as it is now, and what `held` adds (its lockfiles, `lockfilesOver`). A
- *  failure vouches for nothing. */
-export function vouchesFor(outcomes: readonly TestOutcome[], graph: DeclarationGraph, options: { "by": string; "runtime": string; "commit"?: string; "at"?: string; "held"?: (file: string) => Record<string, string> }): Vouch[] {
-	const at = options.at ?? new Date().toISOString();
-
-	return outcomes.filter((outcome) => outcome.outcome === "pass").map((outcome) => {
-		const [file, ...titles] = outcome.titles;
-
-		return { "test": testId(file!, titles), "outcome": "pass" as const, "by": options.by, "at": at, "runtime": options.runtime, ...options.commit === undefined ? {} : { "commit": options.commit }, "reached": { ...fingerprintsOf(graph, staticReach(graph, file!)), ...options.held?.(file!) } };
-	});
-}
-
-/** The runner run on `files` with silo's reporter beside its own, its output passed through: its exit code, and silo's
- *  lines of it. */
-export function runWithReporter(files: readonly string[], runner: readonly string[], options: { "repo": string; "cwd": string }): { "status": number; "outcomes": TestOutcome[] } {
-	const reporter = path.join(import.meta.dirname, "reporter.mjs");
-	const [command, ...args] = runner;
-	const ran = spawnSync(command!, [...args, "--test-reporter=spec", "--test-reporter-destination=stderr", `--test-reporter=${reporter}`, "--test-reporter-destination=stdout", ...files.map((file) => path.relative(options.cwd, path.join(options.repo, file)))], { "cwd": options.cwd, "stdio": ["inherit", "pipe", "inherit"], "encoding": "utf8", "maxBuffer": 1 << 28, "env": { ...process.env, "SILO_ROOT": options.repo } });
-
-	return { "status": ran.status ?? 1, "outcomes": reportedIn(ran.stdout ?? "") };
 }
 
 /** The selection said, and the runner run on its files with silo's reporter beside its own: the runner's exit code. */

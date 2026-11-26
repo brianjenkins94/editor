@@ -1,4 +1,5 @@
 {
+  "$version": 1,
   "A change's problems": {
     "status": "active",
     "why": "reintroduced after ESLint (user, 2026-11-03), as what's built on it — with the UI an agent's tool mirrors first: the review panel shows each changed file's (user's choice)",
@@ -2607,7 +2608,6 @@
     "docs": "packages/silo/README.md, *Tests by feature, in your face*",
     "ways": [
       "cli command|test",
-      "cli command|vouch",
       "command|history.vouched"
     ],
     "paths": [
@@ -3021,13 +3021,14 @@
     "why": "a stopgap (user, 2026-11-03): the end goal is every test running in the editor, in the browser, with in-editor Playwright driving previews and tsval running the tests, where what a test ran is its trace. This records reach from outside until then, to reassess sharing now. Remove it as Preview windows and Playwright tests in the debugger come back",
     "since": "2026-11-03",
     "until": "2027-02-01",
-    "what": "With COVERAGE=1, the editor's own modules are instrumented in every realm. In the editor, a UI spec run in the debugger keeps, as its reach, what the editor in its window ran, every realm of it, frames and workers (shell/preview-windows.tsx asks them on the origin's editor.coverage channel); and from outside, the browser suites record which statements of which files each test ran, which `silo observed` compares with what each test's file declares.",
+    "what": "With COVERAGE=1, the editor's own modules are instrumented in every realm. In the editor, a UI spec run in the debugger keeps, as its reach, what the editor in its window ran, every realm of it, frames and workers (shell/preview-windows.tsx asks them on the origin's editor.coverage channel); and from outside, the browser suites record which statements of which files each test ran, which build/reach-record.ts compares with what each test's file declares, keeping it in .silo/last-run/reach.json.",
     "docs": "packages/silo/README.md, *Declared against observed*",
-    "ways": [
-      "cli command|observed"
-    ],
     "paths": [
-      "packages/editor/build/coverage.ts"
+      "packages/editor/build/coverage.ts",
+      "packages/editor/build/reach-record.ts"
+    ],
+    "tests": [
+      "packages/editor/test/reach-record.test.mjs"
     ]
   },
   "What went through this code, on hover": {
@@ -3245,38 +3246,42 @@
     ]
   },
   "silo features": {
-    "status": "active",
-    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
-    "since": "2026-11-03",
+    "status": "removed",
+    "why": "cut from the command line (the user, 2026-11-25: the files are the interface): what it printed is worked out from the code, and the editor's History does; features --score was an experiment whose result is in the README, and lib's derive.ts went with it",
+    "since": "2026-11-25",
     "what": "Lists every way into a program (commands, views, settings, buttons, agent tools, hub requests and more) by reading its code.",
-    "docs": "packages/silo/README.md, *Derived history: features, reach, what runs say (built 2026-10-12; the feature layer parked)*",
+    "docs": "packages/silo/README.md, *The files are the interface (designed 2026-11-25)*",
     "ways": [
       "cli command|features"
-    ],
-    "tests": [
-      "packages/silo/test/cli.test.ts"
     ]
   },
   "silo history": {
-    "status": "active",
-    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
-    "since": "2026-11-03",
+    "status": "removed",
+    "why": "cut from the command line (the user, 2026-11-25: the files are the interface): what it printed is worked out from the code, and the editor's History replays it as it's edited; lib's narration and git-snapshots' walk went with it",
+    "since": "2026-11-25",
     "what": "Tells what changed in a program from snapshots of its code along git's first-parent history, never from commit messages.",
-    "docs": "packages/silo/README.md, *Derived history: features, reach, what runs say (built 2026-10-12; the feature layer parked)*",
+    "docs": "packages/silo/README.md, *The files are the interface (designed 2026-11-25)*",
     "ways": [
       "cli command|history"
-    ],
-    "tests": [
-      "packages/silo/test/cli.test.ts"
     ]
   },
   "silo init": {
+    "status": "removed",
+    "why": "folded into silo install (the user, 2026-11-25: \"Keep install\"): the first install starts .silo/ and makes the baseline",
+    "since": "2026-11-25",
+    "what": "Sets up .silo/ in a repository, with its git settings and a baseline of what the code imports.",
+    "docs": "packages/silo/README.md, *The files are the interface (designed 2026-11-25)*",
+    "ways": [
+      "cli command|init"
+    ]
+  },
+  "silo install": {
     "status": "active",
     "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
     "since": "2026-11-03",
-    "what": "Sets up .silo/ in a repository, with its git settings and a baseline of what the code imports.",
+    "what": "Installs with the project's package manager, taking nothing under a week old but what's pinned exactly; the first time it starts .silo/ and makes the baseline, then keeps it synced with what's installed.",
     "ways": [
-      "cli command|init"
+      "cli command|install"
     ],
     "tests": [
       "packages/silo/test/cli.test.ts",
@@ -3284,30 +3289,15 @@
       "packages/silo/test/reader.mjs"
     ]
   },
-  "silo install": {
-    "status": "active",
-    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
-    "since": "2026-11-03",
-    "what": "Installs dependencies with the project's package manager, skipping anything published in the last week.",
-    "ways": [
-      "cli command|install"
-    ],
-    "tests": [
-      "packages/silo/test/cli.test.ts"
-    ]
-  },
   "silo remove and restore": {
-    "status": "active",
-    "why": "moved from the manifest (decision 21), area silo: outside the editor's reduction, kept as it was",
-    "since": "2026-11-03",
+    "status": "removed",
+    "why": "cut from the command line (the user, 2026-11-25: \"Cut it anyway\"): deleting is an edit somebody reviews; the editor shows the plan on a way in (lib's removalOf), a person carries it out and `silo status` it removed, and a tombstone's restore is a git checkout to run as it is",
+    "since": "2026-11-25",
     "what": "Takes a feature out of the code (the files only it uses, plus its package manifests' entries) and leaves a tombstone that can bring it back later.",
-    "docs": "packages/silo/README.md, *The feature ledger: code keeps its place, or goes (designed 2026-10-12; step 1 built 2026-10-23)*",
+    "docs": "packages/silo/README.md, *The files are the interface (designed 2026-11-25)*",
     "ways": [
       "cli command|remove",
       "cli command|restore"
-    ],
-    "tests": [
-      "packages/silo/test/cli.test.ts"
     ]
   },
   "silo status": {

@@ -155,7 +155,7 @@ tests ran outside test files, that statement skipped wherever it would run (tsva
 written) — its own feature's code first, about 90 s a time, what's tried kept in `.silo/local/notice/` until the code
 changes, so each go tries more. A test that fails with one skipped noticed it. A declaration isn't skipped (its name
 unbound, any test that runs the code throws, which says the code ran, not that the test looked). A test that noticed
-none of those tried is in Problems, a drop candidate for a person to decide, as `silo remove` is; it's never dropped.
+none of those tried is in Problems, a drop candidate for a person to decide, as a feature's removal is; it's never dropped.
 Only a passing file is checked.
 
 **For agents** (2026-10-29; workbench/test-runs.ts): `runs_tests` runs test files as `node --test` does and answers

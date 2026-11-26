@@ -160,7 +160,7 @@
             "GITHUB_REPOSITORY_OWNER": "${{ github.repository_owner }}",
             "PERF_BASELINE": "/tmp/performance-baseline/performance.json",
             "IN_EDITOR_SHARD": "${{ matrix.part }}",
-            # Dispatched by hand, what each test ran is recorded (build/coverage.ts), for `silo observed`. Not on every run:
+            # Dispatched by hand, what each test ran is recorded (build/coverage.ts), for build/reach-record.ts. Not on every run:
             # instrumented modules are slower, and not while performance measures.
             "COVERAGE": "${{ github.event_name == 'workflow_dispatch' && matrix.shard != 'performance' && '1' || '' }}"
           }
