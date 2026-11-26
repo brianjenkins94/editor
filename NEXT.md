@@ -15,49 +15,29 @@ How it's kept:
 
 Each item says what finishes it. One that has no such line yet waits on a decision, under *Decisions*.
 
-1. **The editor, used** (the user, 2026-11-24): for two weeks, to 2026-12-08, work on this repository happens in the
-   editor, and on example-consumer (the user's choice); no new test machinery meanwhile. What it lacks, and the worst of
-   *Watching*, is the queue after. It's the live site, editor.unusuallygood.dev (each green `cd` deploys it,
-   `EDITOR_DEPLOYS`), first used signed in and pushed from 2026-11-26; going back would be deploying `full-editor`'s
-   build again, not tried. example-consumer's first session
-   (2026-11-24, the live site): it loads with no problems, `npm install` and `npm run dev` work, and its previews didn't;
-   fixed the same day — a page's script by an absolute path (its own imports went outside its server), a package's
-   stylesheet imported, two files of one package (each its own copy of what they share), an inline module's imports, and a
-   preview's frame refused on a first load (the app's frame opened before the service worker, so nothing reached the
-   server). Its gaps, from its README's own commands:
-   - `npm run build` is `tsc && vite build`. `tsc` isn't a gap (the user, 2026-11-24: no need to call it, Problems has what
-     it would say); `vite build` isn't one `vite` takes (it serves only).
-   - `npm test`: its test launches `playwright`'s Chromium and serves the built pages with Vite's `preview`. Decided
-     (the user, 2026-11-26, an exception to no new test machinery): it runs in preview windows in the editor. In the
-     debugger, `playwright` is the editor's (each page a preview window, its colorScheme the frame's, `evaluate`,
-     `pageerror`) and vite's `preview()` the in-browser dev server, serving the pages as they are, not built
-     (playwright-library.spec). example-consumer's own `npm test` passes there unchanged, 4 of 4 (2026-11-26, 8295d2a0,
-     its dev server locally).
+1. **The editor's gaps, from using it.** Work on this repository and on example-consumer happens in the live editor,
+   editor.unusuallygood.dev (each green `cd` deploys it, `EDITOR_DEPLOYS`); what it lacks is listed here as it's found,
+   and errors and agents' tool use come in through the queue (CLAUDE.md, *The queue*). It began as two weeks of only that,
+   to 2026-12-08, with no new test machinery meanwhile (2026-11-24); the user took the hold off 2026-11-26: "if that's
+   where the next work takes us, that's fine". Open:
+   - `npm run build` is `tsc && vite build`: `tsc` isn't a gap (the user, 2026-11-24: Problems has what it would say);
+     `vite build` isn't one the editor's `vite` takes (it serves only), so example-consumer's test checks the pages as
+     served, not built (the user's choice, 2026-11-26).
    - A repository with no ESLint config is held to the editor's own style rules (`object-shorthand` on its tests). Left as
      it is (the user, 2026-11-26): it belongs to a bigger decision about sensible defaults.
-   From the first push from it (2026-11-26, 18aae5a0):
-   - It opened on the workspace it had kept from before, an old clone (NEXT.md weeks behind), and nothing said it was
-     behind GitHub; the account menu's *Load a repo* brought today's. Now it's offered a fast-forward (a4404c97: the
-     GitHub menu says how many commits, *Fast-forward* pulls them; seen working there). Only signed in: the editor's
-     requests to GitHub all need it, a public repository's fetch too, so a signed-out editor isn't told.
-   - After that load, Changes listed two files the repository doesn't have, `.silo/manifest.json` (gone since 2026-11-03)
-     and `.silo/evidence/ci/architecture.json`, and after a reload 110: every file the old workspace had in a folder the
-     clone has too. A replace deletes each folder and writes the clone's into it within one save to IndexedDB, and that
-     save wrote a folder that's there without taking out what was saved under it before; fixed (reload.spec). The `.silo`
-     ones stay because a replace keeps `.silo` whole, and it should (the user, 2026-11-26): `.silo` is always there, the
-     editor being how a repository takes up silo, but a change under it isn't picked for a commit unless the repository
-     already has a `.silo` committed (Changes leaves it unchecked, *Commit and push* leaves it out; a person can pick it).
+   - A signed-out editor isn't told its workspace is behind GitHub: the editor's requests to GitHub all need the sign-in,
+     a public repository's fetch too (the offer to fast-forward, a4404c97, is signed in only).
    - Changes' *Commit* commits without pushing, and doesn't say so; the toolbar's *Commit and push* commits everything
-     changed, so pushing a commit of some of the changes took the terminal's `git push`.
-   **Done when** two weeks' work is done there, its gaps listed here.
-2. **Runtime evidence, used** (after item 1; packages/editor/RUNTIME-EVIDENCE.md). Built: values, branches and types on
+     changed, so pushing a commit of some of the changes takes the terminal's `git push`.
+   **Done when** each gap listed is fixed or decided.
+2. **Runtime evidence, used** (packages/editor/RUNTIME-EVIDENCE.md). Built: values, branches and types on
    hover, what could go, coverage, previews' evidence, time. But none is kept for this repository (no `.silo/evidence`),
-   so nothing it says has been read in real work. In order: run this repository's own programs in it as item 1 goes;
+   so nothing it says has been read in real work. In order: run this repository's own programs in it as it's used;
    decide from the diffs whether evidence is committed by default (its *Open questions*, the first); then the evidence
    diff (*Not built*: what an edit changed at runtime, a view first). **Done when** a week's evidence of this repository
    has been read and that default decided.
 3. **Unused code, from a coverage run** (the user, 2026-11-25: "by having detailed coverage information we can eliminate
-   unused code"; after item 1, as no new test machinery until then). A dispatched architecture run records what each test ran,
+   unused code"). A dispatched architecture run records what each test ran,
    by statement, and `.silo/last-run/reach.json` keeps of it each file and the tests that ran any: what nothing ran is never
    asked, and the dormant check, which meant to (by way in), went 2026-11-25. In order: which realms and packages that run
    and the unit tests' reach don't measure (165 of 544 source files weren't in the record on 2026-11-24, 40 the API's and 23
@@ -71,7 +51,7 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    run everything. Replayed 2026-11-24 over the last 80 by file, against `.silo/last-run/reach.json`: 26, from 34
    on 2026-11-16 — 20 for code nothing there reaches (types alone, as the debugger's protocol is, and modules that only
    re-export: run by no test, though their importers are; build and dev scripts), 3 a package.json, 3 a workflow.
-   Waits behind item 1. **Done when** the same replay says under 10; taking a file no test runs by its importers is
+   **Done when** the same replay says under 10; taking a file no test runs by its importers is
    most of what's left.
 5. **Every test in the editor** (the end goal; the user, 2026-11-03). What's left stays outside, each for its reason
    (RUNNING.md, *Tests*); decided 2026-11-24 to leave it there. 141 of 176 unit test files pass in its debugger (2026-11-23).
