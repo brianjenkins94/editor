@@ -29,13 +29,22 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      a public repository's fetch too (the offer to fast-forward, a4404c97, is signed in only).
    - Changes' *Commit* commits without pushing, and doesn't say so; the toolbar's *Commit and push* commits everything
      changed, so pushing a commit of some of the changes takes the terminal's `git push`.
+   - The terminal has no `/tmp`, and can't make one (`mkdir -p /tmp/x` fails), though scripts expect it; and `cp -r` into
+     it says it can't find its source (2026-11-26).
    **Done when** each gap listed is fixed or decided.
 2. **Runtime evidence, used** (packages/editor/RUNTIME-EVIDENCE.md). Built: values, branches and types on
    hover, what could go, coverage, previews' evidence, time. But none is kept for this repository (no `.silo/evidence`),
    so nothing it says has been read in real work. In order: run this repository's own programs in it as it's used;
    decide from the diffs whether evidence is committed by default (its *Open questions*, the first); then the evidence
    diff (*Not built*: what an edit changed at runtime, a view first). **Done when** a week's evidence of this repository
-   has been read and that default decided.
+   has been read and that default decided. First read (2026-11-26, the live editor, *Workspace filesystem*'s two unit
+   tests from Features and Tests and the terminal): worth having on the code — the gutter's green and red (line 50's
+   `return` never ran), the Margin's values (`coalesce` 22 of 22 calls, `prefix = '/workspace'`), the hover folding runs
+   ("then never ran · else 4× (100%), in 4 runs"). As files to commit, not yet: five runs kept 272 lines, 51 KB, for four
+   source files (`workspace-changes.ts`'s 21 KB, against the ~6 KB a 300-line file was expected to take), and a run of the
+   same test on the same code rewrote every line of every file it reached (61 of 61, 113 of 113, 59 of 59: each line
+   carries the last run's id and time and its decayed weights), so each run is a diff of everything it touched; and a
+   line is a span's hash with counts, which a reviewer can't place.
 3. **Unused code, from a coverage run** (the user, 2026-11-25: "by having detailed coverage information we can eliminate
    unused code"). A dispatched architecture run records what each test ran,
    by statement, and `.silo/last-run/reach.json` keeps of it each file and the tests that ran any: what nothing ran is never
