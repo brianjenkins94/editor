@@ -27,9 +27,11 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    server). Its gaps, from its README's own commands:
    - `npm run build` is `tsc && vite build`. `tsc` isn't a gap (the user, 2026-11-24: no need to call it, Problems has what
      it would say); `vite build` isn't one `vite` takes (it serves only).
-   - `npm test`: its test launches `playwright`'s Chromium and Vite's `preview`, and stops at unenv's
-     `net.getDefaultAutoSelectFamilyAttemptTimeout`. What it checks, a page in a browser, the editor's own Playwright can
-     do of an open preview; whether `playwright` itself should be that is to decide.
+   - `npm test`: its test launches `playwright`'s Chromium and serves the built pages with Vite's `preview`. Decided
+     (the user, 2026-11-26, an exception to no new test machinery): it runs in preview windows in the editor. In the
+     debugger, `playwright` is the editor's (each page a preview window, its colorScheme the frame's, `evaluate`,
+     `pageerror`) and vite's `preview()` the in-browser dev server, serving the pages as they are, not built
+     (playwright-library.spec). Not yet run on example-consumer itself.
    - A repository with no ESLint config is held to the editor's own style rules (`object-shorthand` on its tests). Left as
      it is (the user, 2026-11-26): it belongs to a bigger decision about sensible defaults.
    From the first push from it (2026-11-26, 18aae5a0):

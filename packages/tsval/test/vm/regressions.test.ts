@@ -87,3 +87,9 @@ test("#7 fork: a class prototype is shared, so a forked instance's proto is its 
 
 	assert.strictEqual(Object.getPrototypeOf(forkedInstance), forkedClass.prototype);
 });
+
+test("a program's function shows its own source, as Node's does: what's handed to a page to run (Playwright's evaluate)", () => {
+	const shown = interpret("const arrow = (a) => a + 1;\nfunction named(b) { return b * 2; }\n[String(arrow), named.toString(), Function.prototype.toString.call(Math.max).includes(\"[native code]\")];") as unknown[];
+
+	assert.deepStrictEqual(shown, ["(a) => a + 1", "function named(b) { return b * 2; }", true]);
+});

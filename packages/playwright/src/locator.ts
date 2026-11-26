@@ -15,6 +15,12 @@ export interface Driver {
 	"url"?: () => Promise<string>;
 	"title"?: () => Promise<string>;
 	"fetch"?: (url: string, init: FetchInit) => Promise<Fetched>;
+	/** A function's source run on the page with `arg`, what it returns. */
+	"evaluate"?: (source: string, arg: unknown) => Promise<unknown>;
+	/** What the page threw that nothing caught, since the last ask. */
+	"errors"?: () => Promise<string[]>;
+	/** The page done with. */
+	"close"?: () => Promise<void>;
 }
 
 /** A timeout passing, as Playwright's TimeoutError. */
@@ -173,7 +179,7 @@ export class Page extends Finder {
 			throw new Error("page.goto: this page can't be navigated");
 		}
 
-		await this.driver.goto(url);
+		await this.andHeard(this.driver.goto(url));
 	}
 
 	public async url(): Promise<string> {
@@ -188,6 +194,84 @@ export class Page extends Finder {
 		await new Promise((resolve) => {
 			setTimeout(resolve, ms);
 		});
+	}
+
+	private readonly listeners = new Map<string, Set<(value: unknown) => void>>();
+
+	/** Playwright's events, of which a page's uncaught errors (`pageerror`, each an Error), heard as the page is next asked anything. */
+	public on(event: string, listener: (value: unknown) => void): this {
+		const heard = this.listeners.get(event) ?? new Set();
+
+		heard.add(listener);
+		this.listeners.set(event, heard);
+
+		return this;
+	}
+
+	public off(event: string, listener: (value: unknown) => void): this {
+		this.listeners.get(event)?.delete(listener);
+
+		return this;
+	}
+
+	private async heard(): Promise<void> {
+		if (this.driver.errors === undefined || (this.listeners.get("pageerror")?.size ?? 0) === 0) {
+			return;
+		}
+
+		for (const message of await this.driver.errors()) {
+			for (const listener of this.listeners.get("pageerror") ?? []) {
+				listener(new Error(message));
+			}
+		}
+	}
+
+	private async andHeard<T>(work: Promise<T>): Promise<T> {
+		try {
+			return await work;
+		} finally {
+			await this.heard();
+		}
+	}
+
+	public async evaluate<T>(fn: ((arg: never) => T) | string, arg?: unknown): Promise<T> {
+		if (this.driver.evaluate === undefined) {
+			throw new Error("page.evaluate: this page can't run code");
+		}
+
+		const source = typeof fn === "function" ? String(fn) : `() => (${fn})`;
+
+		return this.andHeard(this.driver.evaluate(source, arg) as Promise<T>);
+	}
+
+	/** The first element `selector` finds, once it's there (and visible, unless another `state`); Playwright's returns its handle, this nothing. */
+	public async waitForSelector(selector: string, options: { "state"?: "attached" | "detached" | "visible" | "hidden"; "timeout"?: number } = {}): Promise<void> {
+		await this.andHeard(this.locator(selector).first().waitFor(options));
+	}
+
+	public async click(selector: string, options: ActionOptions = {}): Promise<void> {
+		await this.andHeard(this.locator(selector).first().click(options));
+	}
+
+	public async textContent(selector: string, options: ActionOptions = {}): Promise<string | null> {
+		return this.andHeard(this.locator(selector).first().textContent(options));
+	}
+
+	private closed = false;
+
+	public isClosed(): boolean {
+		return this.closed;
+	}
+
+	/** Done with: closing it again does nothing, as Playwright's. */
+	public async close(): Promise<void> {
+		if (this.closed) {
+			return;
+		}
+
+		await this.heard();
+		this.closed = true;
+		await this.driver.close?.();
 	}
 }
 

@@ -21,6 +21,28 @@ const { forEachChild, getCombinedModifierFlags, isArrowFunction, isBlock, isClas
 const Kind = ts.SyntaxKind;
 const { ModifierFlags } = ts;
 
+const sourceShown = new WeakSet<object>();
+
+/** `Function.prototype.toString` as Node's answers it for a program's function: its source text, not the host wrapper's. */
+function showSource(functionPrototype: { "toString": () => string }): void {
+	if (sourceShown.has(functionPrototype)) {
+		return;
+	}
+
+	sourceShown.add(functionPrototype);
+
+	const native = functionPrototype.toString;
+	const toString = {
+		toString(this: unknown): string {
+			const meta = (this as { "__tsval"?: GuestFunctionMeta } | null | undefined)?.__tsval;
+
+			return meta === undefined ? native.call(this) : meta.node.getText();
+		}
+	}.toString;
+
+	Object.defineProperty(functionPrototype, "toString", { "value": toString, "writable": true, "enumerable": false, "configurable": true });
+}
+
 export function createGuestFunction(vm: Machine, node: GuestFunctionNode, closure: Scope, homeObject?: object): GuestFunction {
 	const modifierFlags = getCombinedModifierFlags(node);
 	const meta: GuestFunctionMeta = {
@@ -46,6 +68,8 @@ export function createGuestFunction(vm: Machine, node: GuestFunctionNode, closur
 	// function's `.prototype` is a guest-realm object. A generator function's `.prototype` is the
 	// prototype of the generator objects it creates (and is not a constructor).
 	const { realm } = vm;
+
+	showSource(realm.Function.prototype);
 
 	let functionProto;
 

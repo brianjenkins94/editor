@@ -112,6 +112,9 @@ console.log('[HMR] React Refresh initialized');
 </script>
 `;
 
+/** Records a page's uncaught errors and rejections, as each one's message, in `window.__pageErrors`. */
+const PAGE_ERRORS_SCRIPT = "<script>window.__pageErrors=[];addEventListener(\"error\",(event)=>{window.__pageErrors.push(String(event.error&&event.error.message||event.message));});addEventListener(\"unhandledrejection\",(event)=>{window.__pageErrors.push(String(event.reason&&event.reason.message||event.reason));});</script>";
+
 /**
  * HMR client script injected into index.html
  * Implements the import.meta.hot API and handles HMR updates
@@ -974,6 +977,11 @@ export default css;
 
 				content = head === null ? runtime + content : content.slice(0, head.index + head[0].length) + runtime + content.slice(head.index + head[0].length);
 			}
+
+			// What the page throws that nothing catches, kept for who drives it (the editor's Playwright: `pageerror`), first of all.
+			const opened = /<head[^>]*>/iu.exec(content);
+
+			content = opened === null ? PAGE_ERRORS_SCRIPT + content : content.slice(0, opened.index + opened[0].length) + PAGE_ERRORS_SCRIPT + content.slice(opened.index + opened[0].length);
 
       // Inject HMR client script before </head> or </body>
 			if (content.includes("</head>")) {

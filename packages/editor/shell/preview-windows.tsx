@@ -410,6 +410,12 @@ function install(hub: Hub): void {
 		return found;
 	};
 
+	const schemes = new Map<string, string>();
+	const emulateScheme = (frame: HTMLIFrameElement, scheme: string): void => {
+		// eslint-disable-next-line webawesome/no-inline-styles -- a Playwright page's colorScheme: the frame's color-scheme is what its prefers-color-scheme follows, not themeable chrome
+		frame.style.colorScheme = scheme;
+	};
+
 	serve(hub, "playwright.run", async (args) => {
 		const { call, "args": given = [], "page": asking = "" } = args as PlaywrightCall;
 
@@ -421,6 +427,7 @@ function install(hub: Hub): void {
 
 			realmsBefore.delete(asking);
 			ranSoFar.delete(asking);
+			schemes.delete(asking);
 
 			claimed.delete(asking);
 
@@ -451,7 +458,27 @@ function install(hub: Hub): void {
 			}
 		}
 
-		const page = windowOf(asking, call === "goto")?.querySelector("iframe")?.contentWindow;
+		if (call === "emulate") {
+			const [{ colorScheme }] = given as [{ "colorScheme"?: "light" | "dark" | null }];
+
+			schemes.set(asking, colorScheme ?? "");
+
+			const frame = claimed.get(asking)?.querySelector("iframe");
+
+			if (frame !== null && frame !== undefined) {
+				emulateScheme(frame, colorScheme ?? "");
+			}
+
+			return undefined;
+		}
+
+		const frame = windowOf(asking, call === "goto")?.querySelector("iframe");
+
+		if (frame !== null && frame !== undefined && schemes.has(asking)) {
+			emulateScheme(frame, schemes.get(asking) ?? "");
+		}
+
+		const page = frame?.contentWindow;
 
 		if (page === null || page === undefined) {
 			if (call === "run") {

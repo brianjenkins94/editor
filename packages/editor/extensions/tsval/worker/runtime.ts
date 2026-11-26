@@ -6,7 +6,9 @@ import { REFS_DIR } from "@brianjenkins94/editor-api/git";
 import { expect as playwrightExpect, Page } from "@brianjenkins94/playwright";
 import { packageDisposition } from "@brianjenkins94/util/silo/policy";
 import nodeTestSource from "../node-test.js?raw";
+import playwrightSource from "../playwright.js?raw";
 import playwrightTestSource from "../playwright-test.js?raw";
+import viteSource from "../vite.js?raw";
 import { DEVTOOLS_PORT, devtoolsJson, devtoolsSession } from "./devtools";
 import { tally } from "./gate";
 import { installPackage } from "./install";
@@ -156,9 +158,13 @@ const NODE_TEST = "/__editor__/node-test.js";
 
 const PLAYWRIGHT_TEST = "/__editor__/playwright-test.js";
 
-const EDITOR_MODULES = new Map([["node:test", NODE_TEST], ["@playwright/test", PLAYWRIGHT_TEST]]);
+const PLAYWRIGHT = "/__editor__/playwright.js";
 
-export const EDITOR_SOURCES = new Map([[NODE_TEST, nodeTestSource], [PLAYWRIGHT_TEST, playwrightTestSource]]);
+const VITE = "/__editor__/vite.js";
+
+const EDITOR_MODULES = new Map([["node:test", NODE_TEST], ["@playwright/test", PLAYWRIGHT_TEST], ["playwright", PLAYWRIGHT], ["vite", VITE]]);
+
+export const EDITOR_SOURCES = new Map([[NODE_TEST, nodeTestSource], [PLAYWRIGHT_TEST, playwrightTestSource], [PLAYWRIGHT, playwrightSource], [VITE, viteSource]]);
 
 const pageIds = new WeakMap<Page, string>();
 const playwrightCall = async (id: string, name: PlaywrightCall["call"], ...args: unknown[]): Promise<unknown> => {
@@ -170,14 +176,19 @@ const playwrightCall = async (id: string, name: PlaywrightCall["call"], ...args:
 };
 
 export const editorPlaywright = {
-	"page": () => {
+	"page": (options: { "colorScheme"?: "light" | "dark" | null } = {}) => {
 		const id = crypto.randomUUID();
+		const emulated = options.colorScheme === undefined ? Promise.resolve() : playwrightCall(id, "emulate", { "colorScheme": options.colorScheme });
 		const page = new Page({
 			"run": async (op) => playwrightCall(id, "run", op) as Promise<Outcome>,
 			"goto": async (url) => {
 				tally("page:goto", url, "made");
+				await emulated;
 				await playwrightCall(id, "goto", url);
 			},
+			"evaluate": async (source, arg) => playwrightCall(id, "evaluate", source, arg),
+			"errors": async () => playwrightCall(id, "errors") as Promise<string[]>,
+			"close": async () => editorPlaywright.release(page, false),
 			"url": async () => playwrightCall(id, "url") as Promise<string>,
 			"title": async () => playwrightCall(id, "title") as Promise<string>,
 			"fetch": async (url, init) => {
@@ -202,7 +213,14 @@ export const editorPlaywright = {
 			}
 		}
 	},
-	"expect": playwrightExpect
+	"expect": playwrightExpect,
+	"devServer": async (root: string) => {
+		if (state.editorLink === undefined) {
+			throw new Error("no editor to serve from");
+		}
+
+		return state.editorLink.devServer(root);
+	}
 };
 
 export function programModules(loaded: Runtime): ModuleLoader {

@@ -279,7 +279,9 @@ export async function startSession(options = {}) {
 
 	// (`chromium`: Playwright launch options for the browser — the performance suite's full build and eager measurement.)
 	const browser = await launchChromium(options.chromium ?? {});
-	const context = await browser.newContext({ "viewport": { "width": 1400, "height": 900 } });
+	// (colorScheme null: no emulated prefers-color-scheme, which would hold every frame to one; each follows its frame's
+	// color-scheme, as a browser's do — a preview window's page given a colorScheme sees it: playwright-library.spec)
+	const context = await browser.newContext({ "viewport": { "width": 1400, "height": 900 }, "colorScheme": null });
 
 	if (options.debugMcp === true || options.debugMcp === "external") {
 		// The page's debug-mcp socket (:7378), relayed to this checkout's debug-mcp.

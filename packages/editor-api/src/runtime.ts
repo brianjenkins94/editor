@@ -58,7 +58,8 @@ export function runtimeSession(id: string): string | undefined {
  *  the worker's debugger is in. The editor names the worker `<name>#<instance>` (its own, so an answer goes to it alone;
  *  the architecture view counts each as an instance of `name`), bound to `session` (runtimeSession), and the link carries
  *  only the runtime: the worker's log, architecture and metrics, its mailbox handed over, its servers' requests and
- *  their answers, and the editor's realms (`devtools.realms`, for a run's DevTools endpoint) — no other service of the
+ *  their answers, the editor's realms (`devtools.realms`, for a run's DevTools endpoint), its preview windows driven
+ *  (`playwright.run`) and a dev server started and stopped (`devServer.*`, vite's `preview()`) — no other service of the
  *  editor's. */
 export function linkRuntime(hub: Hub, port: MessagePort, name: string, session?: string): () => void {
 	const id = `${name}#${crypto.randomUUID().slice(0, 8)}`;
@@ -67,7 +68,7 @@ export function linkRuntime(hub: Hub, port: MessagePort, name: string, session?:
 
 	const unlink = hub.link(portTransport(port), { "peer": id,
 "permissions": {
-		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "bridge.ready", rpcCallSubject("runtime.fs.attach"), rpcCallSubject("playwright.run"), rpcCallSubject("devtools.realms"), rpcReplySubject("node")],
+		"publish": ["$sys.log.>", "$sys.backlog.log", "$sys.arch.>", "$sys.metrics.>", "bridge.ready", rpcCallSubject("runtime.fs.attach"), rpcCallSubject("playwright.run"), rpcCallSubject("devServer.start"), rpcCallSubject("devServer.stop"), rpcCallSubject("devtools.realms"), rpcReplySubject("node")],
 		"subscribe": ["$sys.arch.sync", rpcCallSubject("virtual.debug.*"), rpcReplySubject(id)]
 	} });
 
@@ -581,7 +582,7 @@ export interface RuntimeVerdict { "allow": boolean; "decided": NonNullable<Effec
  *  served by the shell: on the window you have open. And `fetch`, its test's own request, made by the shell itself (no
  *  window needed: a server's answer, or that nobody's there, is the service worker's to any client). */
 export interface PlaywrightCall {
-	"call": "run" | "goto" | "url" | "title" | "release" | "fetch";
+	"call": "run" | "goto" | "url" | "title" | "release" | "fetch" | "evaluate" | "errors" | "emulate";
 	"args"?: unknown[];
 	/** Which page is asking: each has a window of its own while its test runs, so tests can run at once. */
 	"page"?: string;
@@ -590,6 +591,8 @@ export interface PlaywrightCall {
 export interface RuntimeConnection {
 	/** A preview's page, driven: a Playwright call there (PlaywrightCall), answered when it's done (once `ready`). */
 	"playwright": (call: PlaywrightCall) => Promise<unknown>;
+	/** A dev server on `root`, the editor's in-browser one, as the terminal's `vite` starts: where it's served, and stopping it. */
+	"devServer": (root: string) => Promise<{ "url": string; "port": number; "stop": () => Promise<void> }>;
 	/** The workspace's files (once `ready`). */
 	"fs": RuntimeFs;
 	/** `fs` answered from here on: the editor has the worker's mailbox. */
@@ -694,6 +697,13 @@ export function connectRuntime(port: MessagePort, { name, network = NETWORK_PROB
 			await ready;
 
 			return rpc.request("playwright.run", playwright, { "timeoutMs": 60_000, "waitForResponderMs": 10_000 });
+		},
+		"devServer": async (root) => {
+			await ready;
+
+			const { url, port } = await rpc.request("devServer.start", { "root": root }, { "timeoutMs": 60_000, "waitForResponderMs": 10_000 }) as { "url": string; "port": number };
+
+			return { "url": url, "port": port, "stop": async () => { await rpc.request("devServer.stop", { "port": port }, { "timeoutMs": 15_000 }); } };
 		},
 		"serve": (listening, handler) => {
 			const answer = exchanges(async (request) => {

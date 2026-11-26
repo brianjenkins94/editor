@@ -55,6 +55,7 @@ import { commitPart, installGitReview } from "./git-review";
 import { installGitService } from "./git-service";
 import { createNodeModulesProvider } from "./node-modules-provider";
 import { createNodeRunner } from "./node-runner";
+import { serveDevServers } from "./terminal/commands/vite/vite";
 import { installPaneViews } from "./pane-views";
 import { installPreviewSessions } from "./preview-session";
 import { installProfileTimes } from "./profile-times";
@@ -332,6 +333,8 @@ function maybeBoot(): void {
 				watchVersions(api as typeof import("vscode"));
 				installTarballs(api as typeof import("vscode"), workbenchHub);
 				const nodeRunner = createNodeRunner(workbenchHub, workspaceFs?.buffer);
+
+				serveDevServers(workbenchHub, nodeRunner);
 
 				installEditorState(workbenchHub, api as typeof import("vscode"), paneLog);
 				installFsTrace(workbenchHub, api as typeof import("vscode"), paneLog);

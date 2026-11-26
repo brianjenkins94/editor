@@ -49,6 +49,14 @@ export function windowDriver(window: Window | (() => Window)): Driver {
 		"url": async () => current().location.href,
 		"title": async () => current().document.title,
 		// (from its window: its origin's, its service worker answering)
-		"fetch": async (url, init) => fetched(await current().fetch(url, requestInit(init)))
+		"fetch": async (url, init) => fetched(await current().fetch(url, requestInit(init))),
+		// (in the page's own realm: its globals, its DOM; what it returns crosses as a structured clone)
+		"evaluate": async (source, arg) => (current() as Window & { "eval": (code: string) => (value: unknown) => unknown }).eval(`(${source})`)(arg),
+		// (the dev server's recorder, first in its pages' heads: almostnode's vite-dev-server.ts)
+		"errors": async () => {
+			const page = current() as Window & { "__pageErrors"?: string[] };
+
+			return page.__pageErrors?.splice(0) ?? [];
+		}
 	};
 }

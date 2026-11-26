@@ -1,4 +1,7 @@
+import type { Hub } from "@brianjenkins94/hub";
+import type { NodeRunner } from "../../../node-runner";
 import type { CommandHost, Handler } from "../../catalog";
+import { serve } from "@brianjenkins94/hub";
 
 const BASE_PORT = 5173;
 const inUse = new Set<number>();
@@ -13,6 +16,34 @@ function allocate(): number {
 	inUse.add(port);
 
 	return port;
+}
+
+export function serveDevServers(hub: Hub, runner: Pick<NodeRunner, "startDevServer" | "stopDevServer">): void {
+	serve(hub, "devServer.start", async (args) => {
+		const { root } = (args ?? {}) as { "root"?: unknown };
+
+		if (typeof root !== "string" || root === "") {
+			throw new TypeError("devServer.start needs the folder to serve (root)");
+		}
+
+		const port = allocate();
+
+		try {
+			return { "url": await runner.startDevServer(port, root), "port": port };
+		} catch (error) {
+			inUse.delete(port);
+			throw error;
+		}
+	});
+
+	serve(hub, "devServer.stop", async (args) => {
+		const { port } = (args ?? {}) as { "port"?: unknown };
+
+		if (typeof port === "number" && inUse.has(port)) {
+			await runner.stopDevServer(port);
+			inUse.delete(port);
+		}
+	});
 }
 
 function stamp(): string {
