@@ -861,6 +861,7 @@
     "docs": "packages/api/README.md, *The queue*",
     "paths": [
       "packages/api/migrations/0019_queue.sql",
+      "packages/api/migrations/0020_queue_errors_before.sql",
       "packages/api/src/queue.ts",
       "packages/api/scripts/queue.ts",
       "packages/admin/src/queue.tsx"
