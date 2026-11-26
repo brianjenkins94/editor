@@ -10,6 +10,9 @@ import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/typ
 import { portOf, relay } from "../src/relay.ts";
 import { createDebugMcp } from "../src/server.ts";
 
+// (the tools' use these tests make kept nowhere: a test's calls aren't an agent's — relay.ts `usageFile`)
+process.env["DEBUG_MCP_USAGE_FILE"] = "none";
+
 /** A client whose session is relayed by a debug-mcp that finds `port` taken (bin.ts's second session). */
 async function relayedClient(port: number) {
 	const [ours, theirs] = InMemoryTransport.createLinkedPair();
