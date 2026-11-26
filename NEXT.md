@@ -32,6 +32,13 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      do of an open preview; whether `playwright` itself should be that is to decide.
    - A repository with no ESLint config is held to the editor's own style rules (`object-shorthand` on its tests). Left as
      it is (the user, 2026-11-26): it belongs to a bigger decision about sensible defaults.
+   From the first push from it (2026-11-26, 18aae5a0):
+   - It opened on the workspace it had kept from before, an old clone (NEXT.md weeks behind), and nothing said it was
+     behind GitHub; the account menu's *Load a repo* brought today's.
+   - After that load, Changes listed two files the repository doesn't have: `.silo/manifest.json` (gone since 2026-11-03)
+     and `.silo/evidence/ci/architecture.json`. Where they came from isn't known yet.
+   - Changes' *Commit* commits without pushing, and doesn't say so; the toolbar's *Commit and push* commits everything
+     changed, so pushing a commit of some of the changes took the terminal's `git push`.
    **Done when** two weeks' work is done there, its gaps listed here.
 2. **Runtime evidence, used** (after item 1; packages/editor/RUNTIME-EVIDENCE.md). Built: values, branches and types on
    hover, what could go, coverage, previews' evidence, time. But none is kept for this repository (no `.silo/evidence`),
