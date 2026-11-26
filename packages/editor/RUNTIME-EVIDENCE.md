@@ -68,6 +68,17 @@ layout is silo's (lib `util/silo/layout.ts`): runs in `.silo/runs/<user>.jsonl`,
 `.silo/evidence/<user>/<env>/<file>.jsonl`, a line per (span, kind); `.silo/local/` (raw profiles, value samples, every
 run's trace) stays on the machine.
 
+**What's committed is what was seen, not how often** (stable lines; the user, 2026-11-26, after the first read of this
+repository's evidence: a rerun of the same test on the same code rewrote every line it reached, each carrying the last
+run's id and time and its decayed weights). A committed line says that a statement ran or didn't, a value's types and
+whether one was nullish, a branch's arms taken, a function's kinds of impurity, and the runs it rests on as a floor (1,
+3, 10, 30, 100); lib `stableOf`. So a run that behaves as the ones before changes no line in git, and one that doesn't
+is the diff: an arm taken for the first time, a new type, a statement that stopped running, a floor crossed. Every
+count, weight and run behind it (`Observation`, all of what's below) is the machine's, at
+`.silo/local/evidence/<user>/<env>/<file>.jsonl`; time isn't committed. The editor reads this machine's counts, and
+everyone else's committed lines as coarse evidence: what ran and how, on so many runs at least (the hover says "in 10+
+runs").
+
 The files the editor makes for a project — `versions.json` (the versions it pins) and `baseline.json` (the dependency
 baseline) — are the repository's at `.silo/` once it has committed them,
 and in `.silo/local/` until then (2026-10-30; editor-api's git.ts `keptAt`), so loading a repository doesn't put them
@@ -539,11 +550,8 @@ roughly in order of how much it would cost to change them later.
 
 ### Before more is built on them
 
-- **Is committing evidence the right default?** D3 was decided when only tsval runs wrote evidence. Previews now
-  write it on every dev session, so ordinary work rewrites `.silo/evidence/…` constantly: noisy diffs, `merge=union`
-  folding on every branch, files that grow with every user and machine. The alternatives: evidence local by default
-  (`.silo/local/`) and a rollup committed on request; or committed at a cadence (on commit, daily) rather than per run.
-  What would settle it: a week of real use, and how the diffs read in review.
+- ~~**Is committing evidence the right default?**~~ Decided 2026-11-26 (the user: "Stable lines"): committed, as what
+  was seen, with the counts on the machine (*Storage in git*). The first read had a rerun rewrite every line it reached.
 - **One rule for which span stands for a node.** Evidence takes the innermost span without an ordinal whose range is
   exactly the node's (workbench/evidence.ts, `anchors(…, exact)`); notes take `pickAnchor` over the selection. They
   agree today (pickAnchor prefers ids without an ordinal, then the larger, and keeps the first of equals, which is the

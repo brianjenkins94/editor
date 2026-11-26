@@ -153,6 +153,24 @@ test("a document's placing is shared by the surfaces asking for its version, and
 	assert.equal(await placing, undefined, "edited since: a newer look follows");
 });
 
+test("this machine's counts, and someone else's committed lines as what was seen: coarse, never counted twice", async () => {
+	const full = (kind, span, extra) => line({ "kind": kind, "span": span, "key": "bablr1", "w": 4, "ever": 4, "runs": 4, "lastRun": "r4", "lastAt": "2026-11-26", ...extra });
+	const files = new Map([
+		// (mine, every count — and my committed lines of the same runs, which say less of them)
+		["/workspace/.silo/local/evidence/me/laptop/src/a.ts.jsonl", full("branch", "b", { "arms": [0, 4] }) + full("reached", "s", {})],
+		["/workspace/.silo/evidence/me/laptop/src/a.ts.jsonl", line({ "span": "b", "key": "bablr1", "runs": 3, "kind": "branch", "taken": [1] }) + line({ "span": "s", "key": "bablr1", "runs": 3, "kind": "reached", "ran": true })],
+		// (someone else's: committed lines only)
+		["/workspace/.silo/evidence/bo/ci/src/a.ts.jsonl", line({ "span": "b", "key": "bablr1", "runs": 10, "kind": "branch", "taken": [0, 1] }) + line({ "span": "v", "key": "bablr1", "runs": 3, "kind": "value", "tags": ["string"], "nullish": false })]
+	]);
+	const { vscode } = standIn(files, () => at(0, 4));
+	const placed = await evidenceStore(vscode, []).placedIn("src/a.ts", "text");
+	const bySpan = (span) => placed.find((each) => each.evidence[span === "v" ? "value" : span === "s" ? "reached" : "branch"] !== undefined && (span !== "b" || each.evidence.branch !== undefined))?.evidence;
+
+	assert.deepEqual(bySpan("s").reached, { "ever": 4, "runs": 4, "lastAt": "2026-11-26" }, "mine, counted: my committed line isn't added again");
+	assert.deepEqual(bySpan("b").branch, { "arms": [1, 5], "ever": 14, "runs": 14, "lastAt": "2026-11-26", "coarse": true }, "mine and bo's: bo's taken arms, as taken");
+	assert.deepEqual(bySpan("v").value, { "seen": 3, "nullish": 0, "tags": { "string": 3 }, "ever": 3, "runs": 3, "lastAt": "", "coarse": true });
+});
+
 test("every file with evidence, at any depth and once whoever ran it; a change to one is said, and it's read again", async () => {
 	const files = new Map([
 		["/workspace/.silo/evidence/ann/node-24/src/a.ts.jsonl", line({ "kind": "reached", "span": "s1", "ever": 1, "runs": 1, "lastAt": "2026-11-01" })],
@@ -168,7 +186,7 @@ test("every file with evidence, at any depth and once whoever ran it; a change t
 	store.onDidChange((file) => said.push(file));
 	assert.deepEqual(await store.files(), ["src/a.ts", "src/deep/b.ts"]);
 	assert.deepEqual((await store.placedIn("src/a.ts", "text"))[0].evidence.reached.ever, 1);
-	assert.deepEqual(watchers.map(({ glob }) => glob), ["**/.silo/evidence/**/*.jsonl", "**/.silo/local/samples/**/*.jsonl"]);
+	assert.deepEqual(watchers.map(({ glob }) => glob), ["**/.silo/evidence/**/*.jsonl", "**/.silo/local/evidence/**/*.jsonl", "**/.silo/local/samples/**/*.jsonl"]);
 	assert.ok(subscriptions.length > watchers.length, "its emitter, watchers and their listeners, disposed with the extension");
 
 	const path = "/workspace/.silo/evidence/ann/node-24/src/a.ts.jsonl";

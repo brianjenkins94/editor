@@ -4,7 +4,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { codeOf, openEditor, openFile, runCommand } from "./editor.mjs";
+import { codeOf, openEditor, openFile, openTerminal, runCommand } from "./editor.mjs";
 
 const files = {
 	// (one run, F5's: no live runs, which aren't kept)
@@ -63,4 +63,32 @@ test("a run, then the hover: what went through a ?. and which way a ?: went", as
 	const branch = await hoverSays(workbench, 4, 13, "50%");
 
 	await expect(branch).toContainText("in 1 run");
+});
+
+test("run again, behaving the same: what's committed stays as it was, and the counts are this machine's", async ({ page }) => {
+	const workbench = await openEditor(page, { ...files, ".vscode/settings.json": "{ \"run.liveRuns\": false, \"terminal.integrated.gpuAcceleration\": \"off\" }\n" });
+
+	await openFile(workbench, "played.mjs");
+	await codeOf(workbench).press("F5");
+	await expect(workbench.locator(".notes-margin-run.ran")).toHaveCount(1, { "timeout": 60_000 });
+	await hoverSays(workbench, 4, 13, "50%");
+	await codeOf(workbench).press("Escape");
+
+	const first = await openTerminal(workbench);
+
+	await first.input.pressSequentially("f=$(cd .silo/evidence && find . -name played.mjs.jsonl); cp -r .silo/evidence .silo/local/first && echo kept $f\n");
+	await expect(first.output).toContainText("kept ./", { "timeout": 15_000 });
+
+	await openFile(workbench, "played.mjs");
+	await codeOf(workbench).press("F5");
+	// (the Margin shows the same run once, however often it's made: the hover says two runs once the second is written)
+	await expect(await hoverSays(workbench, 4, 13, "in 2 runs")).toContainText("50%");
+	await codeOf(workbench).press("Escape");
+
+	const second = await openTerminal(workbench);
+
+	await second.input.pressSequentially("f=$(cd .silo/evidence && find . -name played.mjs.jsonl); diff .silo/local/first/$f .silo/evidence/$f && echo un''changed; echo committed $(grep -c lastAt .silo/evidence/$f) local $(grep -c lastAt .silo/local/evidence/$f)\n");
+	await expect(second.output).toContainText("unchanged", { "timeout": 15_000 });
+	await expect(second.output).toContainText("committed 0 local");
+	await expect(second.output).not.toContainText("local 0");
 });

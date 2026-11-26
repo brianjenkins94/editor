@@ -6,7 +6,7 @@ import { test } from "node:test";
 import * as fs from "@brianjenkins94/util/fs";
 import { annotationsText } from "@brianjenkins94/util/silo/annotations";
 import { saveBaseline } from "@brianjenkins94/util/silo/audit";
-import { envelopeLine, evidenceText, foldReached } from "@brianjenkins94/util/silo/evidence";
+import { envelopeLine, foldReached, stableOf, stableText } from "@brianjenkins94/util/silo/evidence";
 import { annotationsPath, evidencePathFor, lastRunReachPath, ledgerPath, runsPath, vouchesPath } from "@brianjenkins94/util/silo/layout";
 import { ledgerText, withStatus } from "@brianjenkins94/util/silo/ledger";
 import { reachRecord } from "@brianjenkins94/util/silo/observed";
@@ -82,9 +82,9 @@ test("silo's files, as silo writes them, read by a program that isn't silo", asy
 				"reached": { "src/notes.ts#add": "abc" }
 			}
 		]),
-		[evidencePathFor("ada", "laptop.node.v8.macos", "src/notes.ts")]: evidenceText(foldReached([], [
+		[evidencePathFor("ada", "laptop.node.v8.macos", "src/notes.ts")]: stableText(stableOf(foldReached([], [
 			{ "span": "s1", "count": 3 }
-		], { "id": "r1", "at": at })),
+		], { "id": "r1", "at": at }))),
 		[annotationsPath("notes", "ada", "src/notes.ts")]: annotationsText([
 			{
 				"id": "n1",

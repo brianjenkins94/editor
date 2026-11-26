@@ -44,7 +44,11 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    source files (`workspace-changes.ts`'s 21 KB, against the ~6 KB a 300-line file was expected to take), and a run of the
    same test on the same code rewrote every line of every file it reached (61 of 61, 113 of 113, 59 of 59: each line
    carries the last run's id and time and its decayed weights), so each run is a diff of everything it touched; and a
-   line is a span's hash with counts, which a reviewer can't place.
+   line is a span's hash with counts, which a reviewer can't place. Decided (the user, 2026-11-26: "Stable lines"): committed is what
+   was seen, the counts this machine's (RUNTIME-EVIDENCE.md, *Storage in git*; lib d7fc57b, d7a1ff5); a rerun that
+   behaves the same changes nothing in git (evidence-hover.spec). Next, the evidence diff: a changed committed line is
+   behavior that changed, so the view reads git's diff of `.silo/evidence/` as what an edit changed at runtime, placed
+   on the code.
 3. **Unused code, from a coverage run** (the user, 2026-11-25: "by having detailed coverage information we can eliminate
    unused code"). A dispatched architecture run records what each test ran,
    by statement, and `.silo/last-run/reach.json` keeps of it each file and the tests that ran any: what nothing ran is never

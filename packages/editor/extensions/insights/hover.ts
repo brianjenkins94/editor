@@ -55,8 +55,8 @@ function branchSite(type: string | undefined): { "name": string; "arms": string[
 const count = (amount: number): string => amount.toLocaleString("en-US");
 const times = (amount: number): string => `${count(amount)}×`;
 
-function runs(amount: number): string {
-	return `${count(amount)} run${amount === 1
+function runs(amount: number, coarse = false): string {
+	return `${count(amount)}${coarse ? "+" : ""} run${amount === 1 && !coarse
 		? ""
 		: "s"}`;
 }
@@ -71,6 +71,15 @@ const bar = (part: number, whole: number): string => "█".repeat(Math.max(1, Ma
 
 export function describe(evidence: SpanEvidence, type: string | undefined, declared?: string): string | undefined {
 	const { value, branch } = evidence;
+
+	if (value?.coarse === true) {
+		return [
+			`**${valueSite(type)}** — in ${runs(value.ever, true)}, ${value.nullish === 0
+				? "never nullish"
+				: "nullish seen"}`,
+			`Observed ${Object.keys(value.tags).map((tag) => `\`${tag}\``).join(", ")}${declared === undefined ? "" : ` · declared \`${declared}\``}`
+		].join("\n\n");
+	}
 
 	if (value !== undefined) {
 		const kinds = Object.entries(value.tags).sort(([, left], [, right]) => right - left).map(([tag, seen]) => `\`${tag}\` ${bar(seen, value.seen)} ${share(seen, value.seen)}`);
@@ -94,6 +103,14 @@ export function describe(evidence: SpanEvidence, type: string | undefined, decla
 			...types,
 			...samples
 		].join("\n\n");
+	}
+
+	if (branch?.coarse === true) {
+		const { name, arms } = branchSite(type);
+
+		return `**${name}** — ${branch.arms.map((ran, arm) => `${arms[arm] ?? `arm ${arm + 1}`} ${ran === 0
+			? "never ran"
+			: "taken"}`).join(" · ")}, in ${runs(branch.ever, true)}`;
 	}
 
 	if (branch !== undefined) {

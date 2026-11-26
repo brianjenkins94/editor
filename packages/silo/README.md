@@ -107,12 +107,13 @@ Paths are lib `layout.ts`'s, the shapes its modules'. *Trust* is what a reader m
 | `versions.json` | the version each dependency loads at, where no lockfile says | the editor's `workbench/versions.ts` `VersionsFile` | the editor's resolver | derived |
 | `last-run/reach.json` | what each test ran, by file | `observed.ts` `ReachRecord` | the editor's `build/reach-record.ts`, by hand | derived |
 | `runs/<user>.jsonl` | each run: who, where, on what code, what it did and was stopped from doing | `evidence.ts` `RunEnvelope` | the editor, as a run ends; util/mcp (kept local unless shared) | claim |
-| `evidence/<user>/<environment>/<file>.jsonl` | what those runs observed, by span: reached, values, branches, purity, time | `evidence.ts` `Observation` | the editor, as a run ends | claim |
+| `evidence/<user>/<environment>/<file>.jsonl` | what those runs saw, by span: a statement ran or not, a value's types and whether one was nullish, a branch's arms taken, a function's kinds of impurity; each with the runs it rests on (1, 3, 10, 30 or 100 at least). Not how often or when, so a run that behaves as the ones before changes no line | `evidence.ts` `StableObservation` | the editor, as a run ends | claim |
 | `vouches/<user>.jsonl` | a test that passed, and the fingerprint of all it reached | `select.ts` `Vouch` | the editor's commit | claim (evidence for which tests run) |
 
 Beside them, `.gitignore` (`/local/`) and `.gitattributes` (`*.jsonl merge=union`), which silo seeds and adds to.
-`local/` is this machine's, never in git, and nobody's contract: runs kept local, value samples, traces, recorded
-results, the editor's reach, coverage and edit history, and its copy of `baseline.json` or `versions.json` until the
+`local/` is this machine's, never in git, and nobody's contract: runs kept local, every count behind the evidence
+(`local/evidence/`, `Observation`: how often, how strong, the last run), value samples, traces, recorded results, the
+editor's reach, coverage and edit history, and its copy of `baseline.json` or `versions.json` until the
 repository commits one. `last-run/outcomes.json` and `zero-knowledge.json`, here, are the rewrite's records, not silo's.
 
 Whose a file is, is in its path: anything a person or their runs write is in a file named for them (a slug of their git

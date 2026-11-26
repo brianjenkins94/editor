@@ -2,13 +2,13 @@ import type { Effect, LoadedPackage, SiteObservation, StatementCoverage } from "
 import type { ModuleEvidence } from "@brianjenkins94/editor-api/recorded";
 import type { Hub } from "@brianjenkins94/hub";
 import type { Observed } from "@brianjenkins94/observability";
-import type { Environment, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
+import type { Environment, Observation, RunEnvelope } from "@brianjenkins94/util/silo/evidence";
 import type * as vscodeApi from "vscode";
 import type { RunInfo } from "../shared/runs";
 import type { Bablr } from "./bablr";
 import type { RunRegistry } from "./runs";
 import { createRpcClient, serve } from "@brianjenkins94/hub";
-import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldTimes, foldValues, parseEvidence, parseSamples, ranPackages, samplesText, userSlug } from "@brianjenkins94/util/silo/evidence";
+import { envelopeLine, evidencePath, evidenceText, foldBranches, foldReached, foldSamples, foldTimes, foldValues, localEvidencePath, parseEvidence, parseSamples, ranPackages, samplesText, stableOf, stableText, userSlug } from "@brianjenkins94/util/silo/evidence";
 import { GITATTRIBUTES, GITIGNORE, runsPath, samplesPath, SILO_DIR, withLines } from "@brianjenkins94/util/silo/layout";
 import { blobOid, headCommit } from "./git-engine";
 
@@ -318,6 +318,21 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 	const uri = (path: string): vscodeApi.Uri => vscode.Uri.file(`${ROOT}/${path}`);
 	const read = async (path: string): Promise<Uint8Array | undefined> => Promise.resolve(vscode.workspace.fs.readFile(uri(path))).catch(() => undefined);
 	const text = async (path: string): Promise<string> => new TextDecoder().decode(await read(path) ?? new Uint8Array());
+	const keep = async (envelope: RunEnvelope, file: string, fold: (known: Observation[]) => Observation[]): Promise<Observation[]> => {
+		const local = localEvidencePath(envelope.user, envelope.environment, file);
+		const committed = evidencePath(envelope.user, envelope.environment, file);
+		const [counted, shared] = await Promise.all([text(local), text(committed)]);
+		const folded = fold(parseEvidence(counted === "" ? shared : counted));
+		const stable = stableText(stableOf(folded), shared);
+
+		await vscode.workspace.fs.writeFile(uri(local), new TextEncoder().encode(evidenceText(folded, counted)));
+
+		if (stable !== shared) {
+			await vscode.workspace.fs.writeFile(uri(committed), new TextEncoder().encode(stable));
+		}
+
+		return folded;
+	};
 
 	let user: string | undefined;
 	const currentUser = async (): Promise<string> => {
@@ -369,12 +384,8 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 			"tags": site.tags ?? {}
 		}));
 		const branches = sites.filter((site) => site.site === "branch").map((site) => ({ "span": site.span, "arms": site.arms ?? [] }));
-		const path = evidencePath(envelope.user, envelope.environment, file);
 		const run = { "id": envelope.id, "at": envelope.endedAt };
-		const before = await text(path);
-		const folded = foldBranches(foldValues(foldReached(parseEvidence(before), reached, run), values, run), branches, run);
-
-		await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(folded, before)));
+		const folded = await keep(envelope, file, (known) => foldBranches(foldValues(foldReached(known, reached, run), values, run), branches, run));
 
 		const samples = sites.flatMap((site) => (site.samples === undefined
 			? []
@@ -429,10 +440,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		const reports = times.functions.map((each) => ({ "span": each.span, "selfMs": each.selfMs, "totalMs": each.totalMs, "profiledMs": times.profiledMs, "callers": each.callers, "callees": each.callees }));
 
 		if (reports.length > 0) {
-			const path = evidencePath(taken.user, taken.environment, file);
-			const before = await text(path);
-
-			await vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(evidenceText(foldTimes(parseEvidence(before), reports, { "id": taken.id, "at": taken.endedAt }), before)));
+			await keep(taken, file, (known) => foldTimes(known, reports, { "id": taken.id, "at": taken.endedAt }));
 		}
 
 		return reports.length;

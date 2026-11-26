@@ -1,7 +1,9 @@
 /**
- * The runtime evidence kept for a file, as the insights surfaces show it (RUNTIME-EVIDENCE.md): every user's runs in
- * every environment (`.silo/evidence/<user>/<environment>/<file>.jsonl`) folded together, and this machine's samples
- * of the values themselves (`.silo/local/samples/<file>.jsonl`). Read where the layout puts them, rather than searched
+ * The runtime evidence kept for a file, as the insights surfaces show it (RUNTIME-EVIDENCE.md): this machine's runs,
+ * every count (`.silo/local/evidence/<user>/<environment>/<file>.jsonl`), and every other user's and environment's as
+ * committed (`.silo/evidence/…`, what was seen: util's `stableOf`), folded together — `coarse` where any of it is a
+ * committed line, which says what ran and how, and on how many runs at least, not how often — and this machine's
+ * samples of the values themselves (`.silo/local/samples/<file>.jsonl`). Read where the layout puts them, rather than searched
  * for, and again when they change.
  *
  * Evidence is an observed span annotation (packages/editor/RUNTIME-EVIDENCE.md, *Durable annotations on spans*): each span is found in the document as it is now by the
@@ -11,15 +13,19 @@
 import type { Observation } from "@brianjenkins94/util/silo/evidence";
 import type * as vscodeApi from "vscode";
 import { observedRef } from "@brianjenkins94/util/silo/annotations";
-import { parseEvidence, parseSamples } from "@brianjenkins94/util/silo/evidence";
+import type { StableObservation } from "@brianjenkins94/util/silo/evidence";
+import { parseEvidence, parseSamples, parseStable } from "@brianjenkins94/util/silo/evidence";
 import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { annotations } from "./annotations.ts";
 
 /** What every run observed at one span, folded: strict counts summed, faded runs summed, the latest report's time. */
 export interface SpanEvidence {
-	"reached"?: { "ever": number; "runs": number; "lastAt": string };
-	"value"?: { "seen": number; "nullish": number; "tags": Record<string, number>; "ever": number; "runs": number; "lastAt": string };
-	"branch"?: { "arms": number[]; "ever": number; "runs": number; "lastAt": string };
+	"reached"?: { "ever": number; "runs": number; "lastAt": string; "coarse"?: true };
+	/** `coarse`: some of it is a committed line, so `seen`, `nullish` and each tag's count are each run floor's (how
+	 *  many runs at least), not how many values. */
+	"value"?: { "seen": number; "nullish": number; "tags": Record<string, number>; "ever": number; "runs": number; "lastAt": string; "coarse"?: true };
+	/** `coarse`: some of it is a committed line, so an arm's count says it was taken, not how often. */
+	"branch"?: { "arms": number[]; "ever": number; "runs": number; "lastAt": string; "coarse"?: true };
 	/** Where a function's time went in the runs that profiled it (a preview's CPU profile): its own (`selfMs`), with what
 	 *  it called (`totalMs`), how long those profiles sampled (`profiledMs`), each faded, so its share is `selfMs /
 	 *  profiledMs`; and who called it and what it called, by name, each by its ms. */
@@ -90,6 +96,38 @@ function foldTime(known: SpanEvidence, observation: Extract<Observation, { "kind
 	return { ...known, "time": { "selfMs": (before?.selfMs ?? 0) + observation.w, "totalMs": (before?.totalMs ?? 0) + observation.totalMs, "profiledMs": (before?.profiledMs ?? 0) + observation.profiledMs, "callers": addMs(before?.callers ?? {}, observation.callers), "callees": addMs(before?.callees ?? {}, observation.callees), "runs": (before?.runs ?? 0) + observation.runs, "lastAt": latest(before?.lastAt, observation.lastAt) } };
 }
 
+/** A committed line (what was seen, on `runs` runs at least) added to what's known of its span, as coarse evidence. */
+function foldStable(known: SpanEvidence, stable: StableObservation): SpanEvidence {
+	switch (stable.kind) {
+		case "reached": {
+			const before = known.reached;
+
+			return { ...known, "reached": { "ever": (before?.ever ?? 0) + (stable.ran ? stable.runs : 0), "runs": (before?.runs ?? 0) + stable.runs, "lastAt": before?.lastAt ?? "", "coarse": true } };
+		}
+
+		case "value": {
+			const before = known.value;
+			const tags = { ...before?.tags };
+
+			for (const tag of stable.tags) {
+				tags[tag] = (tags[tag] ?? 0) + stable.runs;
+			}
+
+			return { ...known, "value": { "seen": (before?.seen ?? 0) + stable.runs, "nullish": (before?.nullish ?? 0) + (stable.nullish ? stable.runs : 0), "tags": tags, "ever": (before?.ever ?? 0) + stable.runs, "runs": (before?.runs ?? 0) + stable.runs, "lastAt": before?.lastAt ?? "", "coarse": true } };
+		}
+
+		case "branch": {
+			const before = known.branch;
+			const arms = Array.from({ "length": Math.max(before?.arms.length ?? 0, ...stable.taken.map((arm) => arm + 1)) }, (_, arm) => (before?.arms[arm] ?? 0) + (stable.taken.includes(arm) ? 1 : 0));
+
+			return { ...known, "branch": { "arms": arms, "ever": (before?.ever ?? 0) + stable.runs, "runs": (before?.runs ?? 0) + stable.runs, "lastAt": before?.lastAt ?? "", "coarse": true } };
+		}
+
+		default:
+			return known;
+	}
+}
+
 /** `observation` added to what's known of its span. */
 function fold(known: SpanEvidence, observation: Observation): SpanEvidence {
 	switch (observation.kind) {
@@ -129,11 +167,39 @@ export function evidenceStore(vscode: typeof vscodeApi, subscriptions: { "dispos
 			known = (async () => {
 				const bySpan = new Map<string, SpanEvidence>();
 				const evidence = vscode.Uri.joinPath(root, `${SILO_DIR}/evidence`);
+				const local = vscode.Uri.joinPath(root, `${LOCAL_DIR}/evidence`);
+				/** The partitions this machine has every count of: their committed lines say less of the same runs. */
+				const counted = new Set<string>();
+
+				for (const user of await folders(local)) {
+					for (const environment of await folders(vscode.Uri.joinPath(local, user))) {
+						const observations = parseEvidence(await text(vscode.Uri.joinPath(local, user, environment, `${file}.jsonl`)));
+
+						if (observations.length > 0) {
+							counted.add(`${user}/${environment}`);
+						}
+
+						for (const observation of observations) {
+							bySpan.set(observation.span, fold(bySpan.get(observation.span) ?? {}, observation));
+						}
+					}
+				}
 
 				for (const user of await folders(evidence)) {
 					for (const environment of await folders(vscode.Uri.joinPath(evidence, user))) {
-						for (const observation of parseEvidence(await text(vscode.Uri.joinPath(evidence, user, environment, `${file}.jsonl`)))) {
+						if (counted.has(`${user}/${environment}`)) {
+							continue;
+						}
+
+						const committed = await text(vscode.Uri.joinPath(evidence, user, environment, `${file}.jsonl`));
+
+						// (an earlier silo committed every count: its lines fold as they did)
+						for (const observation of parseEvidence(committed)) {
 							bySpan.set(observation.span, fold(bySpan.get(observation.span) ?? {}, observation));
+						}
+
+						for (const stable of parseStable(committed)) {
+							bySpan.set(stable.span, foldStable(bySpan.get(stable.span) ?? {}, stable));
 						}
 					}
 				}
@@ -199,10 +265,10 @@ export function evidenceStore(vscode: typeof vscodeApi, subscriptions: { "dispos
 		}))).flat();
 	};
 
-	const watchers = [`**/${SILO_DIR}/evidence/**/*.jsonl`, `**/${LOCAL_DIR}/samples/**/*.jsonl`].map((glob) => vscode.workspace.createFileSystemWatcher(glob));
+	const watchers = [`**/${SILO_DIR}/evidence/**/*.jsonl`, `**/${LOCAL_DIR}/evidence/**/*.jsonl`, `**/${LOCAL_DIR}/samples/**/*.jsonl`].map((glob) => vscode.workspace.createFileSystemWatcher(glob));
 	const onChange = (uri: vscodeApi.Uri): void => {
-		// `.silo/evidence/<user>/<environment>/<file>.jsonl` or `.silo/local/samples/<file>.jsonl` → <file>
-		const file = /\/\.silo\/(?:evidence\/[^/]+\/[^/]+|local\/samples)\/(.+)\.jsonl$/u.exec(uri.path)?.[1];
+		// `.silo/[local/]evidence/<user>/<environment>/<file>.jsonl` or `.silo/local/samples/<file>.jsonl` → <file>
+		const file = /\/\.silo\/(?:(?:local\/)?evidence\/[^/]+\/[^/]+|local\/samples)\/(.+)\.jsonl$/u.exec(uri.path)?.[1];
 
 		if (file !== undefined) {
 			byFile.delete(file);
@@ -227,13 +293,14 @@ export function evidenceStore(vscode: typeof vscodeApi, subscriptions: { "dispos
 		},
 		"placedIn": async (file, text) => await placeIn(file, text) ?? [],
 		"files": async () => {
-			const evidence = vscode.Uri.joinPath(root, `${SILO_DIR}/evidence`);
 			const found = new Set<string>();
 
-			for (const user of await folders(evidence)) {
-				for (const environment of await folders(vscode.Uri.joinPath(evidence, user))) {
-					for (const file of await evidenceFiles(vscode.Uri.joinPath(evidence, user, environment))) {
-						found.add(file);
+			for (const evidence of [vscode.Uri.joinPath(root, `${SILO_DIR}/evidence`), vscode.Uri.joinPath(root, `${LOCAL_DIR}/evidence`)]) {
+				for (const user of await folders(evidence)) {
+					for (const environment of await folders(vscode.Uri.joinPath(evidence, user))) {
+						for (const file of await evidenceFiles(vscode.Uri.joinPath(evidence, user, environment))) {
+							found.add(file);
+						}
 					}
 				}
 			}
