@@ -122,3 +122,34 @@ test("a commit runs its step first (the touched tests, test-runs.ts's), says wha
 	assert.equal((await commands.get("editor.git.commit")("d")).tests, "The tests a commit runs first didn't run: no debugger");
 	assert.deepEqual((await service.status()).files.filter(({ path }) => path === "d.txt"), []);
 });
+
+test("under .silo/, a change isn't picked for a commit until the repository has committed a .silo/, unless a person picks it", async () => {
+	await fs.promises.rm(DIR, { "recursive": true, "force": true });
+	await fs.promises.mkdir(`${DIR}/.silo/evidence`, { "recursive": true });
+	await engine.ensureRepo();
+	await fs.promises.writeFile(`${DIR}/a.txt`, "a\n");
+	await fs.promises.writeFile(`${DIR}/.silo/evidence/run.jsonl`, "{}\n");
+
+	const hub = createHub({ "id": "workbench" });
+
+	serve(hub, "git.identity", async () => ({ "name": "test", "email": "test@localhost" }));
+
+	const service = installGitService(vscode, hub, counting().log);
+	const offered = async () => Object.fromEntries((await service.status({ "whole": true })).files.map(({ path, offered }) => [path, offered ?? true]));
+
+	assert.equal((await offered())[".silo/evidence/run.jsonl"], false);
+	assert.equal((await offered())["a.txt"], true);
+
+	await commands.get("editor.git.commit")("everything offered");
+	assert.deepEqual(Object.keys(await offered()), [".silo/evidence/run.jsonl"], "a commit of everything leaves it, and only it");
+
+	await serviceCommit(hub, "the person picks it", [".silo/evidence/run.jsonl"]);
+	await fs.promises.writeFile(`${DIR}/.silo/evidence/run.jsonl`, "{}\n{}\n");
+	assert.equal((await offered())[".silo/evidence/run.jsonl"], true, "once the repository has .silo/, its changes are a commit's like any other");
+});
+
+async function serviceCommit(hub, message, paths) {
+	const { createRpcClient } = await import("@brianjenkins94/hub");
+
+	return createRpcClient(hub).request("git.commit", { "message": message, "files": paths.map((path) => ({ "path": path })) });
+}

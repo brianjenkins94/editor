@@ -70,6 +70,14 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 
 		const head = await engine.headCommit();
 
+		if (!await engine.siloCommitted()) {
+			for (const entry of byPath.values()) {
+				if (entry.path.startsWith(".silo/")) {
+					entry.offered = false;
+				}
+			}
+		}
+
 		span.end({ "count": byPath.size });
 
 		return { "files": [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path)), ...head === undefined ? {} : { "head": head } };
@@ -158,7 +166,9 @@ export function installGitService(vscode: typeof vscodeApi, hub: Hub, log: Logge
 		const tests = await tested();
 
 		if (request?.files === undefined) {
-			made = await engine.commitAll(message);
+			const unoffered = new Set((await status({ "whole": true })).files.filter((change) => change.offered === false).map((change) => change.path));
+
+			made = await engine.commitAll(message, (path) => unoffered.has(path));
 		} else {
 			const changes = new Map((await status({ "whole": true })).files.map((change) => [change.path, change]));
 			const picked = await Promise.all(request.files.map(async (pick) => toCommit(pick, changes)));

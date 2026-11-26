@@ -41,8 +41,8 @@ export async function commitAndPush(rpc: Pick<ShellContext["rpc"], "request">, m
 		}
 
 		const caught = pulled.outcome === "fast-forwarded" || pulled.outcome === "merged" ? `${pulled.outcome === "merged" ? "Merged" : "Caught up with"} GitHub (${String(pulled.files?.length ?? 0)} files). ` : "";
-		const { files } = await rpc.request("git.status", undefined, { "timeoutMs": 120_000 }) as { "files": { "path": string }[] };
-		const changed = files.filter(({ path }) => path !== ".silo/.gitignore" && path !== ".silo/.gitattributes");
+		const { files } = await rpc.request("git.status", undefined, { "timeoutMs": 120_000 }) as { "files": { "path": string; "offered"?: false }[] };
+		const changed = files.filter(({ path, offered }) => offered !== false && path !== ".silo/.gitignore" && path !== ".silo/.gitattributes");
 
 		if (changed.length > 0 && made === undefined) {
 			made = await commit();

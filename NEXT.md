@@ -41,11 +41,9 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      and `.silo/evidence/ci/architecture.json`, and after a reload 110: every file the old workspace had in a folder the
      clone has too. A replace deletes each folder and writes the clone's into it within one save to IndexedDB, and that
      save wrote a folder that's there without taking out what was saved under it before; fixed (reload.spec). The `.silo`
-     ones stay for another reason: a replace keeps `.silo` whole, as it has since the first (ea3a82c4, 2026-09-28), when
-     it held the editor's own stores; those are `.silo/local` now, which a replace deletes. Whether it should keep the
-     rest of `.silo` is to decide: the editor is meant to be how a repository takes up silo (the user, 2026-11-26), so
-     what it wrote there for a repository is worth keeping for that repository, and a fast-forward does; loading a
-     different one carries it over.
+     ones stay because a replace keeps `.silo` whole, and it should (the user, 2026-11-26): `.silo` is always there, the
+     editor being how a repository takes up silo, but a change under it isn't picked for a commit unless the repository
+     already has a `.silo` committed (Changes leaves it unchecked, *Commit and push* leaves it out; a person can pick it).
    - Changes' *Commit* commits without pushing, and doesn't say so; the toolbar's *Commit and push* commits everything
      changed, so pushing a commit of some of the changes took the terminal's `git push`.
    **Done when** two weeks' work is done there, its gaps listed here.

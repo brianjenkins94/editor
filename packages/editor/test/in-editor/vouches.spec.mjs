@@ -42,8 +42,9 @@ test("a touched test that hasn't run since its code changed runs before the comm
 	// The commit carries the pass, held to the files it ran; none waits for the next.
 	const { input, output } = await openTerminal(workbench);
 
-	await input.pressSequentially("git status\n");
-	await expect(output).toContainText("nothing to commit", { "timeout": 30_000 });
+	// (what's under .silo/ besides the vouch stays out: the repository had no .silo/ committed)
+	await input.pressSequentially("echo \"outside .silo: $(git status --short | grep -c -v '[.]silo/')\"\n");
+	await expect(output).toContainText("outside .silo: 0", { "timeout": 30_000 });
 	await input.pressSequentially("grep -o '\"test\":\"add.test.mjs › [a-z]*\",\"outcome\":\"[a-z]*\"' .silo/vouches/*.jsonl\n");
 	await expect(output).toContainText("\"test\":\"add.test.mjs › adds\",\"outcome\":\"pass\"", { "timeout": 30_000 });
 	await input.pressSequentially("grep -o '\"math.mj[s]\"' .silo/vouches/*.jsonl\n");

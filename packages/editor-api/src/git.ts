@@ -62,4 +62,6 @@ export interface GitFileChange {
 	"status": "A" | "M" | "D";
 	"staged": boolean;
 	"unstaged": boolean;
+	/** false: under `.silo/` in a repository that has none committed, so it isn't picked for a commit unless a person picks it. */
+	"offered"?: false;
 }

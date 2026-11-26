@@ -168,8 +168,20 @@ export async function status(changed?: readonly string[]): Promise<GitStatus> {
 	return { "staged": staged, "unstaged": unstaged };
 }
 
-export async function stageAll(): Promise<void> {
-	const { unstaged } = await status();
+export async function siloCommitted(): Promise<boolean> {
+	const head = await headCommit();
+
+	if (head === undefined) {
+		return false;
+	}
+
+	const { tree } = await readTree({ "fs": fs, "dir": DIR, "oid": head });
+
+	return tree.some((entry) => entry.path === SILO_DIR && entry.type === "tree");
+}
+
+export async function stageAll(leaveOut: (path: string) => boolean = () => false): Promise<void> {
+	const unstaged = (await status()).unstaged.filter(({ path }) => !leaveOut(path));
 	const withSilo = unstaged.some(({ path }) => path.startsWith(`${SILO_DIR}/`) && !SEEDS.includes(path));
 
 	for (const change of unstaged.filter(({ path }) => withSilo || !SEEDS.includes(path))) {
@@ -584,8 +596,8 @@ export async function abortMerge(): Promise<void> {
 	await fs.promises.unlink(MERGE_HEAD).catch(() => undefined);
 }
 
-export async function commitAll(message: string): Promise<Committed> {
-	await stageAll();
+export async function commitAll(message: string, leaveOut?: (path: string) => boolean): Promise<Committed> {
+	await stageAll(leaveOut);
 
 	if ((await status()).staged.length === 0) {
 		throw new Error("nothing to commit");

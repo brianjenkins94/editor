@@ -239,6 +239,7 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 	const [, force] = useReducer((x: number) => x + 1, 0);
 
 	const deselected = useRef(new Set<string>()).current;
+	const unofferedSeen = useRef(new Set<string>()).current;
 	const lineDeselect = useRef(new Map<string, Set<number>>()).current;
 	const changedCount = useRef(new Map<string, number>()).current;
 	const codehikeActive = useRef(false);
@@ -348,6 +349,19 @@ function GitPanel({ overlay, hub, headerEnd }: { "overlay": DiffOverlay; "hub": 
 		for (const path of [...deselected]) {
 			if (!stillChanged(path)) {
 				deselected.delete(path);
+			}
+		}
+
+		for (const path of [...unofferedSeen]) {
+			if (!stillChanged(path)) {
+				unofferedSeen.delete(path);
+			}
+		}
+
+		for (const file of next) {
+			if (file.offered === false && !unofferedSeen.has(file.path)) {
+				unofferedSeen.add(file.path);
+				deselected.add(file.path);
 			}
 		}
 
