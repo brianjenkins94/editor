@@ -11,6 +11,8 @@ const REPORTS = 10;
 
 const SAME = 60_000;
 
+const NOT_FAILURES = /^ResizeObserver loop/u;
+
 export interface Reporting {
 	"event": (event: Event) => void;
 }
@@ -41,7 +43,7 @@ export function startReporting(hub: Hub, onReported: (id: string) => void): Repo
 		const key = `${error.message}\n${(error.stack ?? "").split("\n")[1] ?? ""}`;
 		const now = Date.now();
 
-		if (quiet || leaving || reports >= REPORTS || now - (recent.get(key) ?? 0) < SAME) {
+		if (quiet || leaving || NOT_FAILURES.test(error.message) || reports >= REPORTS || now - (recent.get(key) ?? 0) < SAME) {
 			return;
 		}
 

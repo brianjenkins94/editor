@@ -48,8 +48,13 @@ export const newErrorId = (): string => `E-${shown(newCode())}`;
 /** The top of a stack, by function name only (line and column change with every bundle). */
 const frames = (stack: string | undefined): string[] => (stack ?? "").split("\n").slice(1).map((line) => /^\s*at (?:async )?([^\s(]+)/u.exec(line)?.[1]).filter((name): name is string => name !== undefined).slice(0, 5);
 
-/** What groups occurrences: the source, the name, the top frames (or, without any, the route). */
-export const fingerprintOf = async (source: string, name: string, stack: string | undefined, route: string): Promise<string> => shortHash(`${source}|${name}|${frames(stack).join("|") || route}`, 16);
+/** What groups occurrences: the source, the name, the top frames; without any, the route and the message (its numbers
+ *  aside), so two errors with no stack from one place aren't one group. */
+export const fingerprintOf = async (source: string, name: string, stack: string | undefined, route: string, message = ""): Promise<string> => {
+	const top = frames(stack);
+
+	return shortHash(`${source}|${name}|${top.length > 0 ? top.join("|") : `${route}|${message.replaceAll(/\d+/gu, "#").slice(0, 120)}`}`, 16);
+};
 
 export interface Occurrence {
 	"source": "api" | "editor";
@@ -71,7 +76,7 @@ export interface Occurrence {
 export async function recordError(env: Bindings, occurrence: Occurrence): Promise<string> {
 	const id = newErrorId();
 	const now = Date.now();
-	const fingerprint = await fingerprintOf(occurrence.source, occurrence.name, occurrence.stack, occurrence.route);
+	const fingerprint = await fingerprintOf(occurrence.source, occurrence.name, occurrence.stack, occurrence.route, scrub(occurrence.message, 500));
 	const message = scrub(occurrence.message, 500);
 	const [group] = await env.DB.batch([
 		env.DB.prepare(`INSERT INTO errors (fingerprint, source, name, message, route, first_seen, last_seen, count, releases) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)

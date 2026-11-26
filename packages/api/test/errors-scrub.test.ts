@@ -19,4 +19,8 @@ test("scrubbing keeps secrets and addresses out; a fingerprint ignores line numb
 
 	assert.equal(await fingerprintOf("api", "TypeError", stack(100), "GET /account"), await fingerprintOf("api", "TypeError", stack(900), "GET /account"));
 	assert.notEqual(await fingerprintOf("api", "TypeError", stack(100), "GET /account"), await fingerprintOf("api", "TypeError", "TypeError: x\n    at otherEndpoint (worker.js:1:1)", "GET /account"));
+	// With no stack, the message tells two errors from one place apart (2026-11-26: a ResizeObserver notice was grouped
+	// with "Missing method $init", both stackless from the workbench); its numbers don't.
+	assert.notEqual(await fingerprintOf("editor", "Error", undefined, "editor workbench", "ResizeObserver loop completed with undelivered notifications."), await fingerprintOf("editor", "Error", undefined, "editor workbench", "Missing method $init on worker thread channel default"));
+	assert.equal(await fingerprintOf("editor", "Error", undefined, "editor workbench", "took 12 ms"), await fingerprintOf("editor", "Error", undefined, "editor workbench", "took 340 ms"));
 });
