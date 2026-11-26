@@ -66,7 +66,9 @@ What was found that someone should look into (new error groups, the weekly revie
 API, shown on the admin app's Queue page (packages/api/README.md, *The queue*). Asked to address the queue:
 `npm run queue` in packages/api lists what's open; for each, find out what happened and do what it needs (an error
 group: its occurrences and stack, `#/errors/<ref>`; the weekly review: debug-mcp's `agent_usage` and its findings), then
-`npm run queue -- --close <id> --outcome "<what was done, with the commit if any>"`. Something found that needs
+`npm run queue -- --close <id> --outcome "<what was done, with the commit if any>"`. It needs wrangler logged in (or a
+`CLOUDFLARE_API_TOKEN`); without, the Queue page (admin.unusuallygood.dev, `#/queue`) in the user's signed-in browser
+does the same. Something found that needs
 deciding, not doing, goes in NEXT.md's *Decisions* and the item closes saying so.
 
 ## Agent tools
