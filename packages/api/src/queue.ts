@@ -1,6 +1,7 @@
 /**
  * The queue (README.md, *The queue*): what was found that someone should look into, kept until it's closed with what
- * was done about it, so nothing found goes unnoticed. A new error group adds one (src/errors.ts); the daily cron adds
+ * was done about it, so nothing found goes unnoticed. A new error group adds one, and so does a group happening again
+ * after its item was closed (src/errors.ts); the daily cron adds
  * the week's review of agents' tool use (debug-mcp's agent_usage), once a week. The admin app's Queue page shows them and
  * closes one with its outcome (queue:read, queue:close); asked to address the queue, an agent does the same through
  * scripts/queue.ts.
@@ -19,6 +20,12 @@ const KEPT_CLOSED = 365 * 86_400_000;
 export async function addItem(db: D1Database, item: { "kind": QueueKind; "ref"?: string; "title": string; "detail"?: string }, now = Date.now()): Promise<void> {
 	await db.prepare("INSERT INTO queue (at, kind, ref, title, detail) SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM queue WHERE kind = ? AND ref IS ? AND closed_at IS NULL)")
 		.bind(now, item.kind, item.ref ?? null, item.title.slice(0, 200), item.detail?.slice(0, 2000) ?? null, item.kind, item.ref ?? null).run();
+}
+
+/** An error group happening again after its item was closed: queued again, once, until that's closed too. */
+export async function errorAgain(db: D1Database, item: { "ref": string; "title": string; "detail": string }, now = Date.now()): Promise<void> {
+	await db.prepare("INSERT INTO queue (at, kind, ref, title, detail) SELECT ?, 'error', ?, ?, ? WHERE EXISTS (SELECT 1 FROM queue WHERE kind = 'error' AND ref = ? AND closed_at IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM queue WHERE kind = 'error' AND ref = ? AND closed_at IS NULL)")
+		.bind(now, item.ref, item.title.slice(0, 200), item.detail.slice(0, 2000), item.ref, item.ref).run();
 }
 
 /** The daily cron: the week's review of agents' tool use, when none is open and the last came a week ago or more; and

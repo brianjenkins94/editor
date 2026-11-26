@@ -95,6 +95,10 @@ export async function recordError(env: Bindings, occurrence: Occurrence): Promis
 			await tellOwner(env, `New error: ${occurrence.name}`, `${where}\n${message}\n\nFirst occurrence: ${id}. The admin app's Errors page has its stack and, if signed in, its sign-in. (At most one new-error email an hour: look there for others.)`);
 		}
 	} else {
+		const { errorAgain } = await import("./queue.ts");
+
+		await errorAgain(env.DB, { "ref": fingerprint, "title": `Error again: ${occurrence.name.slice(0, 100)}`, "detail": `${where}\n${message}\n\nThis occurrence: ${id}, after its last item was closed (the closed queue says what was done). Its group: the admin app's #/errors/${fingerprint}.` }, now);
+
 		const hour = await env.DB.prepare("SELECT COUNT(*) AS n FROM error_occurrences WHERE fingerprint = ? AND at > ?").bind(fingerprint, now - 3_600_000).first<{ "n": number }>();
 
 		if (hour?.n === SURGE) {

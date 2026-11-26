@@ -115,9 +115,22 @@ test("a new error group is an item, once; the week's review comes from the daily
 	assert.equal((await owner.call("POST", `/admin/queue/${String(item?.id)}/close`, { "outcome": "again" })).status, 404, "closed already");
 	assert.deepEqual((await open()).map(({ kind }) => kind), ["agent-use"]);
 
+	// The same error again, after its item was closed: queued again, once.
+	await env.DB.prepare("ALTER TABLE passkeys RENAME TO passkeys_away").run();
+
+	try {
+		await editor.call("GET", "/account");
+		await editor.call("GET", "/account");
+	} finally {
+		await env.DB.prepare("ALTER TABLE passkeys_away RENAME TO passkeys").run();
+	}
+
+	assert.deepEqual((await open()).filter(({ kind }) => kind === "error").map(({ ref, title }) => [ref, title]), [[fingerprint, "Error again: Error"]]);
+	await owner.call("POST", `/admin/queue/${String((await open()).find(({ kind }) => kind === "error")?.id)}/close`, { "outcome": "Still the test's renamed table." });
+
 	const closed = (await (await viewer.call("GET", "/admin/queue?closed=1")).json() as Items).items;
 
-	assert.equal(closed[0]?.outcome, "The passkeys table was renamed by a test: nothing to fix.");
+	assert.deepEqual(closed.map(({ outcome }) => outcome), ["Still the test's renamed table.", "The passkeys table was renamed by a test: nothing to fix."]);
 
 	// Closed and the week gone by: the next review.
 	await owner.call("POST", `/admin/queue/${String((await open())[0]?.id)}/close`, { "outcome": "Reviewed: no findings." });
