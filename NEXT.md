@@ -35,8 +35,13 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    From the first push from it (2026-11-26, 18aae5a0):
    - It opened on the workspace it had kept from before, an old clone (NEXT.md weeks behind), and nothing said it was
      behind GitHub; the account menu's *Load a repo* brought today's.
-   - After that load, Changes listed two files the repository doesn't have: `.silo/manifest.json` (gone since 2026-11-03)
-     and `.silo/evidence/ci/architecture.json`. Where they came from isn't known yet.
+   - After that load, Changes listed two files the repository doesn't have, `.silo/manifest.json` (gone since 2026-11-03)
+     and `.silo/evidence/ci/architecture.json`, and after a reload 110: every file the old workspace had in a folder the
+     clone has too. A replace deletes each folder and writes the clone's into it within one save to IndexedDB, and that
+     save wrote a folder that's there without taking out what was saved under it before; fixed (reload.spec). The `.silo`
+     ones stay for another reason: a replace keeps `.silo` whole, as it has since the first (ea3a82c4, 2026-09-28), when
+     it held the editor's own stores; those are `.silo/local` now, which a replace deletes. Whether it should keep the
+     rest of `.silo` is to decide.
    - Changes' *Commit* commits without pushing, and doesn't say so; the toolbar's *Commit and push* commits everything
      changed, so pushing a commit of some of the changes took the terminal's `git push`.
    **Done when** two weeks' work is done there, its gaps listed here.

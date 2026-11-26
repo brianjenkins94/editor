@@ -8,7 +8,7 @@
  */
 import { expect, test } from "@playwright/test";
 
-import { codeOf, openEditor, openFile, retype, runCommand } from "./editor.mjs";
+import { codeOf, openEditor, openFile, openTerminal, READABLE_TERMINAL, retype, runCommand } from "./editor.mjs";
 
 test("the open file comes back as it was saved", async ({ page }) => {
 	const workbench = await openEditor(page, { "kept.mjs": "const kept = 1;\n", "other.mjs": "const other = 2;\n" });
@@ -30,4 +30,22 @@ test("the open file comes back as it was saved", async ({ page }) => {
 	} catch (error) {
 		throw new Error(`${error.message.slice(0, 160)}; tree ${JSON.stringify(await workbench.getByRole("treeitem").allTextContents())}, tabs ${JSON.stringify(await workbench.locator(".tab").allTextContents())}, code ${JSON.stringify(await workbench.locator(".view-lines").allTextContents())}`, { "cause": error });
 	}
+});
+
+test("a folder deleted and made again at once keeps only what's in it now", async ({ page }) => {
+	const workbench = await openEditor(page, { ...READABLE_TERMINAL, "kept/a.mjs": "const a = 1;\n", "kept/gone.mjs": "const gone = 1;\n" });
+	let terminal = await openTerminal(workbench);
+
+	await terminal.input.pressSequentially("rm -r kept && mkdir kept && echo 'const a = 2;' > kept/a.mjs && echo do''ne");
+	await terminal.input.press("Enter");
+	await expect(terminal.output).toContainText("done", { "timeout": 15_000 });
+
+	await runCommand(workbench, "Developer: Reload Window");
+	await expect(terminal.output).not.toBeAttached({ "timeout": 60_000 });
+
+	terminal = await openTerminal(workbench);
+	await terminal.input.pressSequentially("ls kept; cat kept/a.mjs");
+	await terminal.input.press("Enter");
+	await expect(terminal.output).toContainText("const a = 2;", { "timeout": 15_000 });
+	expect(await terminal.output.textContent()).not.toContain("gone.mjs");
 });

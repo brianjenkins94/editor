@@ -304,6 +304,15 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 	caller = "seed";
 
 	const seeded = seedFiles(files, readonlyPaths);
+	const seededFolders = new Set([...seeded].flatMap((path) => {
+		const folders: string[] = [];
+
+		for (let at = path.lastIndexOf("/"); at > 0; at = path.lastIndexOf("/", at - 1)) {
+			folders.push(path.slice(0, at));
+		}
+
+		return folders;
+	}));
 
 	caller = undefined;
 	const db = await openPersist();
@@ -426,7 +435,21 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 			const transaction = db.transaction(PERSIST_STORE, "readwrite");
 			const objects = transaction.objectStore(PERSIST_STORE);
 
+			const seededGoneUnder = (folder: string): void => {
+				if (!seededFolders.has(folder)) {
+					return;
+				}
+
+				for (const each of seeded) {
+					if (each.startsWith(folder + "/") && !fs.existsSync(each)) {
+						objects.put(null, each);
+					}
+				}
+			};
+
 			for (const path of batch) {
+				objects.delete(IDBKeyRange.bound(path + "/", path + "/\uFFFF"));
+
 				if (fs.existsSync(path) && !linked(path)) {
 					for (const file of filesUnder(path)) {
 						const contents = fs.readFileSync(file);
@@ -436,15 +459,13 @@ export async function installWorkspaceFs(files: WorkbenchFile[], log: Logger, op
 						written += 1;
 						bytes += encoded.byteLength;
 					}
+				} else if (seeded.has(path)) {
+					objects.put(null, path);
 				} else {
-					objects.delete(IDBKeyRange.bound(path + "/", path + "/\uFFFF"));
-
-					if (seeded.has(path)) {
-						objects.put(null, path);
-					} else {
-						objects.delete(path);
-					}
+					objects.delete(path);
 				}
+
+				seededGoneUnder(path);
 			}
 
 			transaction.commit();
