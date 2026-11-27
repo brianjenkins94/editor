@@ -63,6 +63,23 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    the theme's: a lead, not a finding); then the declarations no test ran, by feature, as something seen in the editor
    before a tool; then each one checked: nothing needs it and it goes, or it needs a test. What a person's runs reach counts
    as use too (item 2). **Done when** that list is empty of surprises: each entry removed, tested, or kept with why.
+   What isn't measured (2026-11-26, the record of 2026-11-24 against the tree: 207 of 589 source files not in it):
+   - **Not counted, though run** (28): a module whose only code is `export default {…}`, as each terminal command's
+     definition is, had no statement coverage counts; it does now (almostnode's instrument.ts). Types-only modules have
+     nothing that runs, so nothing to measure.
+   - **Tests that ran outside the record** (72): the API's (46 files, 33 test files, under Node), the theme's (24), the
+     site's and eslint-plugin-webawesome's.
+   - **No tests at all** (21): admin (17), account, bablr (3).
+   - **Tooling** (about 45): the editor's build/ (9), monaco-vscode-api's build and probes (12), contrib (7), the demo
+     (5), tsval's scripts and bench (5), silo's and debug-mcp's CLIs and hook, configs. Used by being run (CI, dev).
+   - **New since the record** (about 8): insights' changes.ts, debug-mcp's agent audit and tool, tsval's playwright and
+     vite modules, and others since 2026-11-24.
+   - **Leads in the editor's realms** (about 25): almostnode's index, npm-util and four shims (domain, https,
+     perf_hooks, util); capabilities' and history's engines, packages worker and TS server plugins (a realm the record
+     doesn't reach: the TS server's); shell's account dialog and git-clone; shared/socket-gate (coverage leaves it out
+     by name); app/tools/host; editor-api's debugger and index; playwright's and tsval's index.
+   Next: a fresh record (a dispatched coverage run, and the unit tests in an editor), with the statements each ran kept,
+   not only the file; then the declarations no test ran.
 4. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
    (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s `why`,
    the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). CI's specs aren't selected by

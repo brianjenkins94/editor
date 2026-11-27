@@ -164,6 +164,20 @@ test("coverage only: statements, no sites", () => {
 	assert.deepEqual(events, ["statement const a = null ?? 1;", "statement if (a) { out(a); }", "statement out(a);"]);
 });
 
+test("coverage counts `export default` of an expression, which runs as a statement: a module of only that loaded", () => {
+	const sites = (source: string): string[] => {
+		const instrumented = instrument("/workspace/command.ts", "oid", "coverage");
+
+		ts.transpileModule(source, { "compilerOptions": { "module": ts.ModuleKind.ESNext }, "transformers": { "before": [instrumented.before] } });
+
+		return instrumented.sites().map((site) => site.kind);
+	};
+
+	assert.deepEqual(sites("export default { \"name\": \"bun\" };\n"), ["statement"]);
+	assert.deepEqual(sites("const definition = {};\nexport default definition;\n"), ["statement"], "a name exported: what made it is counted, not the export");
+	assert.deepEqual(sites("export interface Definition { \"name\": string }\n"), [], "types: nothing runs");
+});
+
 /** Compile `source` with recorded stops on `lines` (1-based), run it, and return each stop's hits: its range, where it
  *  is, what its scope read and `this`. */
 function stopsOf(source: string, lines: number[]): { "printed": unknown[]; "hits": { "at": number[]; "where": string; "scope": Record<string, unknown>; "self": unknown }[] } {

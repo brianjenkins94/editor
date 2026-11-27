@@ -170,8 +170,10 @@ export function instrument(file: string, version: string, level: InstrumentLevel
 			return before === undefined ? call("v", index, visited) : call("c", index, factory.createNumericLiteral(before), visited);
 		};
 
-		/** A statement tsval counts: a real one (not a declaration), not ambient. */
-		const counted = (node: ts.Node): node is ts.Statement => node.kind >= ts.SyntaxKind.FirstStatement && node.kind <= ts.SyntaxKind.LastStatement && !(ts.isVariableStatement(node) && node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DeclareKeyword));
+		/** A statement tsval counts: a real one (not a declaration), not ambient; and `export default <expression>`, which
+		 *  runs as one (a module of only that, a terminal command's definition, would otherwise have nothing counted, and
+		 *  look to coverage as if it never loaded). */
+		const counted = (node: ts.Node): node is ts.Statement => (node.kind >= ts.SyntaxKind.FirstStatement && node.kind <= ts.SyntaxKind.LastStatement && !(ts.isVariableStatement(node) && node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DeclareKeyword))) || (ts.isExportAssignment(node) && !ts.isIdentifier(node.expression));
 
 		/** `statements` with each counted one preceded by its counter (and, on a stop's line, its recorded stop). */
 		const counting = (statements: ts.NodeArray<ts.Statement>): ts.Statement[] => statements.flatMap((statement) => {
