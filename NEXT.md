@@ -78,8 +78,25 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      perf_hooks, util); capabilities' and history's engines, packages worker and TS server plugins (a realm the record
      doesn't reach: the TS server's); shell's account dialog and git-clone; shared/socket-gate (coverage leaves it out
      by name); app/tools/host; editor-api's debugger and index; playwright's and tsval's index.
-   Next: a fresh record (a dispatched coverage run, and the unit tests in an editor), with the statements each ran kept,
-   not only the file; then the declarations no test ran.
+   Measured by statement (2026-11-27; the user: "time to get more granular"): the record is version 3 (lib 47d3a86),
+   each file's statements by start line with the tests that ran each, 1.9 MB — coverage run 45932711447's 101 browser
+   tests (at b5f962cb) and 1,832 unit tests run in a throwaway editor (at 2da2da72; 159 of 189 files: 23 of the API's
+   need workerd, 5 hit unenv's missing net and crypto, node-test.test crashed the tab, log.test asks exec). Of 557 code
+   files with statements, 143 have none run, and 417 declarations go unrun in files that partly ran. By cluster:
+   - **Can't run in the editor yet**: the API (45 files, workerd), the site and playwright's engine tests (unenv).
+   - **No tests**: admin (17 files), account, bablr, eslint-plugin-webawesome's rules (its test didn't run), the theme's
+     scripts.
+   - **Tooling**: monaco-vscode-api's build and probes, contrib, the editor's build/, demo, bench, configs.
+   - **Realms no test reaches**: the TS server's plugins (capabilities and history ts-plugin.js, the engines and
+     packages worker), tsval's node-test.js, playwright and vite modules (they run inside a run), socket-gate.
+   - **Needs GitHub or an account**: shell's session.ts, sign-in.tsx, github.ts, repo-load's loadRepo and fast-forward,
+     git-engine's push, pull and fetch, git-clone.ts, reset.ts.
+   - **Plain gaps** (a test away): bridge's capability decisions (decide.ts, 10), tsval's canary and package-calls,
+     debugger session hooks (setBreakpoints, setPace, stepOut), install.ts's linking, ata's resolveImport, the margin's
+     withPlace, editor-metrics' worker names; almostnode's shims (148 declarations), bablr-language-ts (41), silo (24).
+   (Lines in test-runs.ts and preview-windows.tsx shifted between the two commits: those two read wrong.)
+   Next (the user, 2026-11-26: "dispatch, then backfill tests, measure again, reassess"): tests for the plain gaps and
+   the realms, then measure again.
 4. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
    (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s `why`,
    the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). CI's specs aren't selected by
