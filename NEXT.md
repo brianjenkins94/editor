@@ -105,8 +105,28 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    vite.js) run as a run's guest code, which coverage's instrumenting doesn't count; silo's test command runs in the CLI
    processes its tests spawn, which no coverage counts; bablr-language-ts's grammar.ts reads as partly run with its
    top-level constants not, so its lines don't match what ran. For the reassess: the shims nothing reaches (esbuild's
-   build, chokidar, readdirp, rollup, http2, tls). Measuring again: coverage run 46010188876 and the unit tests at
-   2e50df9d.
+   build, chokidar, readdirp, rollup, http2, tls). Measured again (2026-11-27, at 2e50df9d: coverage run 46010188876's
+   102 browser tests and 1,834 unit tests in a throwaway editor): statements run 24,068 → 24,872 of 39,700; files with
+   none run 143 → 137, declarations unrun in files partly run 417 → 361; nothing newly unrun. Reassessed, the rest:
+   - **Removed**: zenfs-vfs's getSharedWorkspaceBuffer and mountWorkspaceVfs (nothing calls them since the node worker
+     went, 517144b7).
+   - **Kept, as measurement**: tooling used by being run (the editor's build/, contrib, the demo, bench, monaco's build
+     and probes, tsval's scripts, configs); silo's CLI in the processes its tests spawn; tsval's in-run modules; the
+     API (workerd, not the browser); bablr-language-ts's grammar.ts (its lines don't match what ran).
+   - **A test away** (callers, no test): the eslint extension's globOf and projectFolderOf, ci-status's icons, the
+     Features view's slower badge, the terminal's tab completion (longestCommonPrefix), test-notice's digestOf, the
+     Changes panel's plain rows and collapse, codehike's fold slot, the playground's instance, the reset popover's loss,
+     the explorer's orderings' ordinals and a crash's place, a debugger stop's odd values (asString) and breakpoint
+     hook, a replayed capability's word, nothing to run's message, failureText, the app tools' sessionOf/previews/runs.
+   - **Needs GitHub or an account**: session.ts, sign-in.tsx, github.ts, repo-load's load and fast-forward,
+     git-engine's push, pull and fetch, git-clone.ts, reset.ts. Open: a test double for GitHub and the account API, or
+     these stay what CI can't reach.
+   - **No tests**: admin (17 files), account. Open: tests, or a decision they stay manual.
+   - **almostnode's shims nothing reaches** (130 declarations: esbuild's build, chokidar, readdirp, rollup, http2, tls,
+     brotli, dns). Open: kept for the programs that may call them, or out until one does.
+   - Found measuring: under coverage, a run right after "Put the rule back here" can still go without the rule
+     (mock-value.spec, CI's instrumented run; 3 of 3 uninstrumented here) — the policy's cache keys a file by its mtime
+     and size, which a moved place may leave the same, or the run's own placing is slow.
 4. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
    (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s `why`,
    the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). CI's specs aren't selected by

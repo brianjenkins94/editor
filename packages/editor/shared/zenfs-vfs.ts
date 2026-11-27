@@ -37,7 +37,6 @@ const WORKSPACE_MOUNT = "/workspace";
 let configured = false;
 let mounted = false;
 let pendingBuffer: SharedArrayBuffer | undefined;
-let sharedWorkspaceBuffer: SharedArrayBuffer | undefined;
 let connection: WorkspaceConnection = {};
 
 export interface WorkspaceConnection {
@@ -69,26 +68,11 @@ export function attachSharedWorkspace(buffer: unknown): void {
 		return;
 	}
 
-	sharedWorkspaceBuffer = buffer;
-
 	if (configured) {
 		void mountSharedWorkspace(buffer);
 	} else {
 		pendingBuffer = buffer;
 	}
-}
-
-export function getSharedWorkspaceBuffer(): SharedArrayBuffer | undefined {
-	return sharedWorkspaceBuffer;
-}
-
-export async function mountWorkspaceVfs(buffer: SharedArrayBuffer): Promise<VirtualFS> {
-	await configure({ "mounts": { "/": InMemory } });
-	configured = true;
-	sharedWorkspaceBuffer = buffer;
-	await mountSharedWorkspace(buffer);
-
-	return adapter;
 }
 
 async function mountSharedWorkspace(buffer: SharedArrayBuffer): Promise<void> {
