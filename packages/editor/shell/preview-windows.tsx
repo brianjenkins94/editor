@@ -5,7 +5,7 @@ import type { Hub } from "@brianjenkins94/hub";
 import type { ShellFeature } from "./feature";
 import type { DevtoolsPanel } from "./preview-devtools";
 import { appWindow } from "@brianjenkins94/app-window";
-import { createRpcClient, serve } from "@brianjenkins94/hub";
+import { serve } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Gauge, Pause, Play, Redo2, RotateCcw } from "lucide";
 import { render } from "preact";
@@ -15,35 +15,11 @@ import { createStore, useStore } from "./feature";
 import { Icon } from "./icon";
 import { askInWindow, type PreviewAsk } from "./preview-ask";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
+import { askRealms, driving, inFull, keepEvidence } from "./own-evidence";
 import { createPreviewProfiler, installPreviewProfiler, PROFILE_MS } from "./preview-profile";
 import "theme/components/button";
 
 const log = logger({ "source": "shell" });
-
-const COVERAGE_CHANNEL = "editor.coverage";
-
-const ASK_MS = 1000;
-
-interface RealmAnswer { "realm": string; "ran"?: Record<string, [number, number][]>; "modules"?: ModuleEvidence[] }
-
-async function askRealms(ask: Record<string, unknown>): Promise<RealmAnswer[]> {
-	const channel = new BroadcastChannel(COVERAGE_CHANNEL);
-	const nonce = crypto.randomUUID();
-	const answers: RealmAnswer[] = [];
-
-	channel.addEventListener("message", ({ data }: MessageEvent<RealmAnswer & { "answer"?: string }>) => {
-		if (data.answer === nonce) {
-			answers.push(data);
-		}
-	});
-	channel.postMessage({ ...ask, "nonce": nonce });
-	await new Promise((resolve) => {
-		setTimeout(resolve, ASK_MS);
-	});
-	channel.close();
-
-	return answers;
-}
 
 function distinct(lines: [number, number][]): [number, number][] {
 	const seen = new Map(lines.map(([from, to]) => [`${String(from)}-${String(to)}`, [from, to] as [number, number]]));
@@ -352,24 +328,9 @@ function install(hub: Hub): void {
 	const openedForPage = new Set<HTMLElement>();
 
 	const counting = "__evidence" in globalThis;
-	const inFull = (globalThis as { "__evidence"?: { "full"?: true } }).__evidence?.full === true;
 	const realmsBefore = new Map<string, Set<string>>();
 	const ranSoFar = new Map<string, Map<string, [number, number][]>>();
 	const drivenSoFar = new Map<string, Map<string, ModuleEvidence[]>>();
-	const rpc = createRpcClient(hub);
-	const keepDriven = async (modules: ModuleEvidence[]): Promise<void> => {
-		const [first, ...rest] = modules;
-
-		if (first === undefined) {
-			return;
-		}
-
-		const { id } = await rpc.request("runs.begin", { "title": "The editor, driven by a test", "cwd": "/workspace", "runtime": "browser" }, { "timeoutMs": 10_000 }) as { "id": string };
-		const coverage = ({ file, version, statements, sites }: ModuleEvidence): Record<string, unknown> => ({ "file": file, "version": version, "source": "", "statements": statements, "sites": sites });
-
-		hub.publish("evidence.observed", { "runId": id, ...coverage(first), "files": rest.map(coverage) });
-		hub.publish(`node.exit.${id}`, { "exitCode": 0 });
-	};
 	const collect = async (page: string): Promise<void> => log.span("editor.shell.preview-windows.reach", {}, async (span) => {
 		const before = realmsBefore.get(page);
 
@@ -389,7 +350,7 @@ function install(hub: Hub): void {
 
 		ranSoFar.set(page, ran);
 
-		if (inFull && realms.length > 0) {
+		if (inFull() && realms.length > 0) {
 			const driven = drivenSoFar.get(page) ?? new Map<string, ModuleEvidence[]>();
 
 			for (const { realm, modules } of await askRealms({ "ask": "full", "realms": realms })) {
@@ -443,15 +404,17 @@ function install(hub: Hub): void {
 			await collect(asking);
 
 			const reach = ranSoFar.get(asking);
-			const driven = [...drivenSoFar.get(asking)?.values() ?? []].flat();
+			const driven = [...drivenSoFar.get(asking) ?? []].map(([realm, modules]) => ({ "realm": realm, "modules": modules }));
 			const element = claimed.get(asking);
 
 			realmsBefore.delete(asking);
 			ranSoFar.delete(asking);
 			drivenSoFar.delete(asking);
 
+			driving.delete(asking);
+
 			if (driven.length > 0) {
-				await keepDriven(driven).catch((error: unknown) => {
+				await keepEvidence(hub, "The editor, driven by a test", driven).catch((error: unknown) => {
 					log.warn("the driven editor's evidence wasn't kept", { "error": error instanceof Error ? error.message : String(error) });
 				});
 			}
@@ -482,6 +445,7 @@ function install(hub: Hub): void {
 			if (realmsBefore.has(asking)) {
 				await collect(asking);
 			} else {
+				driving.add(asking);
 				realmsBefore.set(asking, new Set((await askRealms({ "ask": "realms" })).map(({ realm }) => realm)));
 			}
 		}

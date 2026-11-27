@@ -15,6 +15,7 @@ import { commit } from "./commit";
 import { renderGitPanel } from "./git-panel";
 import { github } from "./github-control";
 import { Icon } from "./icon";
+import { ownEvidence } from "./own-evidence";
 import { previewWindows } from "./preview-windows";
 import { push } from "./push";
 import { repoLoad } from "./repo-load";
@@ -44,6 +45,7 @@ const FEATURES: ShellFeature[] = [
 	reset,
 	github,
 	previewWindows,
+	ownEvidence,
 	errorReports
 ];
 

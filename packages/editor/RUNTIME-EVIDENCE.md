@@ -255,9 +255,14 @@ releases the editor it drove, the preview windows ask that editor's realms for t
 its own ("The editor, driven by a test"); the workbench takes each module's source from the workspace only where its
 blob matches what ran, so evidence never lands on a different version of a file. The hover, the Margin and what could
 go then read it on the editor's own source: the hub's `envelope.from ?? data.replyTo`, "32 values in 1 run, never
-nullish", sampled as "workbench", "shell", "bridge", "debug-worker#…". Keeping it is BABLR's per file, about a third of
-a minute for a dozen files, so a driven editor's few hundred take a while after the spec ends. Not yet: a person's own
-use of an editor inside the editor, which no spec releases.
+nullish", sampled as "workbench", "shell", "bridge", "debug-worker#…". And the editor a person is using (the user,
+2026-11-27: "Yes, build that"; shell/own-evidence.ts): served with `COVERAGE=full`, every ten minutes and whenever its
+page is hidden, it keeps what its realms did since the last keep as a run, "This editor, as used" — only statements
+that ran and sites that saw something since, so a stretch it sat idle isn't a run in which its code didn't run (it would
+earn `neverRan` claims for nothing), and what a test drove, taken as that test's, isn't counted again; it waits while a
+test drives an editor. With its own repository open, its source fills with what using it did. Keeping is BABLR's per
+file: about a dozen files a half minute the first time a version is parsed (510 files on a first keep, some 20
+minutes), cached after.
 
 ## Fourth slice: what could go, in purple, across inputs
 

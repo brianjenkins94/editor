@@ -151,6 +151,11 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
 How each architecture test has gone in CI lately, failing and flaky first: `node test/outcomes.mjs` in
 packages/editor (`--all`, `--runs N`, `--json`).
 
+- **A TextMate tokenizer error under COVERAGE=full** (2026-11-27, once): reloading an editor served with
+  `COVERAGE=full` with packages/hub/src/index.ts (1,700 lines) open, the workbench's tokenizer threw "Cannot set
+  null/undefined state" (reported as E-NEUF-J89K); plain, a reload with another file open didn't. Whether it's the
+  instrumented realms' load or a race of VS Code's own is open.
+
 - **vouches.spec's commit found a run's evidence files after it** ("nothing to commit" expected, `.silo/evidence/…` and
   `.silo/runs/…` untracked: 2026-11-24, one of three full runs here; alone, 2 of 2).
 - **evidence-kept's preview test missed its app's page once** (test/agent-tools/evidence-kept.mjs, "timed out waiting

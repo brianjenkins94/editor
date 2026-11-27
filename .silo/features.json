@@ -887,7 +887,7 @@
     "status": "active",
     "why": "reintroduced after the debugger's runs' evidence: a preview's run kept in git as a debugger's is, so the hover and the purple read what an app did too. The objective is rough feature parity with full-editor",
     "since": "2026-11-08",
-    "what": "A preview's dev server instruments the workspace's modules as it serves them and puts a small runtime first in each page, which counts what ran and went through each site across hot updates and reports it to the editor; when the server's run ends, its pages report once more and the run is kept in git like a debugger's. `silo.evidence.previews` says how much is instrumented (everything, statements only, or nothing).",
+    "what": "A preview's dev server instruments the workspace's modules as it serves them and puts a small runtime first in each page, which counts what ran and went through each site across hot updates and reports it to the editor; when the server's run ends, its pages report once more and the run is kept in git like a debugger's. `silo.evidence.previews` says how much is instrumented (everything, statements only, or nothing). The editor is such an app too: served with COVERAGE=full, what an editor a test drives does is kept as that run's, and what this editor does as it's used is kept every ten minutes and when it's hidden — only what changed since — on its own source.",
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Third slice: previews, under HMR*",
     "ways": [
       "core module|installPageEvidence",
@@ -899,10 +899,12 @@
     ],
     "paths": [
       "packages/editor/previews/",
+      "packages/editor/shell/own-evidence.ts",
       "packages/editor/workbench/evidence.ts"
     ],
     "tests": [
-      "packages/editor/test/agent-tools/preview-evidence.mjs"
+      "packages/editor/test/agent-tools/preview-evidence.mjs",
+      "packages/editor/test/own-evidence.test.mjs"
     ]
   },
   "Experiments that undo themselves": {
