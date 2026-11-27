@@ -12,7 +12,7 @@ import { buildPackage } from "@brianjenkins94/util/vite/build";
 import { polyfillNode } from "@brianjenkins94/util/vite/plugins/polyfillNode";
 import { build, createLogger } from "vite";
 import { commandTap, TAPPED_VSCODE } from "./build/command-tap";
-import { coveragePlugin } from "./build/coverage";
+import { coverage } from "./build/coverage";
 import { eslintToolchain } from "./build/eslint-toolchain";
 import { buildCapabilities, CAPABILITIES_FILES } from "./build/capabilities";
 import { buildHistory, HISTORY_FILES } from "./build/history";
@@ -27,7 +27,6 @@ const resolvePath = (relative: string): string => url.fileURLToPath(new URL(rela
 
 const sourcemap: boolean | "hidden" = !isCI || (process.env["SOURCE_MAPS"] === "hidden" ? "hidden" : false);
 
-const coverage = (): Plugin[] => (process.env["COVERAGE"] === "1" ? [coveragePlugin()] : []);
 
 const SHARED_PACKAGES = ["@brianjenkins94/util", "@brianjenkins94/hub", "@brianjenkins94/observability", "@brianjenkins94/almostnode", "@awesome.me/webawesome"];
 

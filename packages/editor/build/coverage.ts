@@ -1,6 +1,7 @@
 import type { Plugin } from "vite";
 import * as path from "node:path";
 import * as url from "node:url";
+import * as fs from "@brianjenkins94/util/fs";
 import ts from "typescript";
 import { instrument } from "../../almostnode/frameworks/instrument.ts";
 
@@ -25,24 +26,38 @@ function ours(id: string): string | undefined {
 	return linked === null ? relative : "packages/" + linked[1];
 }
 
+export function instrumented(code: string, id: string): string | undefined {
+	const name = ours(id);
+
+	if (name === undefined) {
+		return undefined;
+	}
+
+	const sites = instrument(name, "cov", "coverage");
+	const output = ts.transpileModule(code, { "fileName": name, "compilerOptions": { "module": ts.ModuleKind.ESNext, "target": ts.ScriptTarget.ESNext, "jsx": ts.JsxEmit.Preserve, "allowJs": true, "verbatimModuleSyntax": false, "useDefineForClassFields": true }, "transformers": { "before": [sites.before] } }).outputText;
+	const table = JSON.stringify(sites.sites().map((site) => [site.kind, ...site.start, ...site.end]));
+	const identity = "(_, x) => x";
+	const prelude = `${RUNTIME}const __ev = { ...globalThis.__evidence.module(${JSON.stringify(name)}, "cov", ${table}), v: ${identity}, b: ${identity}, a: ${identity}, o: ${identity}, c(_, __, x) { return x; }, p() {}, e() {}, k: ${identity}, x() {} };`;
+
+	return `${prelude}\n${output}`;
+}
+
 export function coveragePlugin(): Plugin {
 	return {
 		"name": "coverage",
 		"enforce": "pre",
 		"transform": (code, id) => {
-			const name = ours(id);
+			const counted = instrumented(code, id);
 
-			if (name === undefined) {
-				return undefined;
-			}
-
-			const instrumented = instrument(name, "cov", "coverage");
-			const output = ts.transpileModule(code, { "fileName": name, "compilerOptions": { "module": ts.ModuleKind.ESNext, "target": ts.ScriptTarget.ESNext, "jsx": ts.JsxEmit.Preserve, "allowJs": true, "verbatimModuleSyntax": false, "useDefineForClassFields": true }, "transformers": { "before": [instrumented.before] } }).outputText;
-			const table = JSON.stringify(instrumented.sites().map((site) => [site.kind, ...site.start, ...site.end]));
-			const identity = "(_, x) => x";
-			const prelude = `${RUNTIME}const __ev = { ...globalThis.__evidence.module(${JSON.stringify(name)}, "cov", ${table}), v: ${identity}, b: ${identity}, a: ${identity}, o: ${identity}, c(_, __, x) { return x; }, p() {}, e() {}, k: ${identity}, x() {} };`;
-
-			return { "code": `${prelude}\n${output}`, "map": null };
+			return counted === undefined ? undefined : { "code": counted, "map": null };
 		}
 	};
+}
+
+export const coverage = (): Plugin[] => (process.env["COVERAGE"] === "1" ? [coveragePlugin()] : []);
+
+export function emittedAsIs(file: string): string {
+	const code = fs.readFileSync(file, "utf8");
+
+	return process.env["COVERAGE"] === "1" ? instrumented(code, file) ?? code : code;
 }
