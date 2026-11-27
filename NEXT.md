@@ -31,6 +31,8 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      changed, so pushing a commit of some of the changes takes the terminal's `git push`.
    - The terminal has no `/tmp`, and can't make one (`mkdir -p /tmp/x` fails), though scripts expect it; and `cp -r` into
      it says it can't find its source (2026-11-26).
+   - The terminal's `git commit` with nothing to commit says "fatal: EISDIR: illegal operation on a directory, open
+     '/workspace'", not that there's nothing to commit (2026-11-26).
    **Done when** each gap listed is fixed or decided.
 2. **Runtime evidence, used** (packages/editor/RUNTIME-EVIDENCE.md). Built: values, branches and types on
    hover, what could go, coverage, previews' evidence, time. But none is kept for this repository (no `.silo/evidence`),
