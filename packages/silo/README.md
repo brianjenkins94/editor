@@ -105,7 +105,7 @@ Paths are lib `layout.ts`'s, the shapes its modules'. *Trust* is what a reader m
 | `notes/<user>/<file>.jsonl` (any collection of annotations) | a person's notes, each on a span | `annotations.ts` `Annotation` | the editor | decision |
 | `baseline.json` | what each package can do, what the code uses of it, and what that can reach | `audit.ts` `Baseline` | `silo install`; the editor's capabilities extension | derived |
 | `versions.json` | the version each dependency loads at, where no lockfile says | the editor's `workbench/versions.ts` `VersionsFile` | the editor's resolver | derived |
-| `last-run/reach.json` | what each test ran, by file | `observed.ts` `ReachRecord` | the editor's `build/reach-record.ts`, by hand | derived |
+| `last-run/reach.json` | what each test ran, by statement: each file's statements by start line, with the tests that ran each | `observed.ts` `ReachRecord` | the editor's `build/reach-record.ts`, by hand | derived |
 | `runs/<user>.jsonl` | each run: who, where, on what code, what it did and was stopped from doing | `evidence.ts` `RunEnvelope` | the editor, as a run ends; util/mcp (kept local unless shared) | claim |
 | `evidence/<user>/<environment>/<file>.jsonl` | what those runs saw, by span: a statement ran or not, a value's types and whether one was nullish, a branch's arms taken, a function's kinds of impurity; each with the runs it rests on (1, 3, 10, 30 or 100 at least), and what its counts claim once past 30 runs and 100 tries (`claim`: `neverRan`, `neverNullish`, `onlyArm`, `pure`). Not how often or when, so a run that behaves as the ones before changes no line | `evidence.ts` `StableObservation` | the editor, as a run ends | claim |
 | `vouches/<user>.jsonl` | a test that passed, and the fingerprint of all it reached | `select.ts` `Vouch` | the editor's commit | claim (evidence for which tests run) |
@@ -144,7 +144,7 @@ What's written above is what the code does, and another program can rely on it:
 
 - **A version where a meaning can change** (lib `layout.ts` `VERSIONS`). Each line of `runs` and `vouches` says
   `"version": 1`; `baseline.json` says it once, and `features.json` as `"$version": 1`, a key no feature is named.
-  `policy.json` (1), `last-run/reach.json` (2) and `versions.json` (`"format": 3`) already had one. Evidence and annotations
+  `policy.json` (1), `last-run/reach.json` (3 since 2026-11-27, by statement) and `versions.json` (`"format": 3`) already had one. Evidence and annotations
   name how their spans are made instead (`"key": "bablr1"`). None, in a file from before, is the first. A version changes
   only when a reader of the old one would misread the new; a new field or kind doesn't change it.
 - **A reader meeting a version it doesn't know** skips the line, or refuses the whole file. A whole file is one it would

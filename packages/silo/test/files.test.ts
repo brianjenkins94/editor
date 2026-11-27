@@ -166,7 +166,8 @@ test("silo's files, as silo writes them, read by a program that isn't silo", asy
 	assert.deepEqual(read.notes, ["ada src/notes.ts n1"], "a dismissed note is a tombstone");
 	assert.deepEqual(read.reach, {
 		"tests": 1,
-		"files": ["src/notes.ts"]
+		"files": ["src/notes.ts"],
+		"statements": 1
 	});
 	assert.deepEqual(read.baseline, {
 		"packages": ["kit"],

@@ -89,7 +89,7 @@ export function readSilo(repo) {
 	const ledger = wholeFile(path.join(silo, "features.json"), VERSIONS.features, "$version");
 	const baseline = wholeFile(path.join(silo, "baseline.json"), VERSIONS.baseline, "version");
 	const policy = wholeFile(path.join(silo, "policy.json"), 1, "version");
-	const reach = wholeFile(path.join(silo, "last-run", "reach.json"), 2, "version");
+	const reach = wholeFile(path.join(silo, "last-run", "reach.json"), 3, "version");
 	const versions = wholeFile(path.join(silo, "versions.json"), 3, "format");
 	const runs = lineFile(silo, "runs", VERSIONS.runs, (line) => line.type === "run" && typeof line.id === "string");
 	const vouches = lineFile(silo, "vouches", VERSIONS.vouches, (line) => typeof line.test === "string" && typeof line.reached === "object");
@@ -150,7 +150,8 @@ export function readSilo(repo) {
 			? undefined
 			: {
 					"tests": (reach.tests ?? []).length,
-					"files": Object.keys(reach.files ?? {}).toSorted()
+					"files": Object.keys(reach.files ?? {}).toSorted(),
+					"statements": Object.values(reach.files ?? {}).reduce((sum, lines) => sum + Object.keys(lines).length, 0)
 				},
 		"versions": versions === undefined
 			? undefined
