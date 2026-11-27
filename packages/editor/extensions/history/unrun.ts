@@ -20,7 +20,7 @@ export interface UnrunView {
 	"read": (graph: DeclarationGraph, analyses: ReadonlyMap<string, FileAnalysis>) => void;
 }
 
-export function unrunView(context: vscode.ExtensionContext, root: vscode.Uri, ledger: LedgerView): UnrunView {
+export function unrunView(context: vscode.ExtensionContext, root: vscode.Uri, ledger: LedgerView, fresh: () => Promise<void>): UnrunView {
 	let program: { "graph": DeclarationGraph; "analyses": ReadonlyMap<string, FileAnalysis> } | undefined;
 	const store = evidenceStore(vscode, context.subscriptions);
 	const textOf = async (file: string): Promise<string | undefined> => Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, file))).then((bytes) => new TextDecoder().decode(bytes), () => undefined);
@@ -53,6 +53,8 @@ export function unrunView(context: vscode.ExtensionContext, root: vscode.Uri, le
 	};
 
 	async function show(): Promise<void> {
+		await vscode.window.withProgress({ "location": vscode.ProgressLocation.Notification, "title": "What nothing ran: reading the program" }, fresh);
+
 		if (program === undefined) {
 			void vscode.window.showInformationMessage("The program isn't read yet: TypeScript's server is still reading it. Try again in a moment.");
 
@@ -99,6 +101,25 @@ export function unrunView(context: vscode.ExtensionContext, root: vscode.Uri, le
 		pick.matchOnDescription = true;
 		pick.matchOnDetail = true;
 		pick.items = items;
+		pick.buttons = [{ "iconPath": new vscode.ThemeIcon("list-flat"), "tooltip": "Open the list as a document" }];
+		pick.onDidTriggerButton(async () => {
+			pick.hide();
+
+			const document = await vscode.workspace.openTextDocument({
+				"language": "markdown",
+				"content": [
+					`# ${pick.title ?? "What nothing ran"}`,
+					...GROUPS.flatMap(([kind, label]) => {
+						const these = listed.unrun.filter((each) => each.kind === kind);
+
+						return these.length === 0 ? [] : ["", `## ${label} (${String(these.length)})`, "", ...these.map((each) => `- \`${each.name}\` ${each.file}:${String(each.line)} · ${featureOf(each.file)}${kind === "called" ? ` · ${String(each.callers)} caller${each.callers === 1 ? "" : "s"}` : ""}`)];
+					}),
+					""
+				].join("\n")
+			});
+
+			await vscode.window.showTextDocument(document);
+		});
 		pick.onDidChangeActive(([item]) => {
 			if (item?.place !== undefined) {
 				void open(item.place, true);

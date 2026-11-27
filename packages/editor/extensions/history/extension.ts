@@ -76,7 +76,11 @@ export function activate(context: vscode.ExtensionContext): void {
 	let exercised: Map<string, Exercise> | undefined;
 	const ledger = ledgerView(context, root);
 	const reach = reachView(context, root, ledger);
-	const unrun = unrunView(context, root, ledger);
+	const unrun = unrunView(context, root, ledger, async () => {
+		rescan = true;
+		queue = queue.then(async () => step()).catch(() => undefined);
+		await queue;
+	});
 	const edited = new Set<string>();
 	let read = false;
 	let timer: ReturnType<typeof setTimeout> | undefined;

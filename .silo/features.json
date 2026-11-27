@@ -1532,6 +1532,7 @@
       "packages/observability/test/errors.test.ts",
       "packages/observability/test/hub.ts",
       "packages/observability/test/observe.test.ts",
+      "packages/observability/test/page-links.test.ts",
       "packages/observability/test/preview.test.ts",
       "packages/observability/test/realm.test.ts",
       "packages/observability/test/records.test.ts",
@@ -2066,7 +2067,8 @@
     ],
     "tests": [
       "packages/editor/test/github.test.mjs",
-      "packages/editor/test/project-load.test.mjs"
+      "packages/editor/test/project-load.test.mjs",
+      "packages/editor/test/shell-signed-out.test.mjs"
     ]
   },
   "Reset": {

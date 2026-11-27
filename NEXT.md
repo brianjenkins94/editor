@@ -116,7 +116,15 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      stand in for, which programs call. The 82 the view first showed were its blind spots, now closed: an export a
      program outside uses (its own group), and an import by a package's name the graph didn't follow
      (`@brianjenkins94/monaco-vscode-api/main`'s shownNotifications, which editor-state.ts serves): an import by name
-     counts as a caller now. Next: the two other groups — ran in use with no test (each a test), called and never run.
+     counts as a caller now.
+   - **Ran in use, no test runs it, worked through** (2026-11-27; 10, the editor's own use under COVERAGE=full): tests
+     for git-push's remote, github.ts's connectGitHub and actions, session's reportError (shell-signed-out.test) and
+     observability's linkServiceWorkerHub, the preview link's announce, servePageTools and installWindowMessageProbe
+     (page-links.test); repo-load's behindGitHub kept for the GitHub stand-in (it runs once a workspace is a GitHub
+     repository's); tsval's CONSTRUCT_PROBE was the view's mistake — a value built from a function read as a function,
+     its line's run not counted — fixed. The view reads the program afresh when asked now, and opens its list as a
+     document; it reads the active file's project only (open a file of the project to ask about). Next: called and
+     never run (1,218 in the editor's project, most of it what the GitHub stand-in and the API would reach).
    - **Removed**: zenfs-vfs's getSharedWorkspaceBuffer and mountWorkspaceVfs (nothing calls them since the node worker
      went, 517144b7).
    - **Kept, as measurement**: tooling used by being run (the editor's build/, contrib, the demo, bench, monaco's build

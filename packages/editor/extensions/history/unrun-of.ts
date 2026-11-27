@@ -21,7 +21,7 @@ const lineOf = (text: string, offset: number): number => text.slice(0, offset).s
 
 const isTypeOnly = (head: string): boolean => /^(?:export\s+)?(?:declare\s+)?(?:interface|type)\s/u.test(head);
 
-const isCallable = (head: string): boolean => /\bfunction\b|=>|\bclass\b/u.test(head);
+const isCallable = (head: string): boolean => /^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\b|^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\b|=\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*(?::[^=]*)?=>|[\w$]+\s*=>)/u.test(head);
 
 export function callersOf(graph: UnrunInputs["graph"], declared: ReadonlySet<string>): Map<string, Set<string>> {
 	const users = new Map<string, Set<string>>();

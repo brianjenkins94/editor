@@ -83,3 +83,11 @@ test("an import the graph doesn't follow — by a package's name, across package
 
 	assert.equal(listed.kind, "called", "imported by editor-state.ts, so called, not nothing");
 });
+
+test("a value built from a function isn't a function: its own line running is it running", async () => {
+	const text = "const PROBE = new Proxy(function() {\n\t// never called\n}, { construct: () => ({}) });\n\nexport const run = (value) => {\n\treturn value;\n};\n";
+	const analyses = new Map([["probe.ts", { "declarations": { "PROBE": { "range": [0, text.indexOf("});") + 3], "uses": [], "fingerprint": "p" }, "run": { "range": [text.indexOf("export const run"), text.lastIndexOf("};") + 2], "uses": [], "fingerprint": "r" } } }]]);
+	const listed = unrunOf({ "graph": { "nodes": () => [], "edges": () => [] }, "analyses": analyses, "texts": new Map([["probe.ts", text]]), "tested": { "probe.ts": new Set([0, 4]) }, "used": {} });
+
+	assert.deepEqual(listed.map(({ name }) => name), ["run"], "PROBE's line ran as its module loaded: it ran; run's first line did, its body didn't");
+});
