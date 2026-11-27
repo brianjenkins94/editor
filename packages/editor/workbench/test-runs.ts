@@ -52,20 +52,14 @@ interface Asked { "message": string; "key": string; "scope": string; "request": 
 
 interface Ran { "file": string; "exitCode": number; "ms": number; "tests": { "id": string; "outcome": string }[]; "output"?: string }
 
-function rangesOf(statements: [[number, number], [number, number]][]): [number, number][] {
-	const ranges: [number, number][] = [];
+function linesOf(statements: [[number, number], [number, number]][]): [number, number][] {
+	const seen = new Map<string, [number, number]>();
 
-	for (const [[from], [to]] of statements.toSorted(([one], [other]) => one[0] - other[0])) {
-		const last = ranges.at(-1);
-
-		if (last !== undefined && from <= last[1] + 1) {
-			last[1] = Math.max(last[1], to);
-		} else {
-			ranges.push([from, to]);
-		}
+	for (const [[from], [to]] of statements) {
+		seen.set(`${String(from)}-${String(to)}`, [from, to]);
 	}
 
-	return ranges;
+	return [...seen.values()].sort(([one, oneEnd], [other, otherEnd]) => one - other || oneEnd - otherEnd);
 }
 
 export interface RunRecord {
@@ -440,7 +434,7 @@ export function installTestRuns(vscode: typeof vscodeApi, hub: Hub, git: GitServ
 	serve(hub, "tests.history", async () => ({ "history": await readHistory() }));
 
 	const keepReach = async (file: string, tests: TestReport[]): Promise<void> => {
-		const reach = Object.fromEntries(tests.map((test) => [[file, ...test.titles].join(" › "), Object.fromEntries(test.files.map((ran) => [ran.file.replace(/^\/workspace\//u, ""), rangesOf(ran.statements)]))]));
+		const reach = Object.fromEntries(tests.map((test) => [[file, ...test.titles].join(" › "), Object.fromEntries(test.files.map((ran) => [ran.file.replace(/^\/workspace\//u, ""), linesOf(ran.statements)]))]));
 
 		await vscode.workspace.fs.writeFile(vscode.Uri.file(`${ROOT}/${REACH}/${file}.json`), new TextEncoder().encode(JSON.stringify(reach)));
 	};

@@ -42,20 +42,10 @@ async function askRealms(ask: Record<string, unknown>): Promise<{ "realm": strin
 	return answers;
 }
 
-function rangesOf(lines: [number, number][]): [number, number][] {
-	const ranges: [number, number][] = [];
+function distinct(lines: [number, number][]): [number, number][] {
+	const seen = new Map(lines.map(([from, to]) => [`${String(from)}-${String(to)}`, [from, to] as [number, number]]));
 
-	for (const [from, to] of lines.toSorted(([one], [other]) => one - other)) {
-		const last = ranges.at(-1);
-
-		if (last !== undefined && from <= last[1] + 1) {
-			last[1] = Math.max(last[1], to);
-		} else {
-			ranges.push([from, to]);
-		}
-	}
-
-	return ranges;
+	return [...seen.values()].sort(([one, oneEnd], [other, otherEnd]) => one - other || oneEnd - otherEnd);
 }
 
 const CASCADE = 32;
@@ -374,7 +364,7 @@ function install(hub: Hub): void {
 
 		for (const answer of answers) {
 			for (const [file, lines] of Object.entries(answer.ran ?? {})) {
-				ran.set(file, rangesOf([...ran.get(file) ?? [], ...lines]));
+				ran.set(file, distinct([...ran.get(file) ?? [], ...lines]));
 			}
 		}
 

@@ -73,10 +73,16 @@ test("the editor's reach, each test file's at its own path, as its runs keep the
 	});
 
 	fs.mkdirSync(path.join(reach, "test"));
-	fs.writeFileSync(path.join(reach, "test", "notes.test.mjs.json"), JSON.stringify({ "test/notes.test.mjs › stray": { "src/git.ts": [[0, 24]] }, "test/notes.test.mjs › own": { "src/notes.ts": [[100, 109], [110, 124]] } }));
+	const each = (from) => Array.from({ "length": 25 }, (_, index) => [from + index, from + index + (index % 3)]);
 
-	const told = recordReach(reach, repo);
+	fs.writeFileSync(path.join(reach, "test", "notes.test.mjs.json"), JSON.stringify({ "test/notes.test.mjs › stray": { "src/git.ts": each(0) }, "test/notes.test.mjs › own": { "src/notes.ts": each(100) } }));
 
-	assert.match(told, /\| 0% \| 25 \| notes\.test\.mjs: stray \| Git 25 \|/u);
+	const told = recordReach(reach, repo, "2026-11-26", "0123abc");
+
+	assert.match(told, /\| 0% \| 25 \| notes\.test\.mjs: stray \| Git 25 \|/u, "a statement each, [line, endLine], not each line it spans");
 	assert.match(told, /\| 100% \| 25 \| notes\.test\.mjs: own \| Notes 25 \|/u);
+
+	const record = JSON.parse(fs.readFileSync(path.join(repo, ".silo/last-run/reach.json"), "utf8"));
+
+	assert.deepEqual([record.version, record.commit, Object.keys(record.files["src/notes.ts"]).length, record.files["src/notes.ts"]["100"]], [3, "0123abc", 25, [0]], "by statement: the line each starts on, and which tests ran it");
 });
