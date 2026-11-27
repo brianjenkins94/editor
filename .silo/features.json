@@ -413,12 +413,14 @@
     "paths": [
       "components/monaco-vscode-api/vite.config.ts",
       "packages/editor/build.ts",
+      "packages/editor/build/stale-entries.ts",
       "packages/editor/build/vite.ts",
       "packages/editor/dev.ts",
       "packages/editor/env.d.ts",
       "packages/editor/wa-jsx.d.ts"
     ],
     "tests": [
+      "packages/editor/test/stale-entries.test.mjs",
       "packages/editor/test/worker-realms.mjs"
     ]
   },

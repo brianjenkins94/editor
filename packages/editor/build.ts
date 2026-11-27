@@ -20,6 +20,7 @@ import { DICTIONARIES, servedName } from "./extensions/cspell/dictionaries";
 import { editorTypesPlugin, editorVersionsPlugin, nodeModulesCdnPlugin } from "./build/package-types";
 import { editorSettingsDefaultsPlugin, editorWorkspacePlugin } from "./build/snapshot";
 import { buildServiceWorker, staticHostPlugin } from "./build/static-host";
+import { pruneStaleEntries } from "./build/stale-entries";
 import { vscodePlugin, workbenchPreloadPlugin } from "./build/vite";
 
 export const root = url.fileURLToPath(new URL(".", import.meta.url));
@@ -215,6 +216,7 @@ export async function preBuild(): Promise<void> {
 		"resolve": { "dedupe": SHARED_PACKAGES, "alias": { "node:util": "@pkgjs/parseargs", "@automerge/automerge": resolvePath("./node_modules/@automerge/automerge/dist/mjs/entrypoints/fullfat_base64.js") } },
 		"build": {
 			"outDir": "dist",
+			"emptyOutDir": false,
 			"minify": isCI,
 			"sourcemap": sourcemap,
 			"rollupOptions": {
@@ -265,6 +267,12 @@ export async function preBuild(): Promise<void> {
 	await buildCapabilities(root, { "logger": logger, "sourcemap": sourcemap, "banner": PROCESS_SHIM });
 
 	await buildServiceWorker(root, logger);
+
+	const pruned = await pruneStaleEntries(path.join(root, "dist"));
+
+	if (pruned.length > 0) {
+		logger.info(`removed ${String(pruned.length)} extension builds over ten minutes old that this one replaced`);
+	}
 
 	checkExtensionFolders(path.join(root, "dist"));
 }
