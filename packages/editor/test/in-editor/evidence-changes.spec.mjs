@@ -1,7 +1,7 @@
 /**
  * The evidence diff (extensions/insights/changes.ts), as a person has it: run, commit, edit one file and run again, and
- * Problems says what runs did since the last commit in code that wasn't edited — an arm taken now, a parameter nullish
- * now — from the committed evidence at HEAD against the working tree's (RUNTIME-EVIDENCE.md, *Storage in git*). Runs in
+ * Problems says what runs did since the last commit in code that wasn't edited — an arm taken now, a parameter passed
+ * null now — from the committed evidence at HEAD against the working tree's (RUNTIME-EVIDENCE.md, *Storage in git*). Runs in
  * the editor: test/in-editor.mjs.
  */
 import { expect, test } from "@playwright/test";
@@ -38,6 +38,6 @@ test("run, commit, change a caller and run again: Problems says what the untouch
 	const rows = await problems(workbench);
 
 	await expect(rows.filter({ "hasText": "then taken now" })).toHaveCount(1, { "timeout": 60_000 });
-	await expect(rows.filter({ "hasText": "nullish now" }).first()).toBeVisible();
+	await expect(rows.filter({ "hasText": "Passed null now" }).first()).toBeVisible();
 	await expect(rows.filter({ "hasText": "since the last commit" }).first()).toBeVisible();
 });

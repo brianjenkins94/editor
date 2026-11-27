@@ -1,33 +1,53 @@
 import type { EvidenceStore, PlacedChange } from "@brianjenkins94/editor-api/evidence";
 import * as vscode from "vscode";
-import { branchSite, valueSite } from "./hover";
+import { branchSite } from "./hover";
 
 const CODE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u;
 
 const IMPURE = { "write": "writes outside itself", "effect": "makes an effect", "nondeterministic": "reads the clock or random numbers", "unwatched": "calls code runs can't see into" };
 
+function valueVerb(type: string | undefined): string {
+	if (type === "MemberExpression" || type === "CallExpression") {
+		return "?. tested";
+	}
+
+	if (type === "BinaryExpression") {
+		return "?? had on its left";
+	}
+
+	if (type === "Return" || type === "ArrowFunctionExpression") {
+		return "Returned";
+	}
+
+	return type?.endsWith("Pattern") === true || type === "Identifier"
+		? "Passed"
+		: "Was";
+}
+
 export function said({ change, type }: Pick<PlacedChange, "change" | "type">): string {
 	switch (change.kind) {
 		case "reached":
-			return "Since the last commit, this runs: it hadn't.";
+			return "Runs now; it hadn't.";
 
 		case "value": {
-			const what = [...change.nullish ? ["nullish now"] : [], ...change.tags.length > 0 ? [`now also ${change.tags.map((tag) => `\`${tag}\``).join(", ")}`] : []];
+			const what = change.nullish && !change.tags.some((tag) => tag === "null" || tag === "undefined")
+				? [...change.tags, "nullish"]
+				: change.tags;
 
-			return `Since the last commit, ${valueSite(type).replaceAll("`", "")}: ${what.join("; ")}.`;
+			return `${valueVerb(type)} ${what.join(" or ")} now.`;
 		}
 
 		case "branch": {
 			const { name, arms } = branchSite(type);
 
-			return `Since the last commit, ${name.replaceAll("`", "")}: ${change.taken.map((arm) => arms[arm] ?? `arm ${String(arm + 1)}`).join(", ")} taken now.`;
+			return `${name.replaceAll("`", "")}: ${change.taken.map((arm) => arms[arm] ?? `arm ${String(arm + 1)}`).join(", ")} taken now.`;
 		}
 
 		case "purity":
-			return `Since the last commit, it ${change.impure.map((kind) => IMPURE[kind]).join(", ")}.`;
+			return `${change.impure.map((kind) => IMPURE[kind]).join(", ").replace(/^./u, (first) => first.toUpperCase())} now.`;
 
 		default:
-			return "Since the last commit, its runs differ.";
+			return "Its runs differ.";
 	}
 }
 
