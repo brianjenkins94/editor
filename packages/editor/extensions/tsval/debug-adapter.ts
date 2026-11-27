@@ -184,7 +184,7 @@ class TsvalDebugSession extends vscode.Disposable implements vscode.DebugAdapter
 
 			case "stackTrace":
 				this.respond(request, {
-					"stackFrames": (this.snapshot?.frames ?? []).map(({ file, ...frame }) => ({ ...frame, "source": { "path": file ?? this.program } })),
+					"stackFrames": (this.snapshot?.frames ?? []).slice(Number(args["startFrame"] ?? 0), Number(args["levels"] ?? 0) > 0 ? Number(args["startFrame"] ?? 0) + Number(args["levels"]) : undefined).map(({ file, ...frame }) => ({ ...frame, "source": { "path": file ?? this.program } })),
 					"totalFrames": this.snapshot?.frames.length ?? 0
 				});
 				break;
@@ -203,6 +203,11 @@ class TsvalDebugSession extends vscode.Disposable implements vscode.DebugAdapter
 				break;
 
 			case "setVariable":
+				if (args["variablesReference"] !== 1000) {
+					this.fail(request, "Only the frame it's stopped in can have its values set.");
+					break;
+				}
+
 				void this.setValue((args["name"] as string | undefined) ?? "", (args["value"] as string | undefined) ?? "").then((value) => {
 					this.respond(request, { "value": value });
 				}, (error: unknown) => {

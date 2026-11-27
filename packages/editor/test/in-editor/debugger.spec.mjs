@@ -2,7 +2,8 @@
  * The debugger (extensions/tsval: node:test on tsval in the debug worker), as a person has it: a test file run from Features
  * and tests, each test's outcome, a failure's sides, a timer on the run's event loop, a read through the runtime's files and
  * a package loaded; a program's capability calls stopped and answered in the margin — allowed, skipped, denied — as the
- * program and the disk then have them; a breakpoint, a step and a step back; and what's typed at a terminal's run reaching
+ * program and the disk then have them; a breakpoint, a step and a step back; a breakpoint added while stopped, Step Out,
+ * the event loop's timers and Skip Waits; and what's typed at a terminal's run reaching
  * the program. What only an agent has of it (runs_tests' approvals, a run at a commit by its path, a run's spans, the
  * bridge's links) is test/agent-tools/debugger-driven.mjs' and bridge-links.mjs'. Runs in the editor: test/in-editor.mjs.
  */
@@ -130,6 +131,60 @@ test("a breakpoint stops the run; a step goes on a line, and a step back returns
 	await codeOf(workbench).press("F5");
 	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
 	await expect(workbench.locator(".repl .output", { "hasText": "x is 3" }).first()).toBeVisible({ "timeout": 30_000 });
+});
+
+test("stopped: the call stack, a breakpoint added, Step Out, the event loop's timer, and Skip Waits for it", async ({ page }) => {
+	const workbench = await openEditor(page, {
+		"waits.mjs": [
+			"function inner() {",
+			"\tconst mark = 1;",
+			"\treturn mark + 1;",
+			"}",
+			"setTimeout(() => console.log(\"waited\"), 60_000);",
+			"const got = inner();",
+			"let after = got * 10;",
+			"after += 1;",
+			"console.log(\"after is \" + after);",
+			""
+		].join("\n")
+	});
+	const at = workbench.locator(".debug-call-stack .monaco-list-row").first();
+
+	await openFile(workbench, "waits.mjs");
+	await codeOf(workbench).press("ArrowDown");
+	await codeOf(workbench).press("ArrowDown");
+	await codeOf(workbench).press("F9");
+	await codeOf(workbench).press("F5");
+	await expect(at).toContainText(/waits\.mjs3:/u, { "timeout": 60_000 });
+
+	// (the Call Stack: the function, and its caller at the call)
+	await expect(workbench.locator(".debug-call-stack .monaco-list-row").nth(1)).toContainText(/waits\.mjs6:/u);
+
+	// (a breakpoint set while it's stopped: the run has it from then on)
+	for (let line = 3; line < 8; line += 1) {
+		await codeOf(workbench).press("ArrowDown");
+	}
+
+	await codeOf(workbench).press("F9");
+
+	// The timer it set, waiting on the run's own clock.
+	await workbench.locator(".debug-variables .monaco-list-row", { "hasText": "Event loop" }).click();
+	await expect(workbench.locator(".debug-variables .monaco-list-row", { "hasText": "setTimeout 60000ms" })).toBeVisible({ "timeout": 30_000 });
+
+	// Step Out: back in the caller, past the call.
+	await workbench.locator(".debug-toolbar .action-label[aria-label^='Step Out']").click({ "timeout": 30_000 });
+	await expect(at).toContainText(/waits\.mjs[67]:1/u, { "timeout": 30_000 });
+
+	// Continued, it stops at the breakpoint added.
+	await codeOf(workbench).press("F5");
+	await expect(at).toContainText(/waits\.mjs8:1/u, { "timeout": 30_000 });
+
+	// Skip Waits: the minute's timer fires as soon as nothing else is left.
+	await runCommand(workbench, "Skip Waits");
+	await codeOf(workbench).press("F5");
+	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
+	await expect(workbench.locator(".repl .output", { "hasText": "after is 21" }).first()).toBeVisible({ "timeout": 30_000 });
+	await expect(workbench.locator(".repl .output", { "hasText": "waited" }).first()).toBeVisible({ "timeout": 30_000 });
 });
 
 test("stdin: what's typed at a terminal's run reaches the program", async ({ page }) => {

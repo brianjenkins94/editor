@@ -352,14 +352,13 @@ function typeName(value: unknown): string {
 	return typeof value;
 }
 
-function snapshot(vm: Vm): Snapshot {
-	const loc = vm.location();
-	const scope = vm.top?.scope ?? vm.rootScope;
+type ScopeOf = NonNullable<Vm["top"]>["scope"];
 
+function localsOf(scope: ScopeOf): Variable[] {
 	const rows: Variable[] = [];
 	const seen = new Set<string>();
 
-	for (let level: typeof scope | undefined = scope; level !== undefined; level = level.parent) {
+	for (let level: ScopeOf | undefined = scope; level !== undefined; level = level.parent) {
 		for (const [name, binding] of level.bindings) {
 			if (!seen.has(name)) {
 				seen.add(name);
@@ -375,25 +374,58 @@ function snapshot(vm: Vm): Snapshot {
 		}
 	}
 
+	return rows;
+}
+
+function callersOf(vm: Vm): { "node": ts.Node; "scope": ScopeOf }[] {
+	const frames = vm.frames;
+	const callers: { "node": ts.Node; "scope": ScopeOf }[] = [];
+
+	for (let index = frames.length - 1; index > 0; index -= 1) {
+		const { kind } = frames[index];
+
+		if (kind === "call" || kind === "construct") {
+			const caller = frames.slice(0, index).findLast((frame) => frame.kind === undefined);
+
+			if (caller?.kind === undefined && caller !== undefined) {
+				callers.push({ "node": caller.node, "scope": caller.scope });
+			}
+		}
+	}
+
+	return callers;
+}
+
+function frameAt(vm: Vm, id: number, node: ts.Node | null): Snapshot["frames"][number] {
+	const loc = vm.location(node);
+
+	return {
+		"id": id,
+		"name": functionName(node),
+		"line": (loc?.line ?? 0) + 1,
+		"column": (loc?.character ?? 0) + 1,
+		...node === null
+			? {}
+			: {
+					"at": rangeOf(node)
+				},
+		...loc === null || loc.file === state.sourceFile?.fileName
+			? {}
+			: {
+					"file": loc.file,
+					"code": node?.getSourceFile().text.split("\n")[loc.line]?.trim()
+				}
+	};
+}
+
+function snapshot(vm: Vm): Snapshot {
+	const scope = vm.top?.scope ?? vm.rootScope;
+	const callers = callersOf(vm);
+
 	return {
 		"frames": [
-			{
-				"id": 1,
-				"name": functionName(vm.currentNode),
-				"line": (loc?.line ?? 0) + 1,
-				"column": (loc?.character ?? 0) + 1,
-				...vm.currentNode === null
-					? {}
-					: {
-							"at": rangeOf(vm.currentNode)
-						},
-				...loc === null || loc.file === state.sourceFile?.fileName
-					? {}
-					: {
-							"file": loc.file,
-							"code": vm.currentNode?.getSourceFile().text.split("\n")[loc.line]?.trim()
-						}
-			}
+			frameAt(vm, 1, vm.currentNode),
+			...callers.map(({ node }, index) => frameAt(vm, index + 2, node))
 		],
 		"scopes": {
 			"1": [
@@ -403,15 +435,17 @@ function snapshot(vm: Vm): Snapshot {
 					: [
 							{ "name": "Event loop", "variablesReference": 2000, "expensive": false }
 						]
-			]
+			],
+			...Object.fromEntries(callers.map((_, index) => [String(index + 2), [{ "name": "Locals", "variablesReference": 3000 + index + 2, "expensive": false }]]))
 		},
 		"variables": {
-			"1000": rows,
+			"1000": localsOf(scope),
 			...vm.loop === undefined
 				? {}
 				: {
 						"2000": loopRows(vm.loop)
-					}
+					},
+			...Object.fromEntries(callers.map(({ scope: theirs }, index) => [String(3000 + index + 2), localsOf(theirs)]))
 		}
 	};
 }
