@@ -12,7 +12,7 @@ import { sharedSession } from "../architecture-harness.mjs";
 const session = sharedSession("preview-evidence");
 const { ask } = session;
 
-test("what a preview observed is kept in git too: its page's counts, under the dev server's run, as the server stops", async () => {
+test("what a preview observed is kept too: its page's counts on this machine and what was seen in git, under the dev server's run, as the server stops", async () => {
 	await ask("files.write", { "path": "evpreview/index.html", "content": "<!doctype html><html><head><title>evpreview</title></head><body><button>not yet</button><script type=\"module\" src=\"/src/main.ts\"></script></body></html>\n" });
 	await ask("files.write", { "path": "evpreview/src/main.ts", "content": "const hooks: { onClick?: () => void } = { \"onClick\": () => undefined };\nconst button = document.querySelector(\"button\")!;\nlet count = 0;\n\nbutton.textContent = \"ready\";\nbutton.addEventListener(\"click\", () => {\n\tcount += 1;\n\thooks.onClick?.();\n\tbutton.textContent = count > 1 ? \"many\" : \"once\";\n});\n" });
 	await session.terminal("cd evpreview && vite", { "fresh": true });
@@ -41,7 +41,8 @@ test("what a preview observed is kept in git too: its page's counts, under the d
 	const observations = await session.eventually("the preview's evidence", async () => {
 		const [file] = (await ask("files.glob", { "pattern": ".silo/evidence/**/evpreview/src/main.ts.jsonl" })).files;
 
-		return file === undefined ? undefined : (await ask("files.read", { "path": file })).content.split("\n").map((line) => line.slice(line.indexOf("\t") + 1)).filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
+		// (the counts: this machine's, beside it under .silo/local, which isn't searched)
+		return file === undefined ? undefined : (await ask("files.read", { "path": file.replace(".silo/evidence/", ".silo/local/evidence/") })).content.split("\n").map((line) => line.slice(line.indexOf("\t") + 1)).filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
 	}, 60_000).catch(async (error) => {
 		const after = (await ask("runs.list")).find(({ id }) => id === server.id);
 		const envelopes = [];
@@ -56,5 +57,10 @@ test("what a preview observed is kept in git too: its page's counts, under the d
 	assert.ok(observations.some(({ kind, seen, nullish, tags }) => kind === "value" && seen === 3 && nullish === 0 && tags?.function === 3), JSON.stringify(observations));
 	assert.ok(observations.some(({ kind, arms }) => kind === "branch" && arms?.join() === "2,1"), "the ?: took its first arm twice, its second once");
 	assert.ok(observations.some(({ kind }) => kind === "reached"));
+
+	const [committedFile] = (await ask("files.glob", { "pattern": ".silo/evidence/**/evpreview/src/main.ts.jsonl" })).files;
+	const committed = (await ask("files.read", { "path": committedFile })).content.split("\n").map((line) => line.slice(line.indexOf("\t") + 1)).filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
+
+	assert.ok(committed.some(({ kind, taken }) => kind === "branch" && taken?.join() === "0,1"), "committed: what was seen, each arm taken");
 	await ask("files.delete", { "path": "evpreview" });
 });
