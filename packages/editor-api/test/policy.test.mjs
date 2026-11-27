@@ -73,10 +73,27 @@ test("the policy consulted: my overrides first, over the shared contract, mine n
 	assert.deepEqual([apart.mine.file, apart.mine.rules.length, apart.shared.file, apart.shared.rules.length], [".silo/policy/ann.json", 1, ".silo/policy.json", 1]);
 });
 
-test("a policy file changed by someone else is read again: its stamp, not a watcher", async () => {
+test("a policy file changed by someone else is read again: its text, not a watcher", async () => {
 	put("/workspace/.silo/policy.json", JSON.stringify(withRule(contract, "fs:write", "/workspace/out.txt", "allow", "2026-01-02")));
 
 	assert.deepEqual(whose(await loadEffectivePolicy()), ["allow net https://example.com/", "allow fs:write /workspace/out.txt", "deny net https://example.com/"]);
+});
+
+test("a policy file rewritten to the same size in the same millisecond is read again: its text, not its stamp", async () => {
+	const file = "/workspace/.silo/policy.json";
+	const before = read(file);
+	const { mtime } = files.get(file);
+
+	await loadEffectivePolicy();
+
+	// (a rule's place moved: the same size, and here the same mtime too)
+	const same = before.replace("example.com", "example.org");
+
+	assert.equal(same.length, before.length);
+	files.set(file, { "text": same, "mtime": mtime });
+	assert.ok(whose(await loadEffectivePolicy()).includes("deny net https://example.org/"));
+	files.set(file, { "text": before, "mtime": mtime });
+	assert.ok(whose(await loadEffectivePolicy()).includes("deny net https://example.com/"), "and back");
 });
 
 test("what I decide is written to my file, never the contract: a call's decision kept with when it was first made", async () => {

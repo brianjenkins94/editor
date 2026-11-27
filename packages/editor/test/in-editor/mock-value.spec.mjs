@@ -56,10 +56,10 @@ test("a variable set on every run: the rule sets it, const or not, shows in the 
 	await openFile(workbench, "rate.mjs");
 	await retype(workbench, PROGRAM.replace("= 2", "= 3"));
 
-	for (let line = 0; line < 3; line += 1) {
-		await codeOf(workbench).press("ArrowUp");
-	}
-
+	// (to its first line, however many lines typing it made: a newline typed under load can make one more)
+	await codeOf(workbench).press("PageUp");
+	await codeOf(workbench).press("PageUp");
+	await codeOf(workbench).press("Home");
 	await quickFix(workbench, "Put the rule back here");
 	// (its mark the one that applies, not one it isn't sure of)
 	await expect(workbench.locator(".notes-margin-mark[title*='rate']:not([title^='Not sure'])")).toHaveCount(1, { "timeout": 60_000 });

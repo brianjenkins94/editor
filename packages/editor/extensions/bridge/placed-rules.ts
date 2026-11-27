@@ -20,6 +20,22 @@ function setsOf(rule: Rule): RulePlace["sets"] {
 
 const lineAt = (text: string, offset: number): number => text.slice(0, offset).split("\n").length;
 
+const TRIES = 3;
+
+async function resolvedIn(text: string, file: string, refs: SpanRef[]): ReturnType<ReturnType<typeof annotations>["resolve"]> {
+	for (let tries = 1; ; tries += 1) {
+		const answer = await annotations(vscode.commands).resolve(text, file, refs);
+
+		if ("value" in answer || tries === TRIES) {
+			return answer;
+		}
+
+		await new Promise((resolve) => {
+			setTimeout(resolve, 500 * tries);
+		});
+	}
+}
+
 async function placesFrom(policy: Policy): Promise<Record<string, RulePlace[]>> {
 	const folder = vscode.workspace.workspaceFolders?.[0];
 	const byFile = new Map<string, { "ref": SpanRef; "sets": RulePlace["sets"] }[]>();
@@ -46,11 +62,15 @@ async function placesFrom(policy: Policy): Promise<Record<string, RulePlace[]>> 
 			return;
 		}
 
-		const answer = await annotations(vscode.commands).resolve(text, file, placed.map(({ ref }) => ref));
+		const answer = await resolvedIn(text, file, placed.map(({ ref }) => ref));
 
-		if ("value" in answer) {
-			places[uri.path] = answer.value.flatMap((found, index) => (found.candidate?.start === undefined || found.status === "uncertain" || found.status === "orphaned" ? [] : [{ "line": lineAt(text, found.candidate.start), "sets": placed[index].sets }]));
+		if (!("value" in answer)) {
+			void vscode.window.showWarningMessage(`The rules placed in ${file} couldn't be found in it as it is now (${"unparsable" in answer ? answer.unparsable : answer.unavailable}), so this run goes without them.`);
+
+			return;
 		}
+
+		places[uri.path] = answer.value.flatMap((found, index) => (found.candidate?.start === undefined || found.status === "uncertain" || found.status === "orphaned" ? [] : [{ "line": lineAt(text, found.candidate.start), "sets": placed[index].sets }]));
 	}));
 
 	return places;

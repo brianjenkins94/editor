@@ -96,35 +96,25 @@ async function readUser(folder: vscode.WorkspaceFolder): Promise<void> {
 
 // ── policy: base contract + my overrides ─────────────────────────────────────────────────────────────────────
 
-/** Each policy file as last read, with its stamp then (mtime and size) — kept while the file's stamp is the same. More
- *  than one bundle has its own copy of this module (the bridge's decider, the capabilities extension's rules), each
- *  writing the files: a file watcher reports another's write too late for the next decision, a stat doesn't. */
-const policies = new Map<string, { "policy": Policy; "stamp": string }>();
+/** Each policy file as last read, with its text then — kept while the file's text is the same. More than one bundle has
+ *  its own copy of this module (the bridge's decider, the capabilities extension's rules, the margin's places), each
+ *  writing the files: a file watcher reports another's write too late for the next decision, a read doesn't. */
+const policies = new Map<string, { "policy": Policy; "text": string | undefined }>();
 
-/** A file's stamp: when it last changed, and its size — or "absent". */
-async function stampOf(uri: vscode.Uri): Promise<string> {
-	try {
-		const { mtime, size } = await vscode.workspace.fs.stat(uri);
-
-		return `${mtime}:${size}`;
-	} catch {
-		return "absent";
-	}
-}
-
-/** A policy file, from the cache while its stamp is unchanged — else read again, and kept. */
+/** A policy file, parsed again only when its text changed. Read each time: it's small, and a stamp (mtime and size)
+ *  can miss a rewrite — a rule's place moved keeps its file's size, and a write in the same millisecond its mtime — so
+ *  a run started just after "Put the rule back here" went without the rule. */
 async function loadPolicy(uri: vscode.Uri): Promise<Policy> {
-	const stamp = await stampOf(uri);
+	const text = await readText(uri);
 	const cached = policies.get(uri.toString());
 
-	if (cached?.stamp === stamp) {
+	if (cached !== undefined && cached.text === text) {
 		return cached.policy;
 	}
 
-	const text = stamp === "absent" ? undefined : await readText(uri);
 	const policy = text === undefined ? { ...EMPTY_POLICY } : parsePolicy(text);
 
-	policies.set(uri.toString(), { "policy": policy, "stamp": stamp });
+	policies.set(uri.toString(), { "policy": policy, "text": text });
 
 	return policy;
 }
@@ -141,8 +131,10 @@ async function loadOverride(root: vscode.Uri, user: string): Promise<Policy> {
 async function writeOverride(root: vscode.Uri, user: string, policy: Policy): Promise<void> {
 	const uri = fileIn(root, userPolicyPath(user));
 
-	await writeText(uri, JSON.stringify(policy, null, "\t") + "\n");
-	policies.set(uri.toString(), { "policy": policy, "stamp": await stampOf(uri) });
+	const text = JSON.stringify(policy, null, "\t") + "\n";
+
+	await writeText(uri, text);
+	policies.set(uri.toString(), { "policy": policy, "text": text });
 }
 
 /** The effective policy consulted at decision time: MY overrides layered over the base contract. Overrides go

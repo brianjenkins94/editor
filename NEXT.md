@@ -124,9 +124,14 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    - **No tests**: admin (17 files), account. Open: tests, or a decision they stay manual.
    - **almostnode's shims nothing reaches** (130 declarations: esbuild's build, chokidar, readdirp, rollup, http2, tls,
      brotli, dns). Open: kept for the programs that may call them, or out until one does.
-   - Found measuring: under coverage, a run right after "Put the rule back here" can still go without the rule
-     (mock-value.spec, CI's instrumented run; 3 of 3 uninstrumented here) — the policy's cache keys a file by its mtime
-     and size, which a moved place may leave the same, or the run's own placing is slow.
+   - Found measuring: under coverage, a run right after "Put the rule back here" went without the rule (mock-value.spec,
+     CI's instrumented run 46010188876; here once in a full run). The cause was the spec's: typing the file under load
+     made one more line, so its three ArrowUps put the rule on line 2, after `rate` is read (the Margin said rate = 5,
+     total = 30); it goes to the first line with PageUp and Home now (2026-11-27). Two silent ways to lose a rule found
+     on the way, made right: the policy's cache keyed a file by its mtime and size, which a moved place keeps the size
+     of, so it's keyed by the file's text (editor-api policy.ts; policy.test rewrites it at the same size and mtime);
+     and a place a run couldn't resolve (BABLR unparsable or unavailable) dropped the rule without a word, so it's
+     asked three times and then the run says it goes without it (bridge placed-rules.ts).
 4. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
    (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s `why`,
    the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). CI's specs aren't selected by
