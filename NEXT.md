@@ -130,8 +130,14 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      tree, a blob). test/workbench/github.mjs stands in for the API at the browser's routes (its sign-in; its proxy,
      handing /github/api and /github/git to the stand-in with Ann's token) and, signed in: a repository loaded from its
      address, cloned through the proxy; GitHub moved ahead, the fast-forward offered and caught up (behindGitHub,
-     fastForward); a commit pushed back, by who's signed in. Next: the rest of called-and-never-run, measured again
-     with this suite in the record.
+     fastForward); a commit pushed back, by who's signed in.
+   - **Measured again** (2026-11-27, at 72157b4c: CI's coverage run 46072531887 and 166 of the 168 unit test files in
+     a throwaway editor — api's log.test asks for exec, debug-mcp's sessions.test runs past 5 minutes; cdp-memory-realms'
+     reach kept from the last record, nothing it reaches changed): statements run 24,300 → 25,361 of 40,054; files none
+     run 143 → 136 (git-clone.ts, own-evidence.ts, unrun.ts and unrun-of.ts, bablr-parses.ts, build/coverage.ts and
+     stale-entries.ts); declarations unrun in files partly run 370 → 338 — repo-load's loadRepo, behindGitHub and
+     fastForward, git-engine's fetchBranch, pull and push, session's account and status among them. bablr-worker's
+     reidentify runs in no test (it changed in 9068bf07).
    - **Removed**: zenfs-vfs's getSharedWorkspaceBuffer and mountWorkspaceVfs (nothing calls them since the node worker
      went, 517144b7).
    - **Kept, as measurement**: tooling used by being run (the editor's build/, contrib, the demo, bench, monaco's build
