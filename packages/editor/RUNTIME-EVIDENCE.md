@@ -265,6 +265,21 @@ file: about a dozen files a half minute the first time a version is parsed (510 
 minutes), and again whenever a version is no longer among the 16 parses BABLR's worker holds (see *Bottlenecks to
 expect*).
 
+## What nothing ran
+
+What tests ran and what runs did, together, say where code may go (the user, 2026-11-27: "use information that we
+ambiently accrue from usage of our own code to help us identify where code can be removed/improved"). History: What
+Nothing Ran… (extensions/history/unrun.ts) takes every top-level declaration History's reading of the program has (a
+type's isn't code), and for each asks the tests' reach (`.silo/last-run/reach.json`, by statement: for a function or a
+class its body, since its own line runs as its module loads), what runs did (the evidence kept here, placed in the file
+as it is, the editor's own use included under `COVERAGE=full`), and the declaration graph (what names it, directly or
+through its file's import). What no test ran falls in four groups: nothing calls it and nothing ran it, to remove;
+exported and nothing here names it or ran it, for what's outside the program to vouch for (an extension's `activate`, a
+config's default); other code calls it and nothing ran it, to look into; a run here ran it and no test does, to test.
+First read of this repository (2026-11-27): 1,298 declarations no test ran, 82 of them nothing called, before exports
+were their own group. A finding is a lead,
+not a verdict: runs only cover the paths they took, and the record is of the commit it was made at.
+
 ## Fourth slice: what could go, in purple, across inputs
 
 The point of running a program many times: what none of the runs needed is code that could go. Decided 2026-10-05.

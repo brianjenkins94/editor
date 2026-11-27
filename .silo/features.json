@@ -3059,6 +3059,24 @@
       "packages/editor/test/reach-record.test.mjs"
     ]
   },
+  "What nothing ran": {
+    "status": "active",
+    "why": "NEXT.md item 3: the declarations no test ran, by feature, seen in the editor before a tool — with what runs did counted too (the user, 2026-11-27: \"use information that we ambiently accrue from usage of our own code to help us identify where code can be removed/improved\"; \"yes, build the view\")",
+    "since": "2026-11-27",
+    "what": "History: What Nothing Ran… lists each declaration no test ran, by the tests' reach (.silo/last-run/reach.json, by statement), in four groups: nothing calls it and nothing ran it (to remove), exported and nothing here names it (for what's outside the program to vouch for), other code calls it but nothing ran it (to look into), and a run here ran it but no test does (to test) — what runs did read from the evidence kept in this editor, the editor's own use included under COVERAGE=full; each with its feature and callers, opening where it is.",
+    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *What nothing ran*",
+    "ways": [
+      "command|history.unrun.show"
+    ],
+    "paths": [
+      "packages/editor/extensions/history/unrun-of.ts",
+      "packages/editor/extensions/history/unrun.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/what-nothing-ran.spec.mjs",
+      "packages/editor/test/unrun.test.mjs"
+    ]
+  },
   "What runs did since the last commit": {
     "status": "active",
     "why": "the evidence diff, NEXT.md item 2 (the user, 2026-11-26: \"Yes, start it\"): with evidence committed as what was seen, a committed line that changed since the last commit is behavior that changed",

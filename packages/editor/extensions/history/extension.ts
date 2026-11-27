@@ -15,6 +15,7 @@ import * as vscode from "vscode";
 import { ledgerView } from "./ledger";
 import { reachView } from "./reach";
 import { exerciseOf } from "./runs-say";
+import { unrunView } from "./unrun";
 import { heldAs, vouchesOf } from "./vouches";
 
 const IDLE_MS = 1500;
@@ -75,6 +76,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	let exercised: Map<string, Exercise> | undefined;
 	const ledger = ledgerView(context, root);
 	const reach = reachView(context, root, ledger);
+	const unrun = unrunView(context, root, ledger);
 	const edited = new Set<string>();
 	let read = false;
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -257,6 +259,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		}
 
 		reach.read(features, latest.graph);
+		unrun.read(latest.graph, new Map([...readings].map(([path, reading]) => [path, reading.analysis])));
 		await ledger.check(features);
 	}
 

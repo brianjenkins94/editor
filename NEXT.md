@@ -108,6 +108,8 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    build, chokidar, readdirp, rollup, http2, tls). Measured again (2026-11-27, at 2e50df9d: coverage run 46010188876's
    102 browser tests and 1,834 unit tests in a throwaway editor): statements run 24,068 → 24,872 of 39,700; files with
    none run 143 → 137, declarations unrun in files partly run 417 → 361; nothing newly unrun. Reassessed, the rest:
+   - **Seen in the editor** (2026-11-27): History: What Nothing Ran… lists them — no test ran it, by the record; and,
+     from the evidence kept, whether a run here did (the editor's own use under COVERAGE=full), and what calls it.
    - **Removed**: zenfs-vfs's getSharedWorkspaceBuffer and mountWorkspaceVfs (nothing calls them since the node worker
      went, 517144b7).
    - **Kept, as measurement**: tooling used by being run (the editor's build/, contrib, the demo, bench, monaco's build

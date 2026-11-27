@@ -35,6 +35,11 @@
         "command": "history.reach.show",
         "title": "What a Way In Reaches…",
         "category": "History"
+      },
+      {
+        "command": "history.unrun.show",
+        "title": "What Nothing Ran…",
+        "category": "History"
       }
     ]
   }
