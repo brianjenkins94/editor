@@ -96,13 +96,17 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      withPlace, editor-metrics' worker names; almostnode's shims (148 declarations), bablr-language-ts (41), silo (24).
    (Lines in test-runs.ts and preview-windows.tsx shifted between the two commits: those two read wrong.)
    Next (the user, 2026-11-26: "dispatch, then backfill tests, measure again, reassess"): tests for the plain gaps and
-   the realms, then measure again. Backfilled so far (2026-11-27): a package's own calls in a run (package-calls.spec:
-   decide.ts, package-calls.ts, runtime-fs's decide op); the TS server's plugins counted (ee1659c5: the canary, the
-   engines, both ts-plugin.js); the debugger stopped (debugger.spec: a breakpoint added mid-run, the Event loop's timers,
-   Skip Waits, Step Out), which found Step Out disabled everywhere but an agent's tool, the Call Stack one frame deep
-   (fixed, 6cc7583e). Left: install.ts's linking, ata's resolveImport, the margin's withPlace, editor-metrics' worker
-   names, almostnode's shims, bablr-language-ts, silo; tsval's in-run modules (node-test.js, playwright.js, vite.js) run
-   as a run's guest code, which coverage's instrumenting doesn't count.
+   the realms, then measure again. Backfilled (2026-11-27): a package's own calls in a run (package-calls.spec); the TS
+   server's plugins counted (ee1659c5); the debugger stopped (debugger.spec), which found Step Out disabled everywhere but
+   an agent's tool, the Call Stack one frame deep (fixed, 6cc7583e; a value set from the Margin broke and was mended,
+   67034baf); a file: dependency linked (package-types.spec); a rule put back (mock-value.spec); ata's # imports;
+   almostnode's shims against Node (shims.test), which found timingSafeEqual and exec unlike Node's (fixed, e7ec9e67);
+   editor-metrics' worker names. Not tests but measurement: tsval's in-run modules (node-test.js, playwright.js,
+   vite.js) run as a run's guest code, which coverage's instrumenting doesn't count; silo's test command runs in the CLI
+   processes its tests spawn, which no coverage counts; bablr-language-ts's grammar.ts reads as partly run with its
+   top-level constants not, so its lines don't match what ran. For the reassess: the shims nothing reaches (esbuild's
+   build, chokidar, readdirp, rollup, http2, tls). Measuring again: coverage run 46010188876 and the unit tests at
+   2e50df9d.
 4. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
    (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s `why`,
    the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). CI's specs aren't selected by
