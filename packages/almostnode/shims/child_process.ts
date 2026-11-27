@@ -104,8 +104,11 @@ export function exec(
 	const err = enosys("exec");
 
 	queueMicrotask(() => {
-		if (callback) { callback(err, "", ""); }
-		child.emit("error", err);
+		if (callback) {
+			callback(err, "", "");
+		} else {
+			child.emit("error", err);
+		}
 	});
 
 	return child;
@@ -157,8 +160,11 @@ export function execFile(
 	const err = enosys("execFile");
 
 	queueMicrotask(() => {
-		if (callback) { callback(err, "", ""); }
-		child.emit("error", err);
+		if (callback) {
+			callback(err, "", "");
+		} else {
+			child.emit("error", err);
+		}
 	});
 
 	return child;

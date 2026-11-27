@@ -533,8 +533,8 @@ export function createPrivateKey(key: KeyLike): KeyObject {
 // ============================================================================
 
 export function timingSafeEqual(a: Buffer | Uint8Array, b: Buffer | Uint8Array): boolean {
-	if (a.length !== b.length) {
-		return false;
+	if (a.byteLength !== b.byteLength) {
+		throw Object.assign(new RangeError("Input buffers must have the same byte length"), { "code": "ERR_CRYPTO_TIMING_SAFE_EQUAL_LENGTH" });
 	}
 
 	let result = 0;
