@@ -3055,6 +3055,22 @@
       "packages/editor/test/reach-record.test.mjs"
     ]
   },
+  "What runs did since the last commit": {
+    "status": "active",
+    "why": "the evidence diff, NEXT.md item 2 (the user, 2026-11-26: \"Yes, start it\"): with evidence committed as what was seen, a committed line that changed since the last commit is behavior that changed",
+    "since": "2026-11-26",
+    "what": "Problems says what runs did since the last commit that they hadn't by it, on the code they did it in, edited or not: a statement that runs now, a value nullish now or of a new type, an arm taken now, a function impure in a new way. Each partition's committed evidence at HEAD against the working tree's (util's stableChanges), placed by span.",
+    "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Storage in git*",
+    "ways": [
+      "diagnostic collection|evidence-changes"
+    ],
+    "paths": [
+      "packages/editor/extensions/insights/changes.ts"
+    ],
+    "tests": [
+      "packages/editor/test/in-editor/evidence-changes.spec.mjs"
+    ]
+  },
   "What went through this code, on hover": {
     "status": "active",
     "why": "reintroduced on the evidence kept in git: what a run saw, read where the code is. The objective is rough feature parity with full-editor",

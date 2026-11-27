@@ -8,7 +8,7 @@ const CODE = [
 	{ "scheme": "file", "language": "javascriptreact" }
 ];
 
-function valueSite(type: string | undefined): string {
+export function valueSite(type: string | undefined): string {
 	if (type === "MemberExpression" || type === "CallExpression") {
 		return "`?.` — what it tested";
 	}
@@ -26,7 +26,7 @@ function valueSite(type: string | undefined): string {
 		: "Values";
 }
 
-function branchSite(type: string | undefined): { "name": string; "arms": string[] } {
+export function branchSite(type: string | undefined): { "name": string; "arms": string[] } {
 	if (type === "If") {
 		return {
 			"name": "`if`",

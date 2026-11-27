@@ -13,8 +13,8 @@
 import type { Observation } from "@brianjenkins94/util/silo/evidence";
 import type * as vscodeApi from "vscode";
 import { observedRef } from "@brianjenkins94/util/silo/annotations";
-import type { StableObservation } from "@brianjenkins94/util/silo/evidence";
-import { parseEvidence, parseSamples, parseStable } from "@brianjenkins94/util/silo/evidence";
+import type { StableChange, StableObservation } from "@brianjenkins94/util/silo/evidence";
+import { parseEvidence, parseSamples, parseStable, stableChanges } from "@brianjenkins94/util/silo/evidence";
 import { LOCAL_DIR, SILO_DIR } from "@brianjenkins94/util/silo/layout";
 import { annotations } from "./annotations.ts";
 
@@ -37,6 +37,9 @@ export interface SpanEvidence {
 /** A span with evidence, where it is in the document now: offsets, and its node type when BABLR said. */
 export interface Placed { "start": number; "end": number; "type"?: string; "evidence": SpanEvidence }
 
+/** What runs did at a span that they hadn't by the last commit (util's `stableChanges`), where it is in the document. */
+export interface PlacedChange { "start": number; "end": number; "type"?: string; "change": StableChange }
+
 export interface EvidenceStore {
 	/** The evidence placed in `document` as it is now; undefined when it was edited while being placed, or BABLR can't
 	 *  parse it as it is (mid-edit, often) — keep what's drawn: a newer look follows. Empty when there's none, or no
@@ -46,6 +49,10 @@ export interface EvidenceStore {
 	"placedIn": (file: string, text: string) => Promise<Placed[]>;
 	/** Every file with evidence, workspace-relative. */
 	"files": () => Promise<string[]>;
+	/** The evidence diff: what runs did in `document` that they hadn't by the last commit — each partition's committed
+	 *  lines at HEAD against the working tree's — placed in it as it is now. Undefined as `placed` is; empty outside a
+	 *  repository, or with nothing changed. */
+	"changes": (document: vscodeApi.TextDocument) => Promise<PlacedChange[] | undefined>;
 	/** A file's evidence (or samples) changed: the workspace-relative path. */
 	"onDidChange": vscodeApi.Event<string>;
 }
@@ -245,6 +252,55 @@ export function evidenceStore(vscode: typeof vscodeApi, subscriptions: { "dispos
 		});
 	};
 
+	/** Where `spans` are in `text` now (`file`'s): each one's place, or undefined where it isn't; undefined in all when
+	 *  `text` can't be parsed as it is. */
+	const whereIn = async (file: string, text: string, spans: string[]): Promise<({ "start": number; "end": number; "type"?: string } | undefined)[] | undefined> => {
+		const answer = await annotations(vscode.commands).resolve(text, file, spans.map((span) => observedRef(span, file)), { "observed": true });
+
+		if ("unparsable" in answer) {
+			return undefined;
+		}
+
+		const found = "value" in answer ? answer.value : [];
+
+		return spans.map((_, index) => {
+			const at = found[index]?.candidate;
+
+			return at?.start === undefined || at.end === undefined || at.file !== file ? undefined : { "start": at.start, "end": at.end, ...at.type === undefined ? {} : { "type": at.type } };
+		});
+	};
+
+	const changesIn = async (document: vscodeApi.TextDocument): Promise<PlacedChange[] | undefined> => {
+		const file = vscode.workspace.asRelativePath(document.uri, false);
+		const evidence = vscode.Uri.joinPath(root, `${SILO_DIR}/evidence`);
+		const changes: StableChange[] = [];
+
+		for (const user of await folders(evidence)) {
+			for (const environment of await folders(vscode.Uri.joinPath(evidence, user))) {
+				const path = `${SILO_DIR}/evidence/${user}/${environment}/${file}.jsonl`;
+				const working = await text(vscode.Uri.joinPath(evidence, user, environment, `${file}.jsonl`));
+				const head = working === "" ? "" : await Promise.resolve(vscode.commands.executeCommand<{ "head"?: string } | undefined>("editor.git.file", path)).then((answer) => answer?.head ?? "", () => "");
+
+				if (head !== "" && head !== working) {
+					changes.push(...stableChanges(parseStable(head), parseStable(working)));
+				}
+			}
+		}
+
+		if (changes.length === 0) {
+			return [];
+		}
+
+		const { version } = document;
+		const places = await whereIn(file, document.getText(), changes.map((change) => change.span));
+
+		return places === undefined || document.version !== version ? undefined : changes.flatMap((change, index) => {
+			const at = places[index];
+
+			return at === undefined ? [] : [{ ...at, "change": change }];
+		});
+	};
+
 	const place = async (document: vscodeApi.TextDocument): Promise<Placed[] | undefined> => {
 		const { version } = document;
 		const placed = await placeIn(vscode.workspace.asRelativePath(document.uri, false), document.getText());
@@ -292,6 +348,7 @@ export function evidenceStore(vscode: typeof vscodeApi, subscriptions: { "dispos
 			return placing.placed;
 		},
 		"placedIn": async (file, text) => await placeIn(file, text) ?? [],
+		"changes": changesIn,
 		"files": async () => {
 			const found = new Set<string>();
 

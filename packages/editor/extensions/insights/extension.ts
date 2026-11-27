@@ -1,5 +1,6 @@
 import { evidenceStore } from "@brianjenkins94/editor-api/evidence";
 import * as vscode from "vscode";
+import { registerChanges } from "./changes";
 import { registerFixes } from "./fixes";
 import { registerHover } from "./hover";
 import { registerMonitor } from "./monitor";
@@ -10,6 +11,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	registerHover(context, store);
 	registerFixes(context, store);
+	registerChanges(context, store);
 	registerTimes(context, store);
 	registerMonitor(context);
 }

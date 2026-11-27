@@ -583,14 +583,13 @@ roughly in order of how much it would cost to change them later.
 
 ### Not built, worth considering
 
-- **An evidence diff: what an edit changed at runtime.** Evidence is kept per span, spans survive edits, and runs
-  record the version of each file they ran (its blob oid). Comparing a span's evidence before and after a version
-  would answer "what did this edit change?": a branch arm that stopped firing, a value or observed type that's new at
-  a span, a `catch` body that started running, coverage lost. It's a fold over what's already recorded, not new capture,
-  and it would check an edit — an agent's especially — without a test written for it. A tool on debug-mcp beside the
-  hover. (Shrike's `compare_actions` diffs two recorded clicks; this diffs a span's history across a code change.)
-  Open: what "before" is when recency already blends versions (the last run of the previous version, or everything
-  before it), and how few runs after an edit are enough to say something stopped.
+- ~~**An evidence diff: what an edit changed at runtime.**~~ Built 2026-11-26 (extensions/insights/changes.ts), as
+  committed evidence made it simple: a committed line is what was seen, so one that changed since the last commit is
+  behavior that changed. Problems says it on the code, edited or not: a statement that runs now, a value nullish now or
+  of a new type, an arm taken now, a function impure in a new way (util's `stableChanges`, each partition's lines at
+  HEAD against the working tree's). Agents read it as Problems (`editor_problems`). Not said: what stopped — a span's
+  counts are strict while its code is the same, so an arm taken once stays taken; that needs the counts' recency, the
+  machine's, which committed lines don't carry.
 
 ## Decisions
 

@@ -46,9 +46,9 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    carries the last run's id and time and its decayed weights), so each run is a diff of everything it touched; and a
    line is a span's hash with counts, which a reviewer can't place. Decided (the user, 2026-11-26: "Stable lines"): committed is what
    was seen, the counts this machine's (RUNTIME-EVIDENCE.md, *Storage in git*; lib d7fc57b, d7a1ff5); a rerun that
-   behaves the same changes nothing in git (evidence-hover.spec). Next, the evidence diff: a changed committed line is
-   behavior that changed, so the view reads git's diff of `.silo/evidence/` as what an edit changed at runtime, placed
-   on the code. After it, high-confidence claims (the user, 2026-11-26: "contribute local evidence when it becomes high
+   behaves the same changes nothing in git (evidence-hover.spec). The evidence diff is built (2026-11-26): Problems says what
+   runs did since the last commit that they hadn't, on the code, edited or not (evidence-changes.spec); not what stopped.
+   Next, high-confidence claims (the user, 2026-11-26: "contribute local evidence when it becomes high
    confidence"): what's contributed is a claim, not a count — a committed line gains `neverNullish`, `neverRan`,
    `onlyArm` or `pure` once the machine's counts back it past a bar, and loses it when a run breaks it, so a claim
    earned or broken is the diff and the counts still never are; a teammate's editor offers the quick fix on a claim
