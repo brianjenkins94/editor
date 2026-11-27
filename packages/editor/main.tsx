@@ -60,6 +60,7 @@ if (reset === "wait") {
 
 	serve(rootHub, `virtual.request.${tab}`, async (args) => tabRpc.request("virtual.request", args, { "timeoutMs": 30_000, "waitForResponderMs": 10_000 }));
 	serve(rootHub, `capability.decide.${tab}`, async (args) => tabRpc.request("capability.decide", args, { "timeoutMs": 300_000, "waitForResponderMs": 10_000 }));
+	serve(rootHub, `playwright.route.${tab}`, async (args) => tabRpc.request("playwright.route", args, { "timeoutMs": 120_000, "waitForResponderMs": 10_000 }));
 	serve(rootHub, `capability.record.${tab}`, async (args) => tabRpc.request("capability.record", args, { "timeoutMs": 30_000, "waitForResponderMs": 10_000 }));
 	serve(rootHub, "virtual.tab", () => tab);
 	linkDebugMcp(rootHub);

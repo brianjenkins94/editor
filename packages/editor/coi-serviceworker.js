@@ -477,7 +477,79 @@ globalThis.addEventListener("activate", (event) => {
 	event.waitUntil(globalThis.clients.claim());
 });
 
-globalThis.addEventListener("fetch", (event) => {
+// ── a test's routes (packages/playwright's page.route) ───────────────────────────────────────────────────────
+// While a tab's tests have routes, its previews' requests are its shell's first (shell/preview-routes.ts): held for a
+// route's handler, which fulfills, aborts or continues them; one no route matches goes on at once.
+const routing = new Set();
+
+swHub.subscribe("playwright.routes", (data) => {
+	if (data?.routing === true) {
+		routing.add(data.tab);
+	} else {
+		routing.delete(data?.tab);
+	}
+});
+
+const bytesToBase64 = (bytes) => {
+	let binary = "";
+
+	for (const byte of bytes) {
+		binary += String.fromCodePoint(byte);
+	}
+
+	return btoa(binary);
+};
+
+async function routedFirst(event, answerer) {
+	const request = event.request;
+	let preview = answerer.preview;
+	let client;
+
+	try {
+		client = event.clientId ? await globalThis.clients.get(event.clientId) : undefined;
+		preview ??= client ? parseVirtual(new URL(client.url).pathname) : undefined;
+	} catch {
+		preview = undefined;
+	}
+
+	if (preview === undefined || !routing.has(preview.tab)) {
+		return answerer.answer();
+	}
+
+	const answer = await swLog.span("editor.coi-serviceworker.route", { "op": request.method, "port": preview.port }, async (span) => {
+		const headers = {};
+
+		request.headers.forEach((value, key) => {
+			headers[key] = value;
+		});
+
+		const body = request.method === "GET" || request.method === "HEAD" ? undefined : bytesToBase64(new Uint8Array(await request.clone().arrayBuffer()));
+		const answered = await rpc.request(`playwright.route.${preview.tab}`, { "port": preview.port, "client": client?.url, "url": request.url, "method": request.method, "headers": headers, "body": body, "resourceType": request.destination || "fetch" }, { "timeoutMs": 120000, "waitForResponderMs": 2000 }).catch((error) => {
+			span.warn("the routes didn't answer: continued", { "error": String(error) });
+
+			return { "continue": true };
+		});
+
+		span.end({ "answer": Object.keys(answered)[0] });
+
+		return answered;
+	});
+
+	if (answer.abort !== undefined) {
+		return Response.error();
+	}
+
+	if (answer.fulfill !== undefined) {
+		const { status, headers, body } = answer.fulfill;
+
+		return new Response(NULL_BODY.has(status) ? null : Uint8Array.from(atob(body), (character) => character.codePointAt(0)), { "status": status, "headers": headers });
+	}
+
+	return answerer.answer();
+}
+
+// How a request is answered here: a function to answer it, or nothing, for the browser to.
+function answererOf(event) {
 	const request = event.request;
 	const requestUrl = new URL(request.url);
 	const pathname = requestUrl.pathname;
@@ -487,15 +559,11 @@ globalThis.addEventListener("fetch", (event) => {
 
 	// A preview's page, asking about a socket (shared/socket-gate.ts).
 	if (virtual !== undefined && virtual.rest === SOCKET_GATE && request.method === "POST") {
-		event.respondWith(request.json().then(({ capability, resource }) => decideCall(virtual.tab, virtual.port, capability, resource)).then((answer) => new Response(JSON.stringify({ "allow": answer.allow === true }), { "headers": { "content-type": "application/json" } })));
-
-		return;
+		return { "answer": () => request.json().then(({ capability, resource }) => decideCall(virtual.tab, virtual.port, capability, resource)).then((answer) => new Response(JSON.stringify({ "allow": answer.allow === true }), { "headers": { "content-type": "application/json" } })) };
 	}
 
 	if (virtual !== undefined) {
-		event.respondWith(handleVirtualRequest(request, virtual.tab, virtual.port, (virtual.rest || "/") + requestUrl.search));
-
-		return;
+		return { "preview": virtual, "answer": () => handleVirtualRequest(request, virtual.tab, virtual.port, (virtual.rest || "/") + requestUrl.search) };
 	}
 
 	// Module resolver: <base>/workspace/… (store + node_modules CDN fallback). Strip any base prefix so the
@@ -503,9 +571,7 @@ globalThis.addEventListener("fetch", (event) => {
 	const wsIndex = pathname.indexOf(WORKSPACE_ROOT);
 
 	if (wsIndex !== -1) {
-		event.respondWith(serveWorkspace(request, requestUrl, pathname.slice(wsIndex)));
-
-		return;
+		return { "answer": () => serveWorkspace(request, requestUrl, pathname.slice(wsIndex)) };
 	}
 
 	// A same-origin request with no address, but a referer from a page of a server: the app used an absolute path or
@@ -519,24 +585,32 @@ globalThis.addEventListener("fetch", (event) => {
 
 			const follows = request.mode === "navigate" || (request.method === "GET" && request.redirect === "follow");
 
-			event.respondWith(follows ? Response.redirect(requestUrl.origin + from.prefix + target, 302) : handleVirtualRequest(request, from.tab, from.port, target));
-
-			return;
+			return { "preview": from, "answer": () => (follows ? Response.redirect(requestUrl.origin + from.prefix + target, 302) : handleVirtualRequest(request, from.tab, from.port, target)) };
 		}
 	}
 
 	// A range/only-if-cached cross-origin request can't be re-fetched here — leave it to the browser.
 	if (request.cache === "only-if-cached" && request.mode !== "same-origin") {
-		return;
+		return undefined;
 	}
 
 	// A preview's fetch to somewhere else is decided. (`destination` is empty for a fetch or an XHR.)
 	if (requestUrl.origin !== globalThis.location.origin && request.destination === "" && event.clientId) {
-		event.respondWith(gatedFetch(event, request));
-
-		return;
+		return { "fromPreview": true, "answer": () => gatedFetch(event, request) };
 	}
 
 	// Everything else passes straight through with COI stamping.
-	event.respondWith(passThrough(request));
+	return { "answer": () => passThrough(request) };
+}
+
+globalThis.addEventListener("fetch", (event) => {
+	const answerer = answererOf(event);
+
+	if (answerer === undefined) {
+		return;
+	}
+
+	const routable = routing.size > 0 && (answerer.preview !== undefined || answerer.fromPreview === true);
+
+	event.respondWith(routable ? routedFirst(event, answerer) : answerer.answer());
 });

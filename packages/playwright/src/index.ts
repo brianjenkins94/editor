@@ -8,4 +8,6 @@ export { expect } from "./expect.ts";
 export type { Driver } from "./locator.ts";
 export { FrameLocator, Locator, Page, TimeoutError } from "./locator.ts";
 export type { Fetched, FetchInit, RequestOptions } from "./request.ts";
+export type { FulfillOptions, RouteAnswer, Routed, RouteMatch, UrlMatcher } from "./route.ts";
+export { matchesCrossed, Request, Route } from "./route.ts";
 export { APIRequestContext, APIResponse, fetched, requestInit } from "./request.ts";

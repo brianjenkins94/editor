@@ -580,9 +580,10 @@ export interface RuntimeVerdict { "allow": boolean; "decided": NonNullable<Effec
 /** A worker's link into the editor's runtime. */
 /** A Playwright call on a preview window's page (packages/playwright's `Driver`: `run` an op, `goto`, `url`, `title`),
  *  served by the shell: on the window you have open. And `fetch`, its test's own request, made by the shell itself (no
- *  window needed: a server's answer, or that nobody's there, is the service worker's to any client). */
+ *  window needed: a server's answer, or that nobody's there, is the service worker's to any client). And `page.route`'s:
+ *  `routes` (what to hold of the page's requests), `routed` (what's held, waiting a while for one) and `answer`. */
 export interface PlaywrightCall {
-	"call": "run" | "goto" | "url" | "title" | "release" | "fetch" | "evaluate" | "errors" | "emulate";
+	"call": "run" | "goto" | "url" | "title" | "release" | "fetch" | "evaluate" | "errors" | "emulate" | "routes" | "routed" | "answer";
 	"args"?: unknown[];
 	/** Which page is asking: each has a window of its own while its test runs, so tests can run at once. */
 	"page"?: string;

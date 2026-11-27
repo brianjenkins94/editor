@@ -176,7 +176,11 @@ and the table of features and tests shows the same: a file whose code has change
 Playwright test is told and traced as any other. Its `page` drives the preview you have open (the preview window used
 last): packages/playwright's `Page`, `Locator` and `expect`, run in the debug worker (not stepped), each of a locator's ops
 run on the preview's page by the shell (`playwright.run`, shell/preview-windows.tsx). An action waits for its element there
-as Playwright's do, and an `expect` until it holds. What's there: `test` with `page`, `request` (a test's own HTTP requests,
+as Playwright's do, and an `expect` until it holds. `page.route` answers the preview's requests a route matches (whatever
+it asks its own server for, and its fetches and XHRs to other sites): while a tab's tests have routes, the service worker asks the
+shell first (shell/preview-routes.ts), which holds what a route's glob or RegExp matches until the test's handler fulfills,
+continues, aborts or falls back — before the preview gate, so a fulfilled call to another site asks no one. Not changing a
+continued request (`continue({ url, headers })`), nor `route.fetch`. What's there: `test` with `page`, `request` (a test's own HTTP requests,
 made by the shell as a client of the origin, not through the program's `fetch`) and `browserName`, `.skip` (declared, or
 called in a test), `.fixme`, `.describe` and its modifiers, the four hooks, `step`, `info`. Not yet: `test.extend`,
 `test.use`'s options, other browsers, contexts, timeouts, and `playwright` itself (a browser launched). With no

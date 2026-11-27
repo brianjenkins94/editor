@@ -1,5 +1,5 @@
 import type { PlaywrightCall } from "@brianjenkins94/editor-api/runtime";
-import type { Fetched, Outcome } from "@brianjenkins94/playwright";
+import type { Fetched, Outcome, Routed } from "@brianjenkins94/playwright";
 import type { ModuleLoader } from "@brianjenkins94/tsval";
 import type { Control } from "../debug-protocol";
 import { REFS_DIR } from "@brianjenkins94/editor-api/git";
@@ -195,6 +195,13 @@ export const editorPlaywright = {
 				tally("page:request", url, "made");
 
 				return playwrightCall(id, "fetch", url, init) as Promise<Fetched>;
+			},
+			"routes": async (matches) => {
+				await playwrightCall(id, "routes", matches);
+			},
+			"routed": async () => playwrightCall(id, "routed") as Promise<Routed[] | undefined>,
+			"answer": async (held, answer) => {
+				await playwrightCall(id, "answer", held, answer);
 			}
 		});
 

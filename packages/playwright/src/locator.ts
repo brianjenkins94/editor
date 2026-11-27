@@ -6,7 +6,9 @@
  */
 import type { Action, Op, Outcome, Step, TextMatch } from "./engine.ts";
 import type { Fetched, FetchInit } from "./request.ts";
+import type { RouteAnswer, Routed, RouteEntry, RouteMatch, UrlMatcher } from "./route.ts";
 import { APIRequestContext } from "./request.ts";
+import { crossing, handle } from "./route.ts";
 
 /** Where a page's ops run, how it's navigated, and where its test's own requests are made (request.ts). */
 export interface Driver {
@@ -21,6 +23,12 @@ export interface Driver {
 	"errors"?: () => Promise<string[]>;
 	/** The page done with. */
 	"close"?: () => Promise<void>;
+	/** The routes' URLs (route.ts): what of the page's requests to hold for them; none, nothing held. */
+	"routes"?: (matches: RouteMatch[]) => Promise<void>;
+	/** The requests held for the routes since the last ask, waiting a while for one; undefined once the page is done with. */
+	"routed"?: () => Promise<Routed[] | undefined>;
+	/** A held request answered. */
+	"answer"?: (id: string, answer: RouteAnswer) => Promise<void>;
 }
 
 /** A timeout passing, as Playwright's TimeoutError. */
@@ -255,6 +263,75 @@ export class Page extends Finder {
 
 	public async textContent(selector: string, options: ActionOptions = {}): Promise<string | null> {
 		return this.andHeard(this.locator(selector).first().textContent(options));
+	}
+
+	private readonly routes: RouteEntry[] = [];
+	private answering = false;
+
+	/** Playwright's `page.route`: the page's requests `url` matches handled by `handler` (route.ts), `times` of them or all. */
+	public async route(url: UrlMatcher, handler: RouteEntry["handler"], options: { "times"?: number } = {}): Promise<void> {
+		if (this.driver.routes === undefined || this.driver.routed === undefined || this.driver.answer === undefined) {
+			throw new Error("page.route: this page's requests can't be routed");
+		}
+
+		this.routes.push({ "url": url, "handler": handler, "left": options.times ?? Infinity });
+		await this.routesChanged();
+
+		if (!this.answering) {
+			this.answering = true;
+			void this.answerHeld();
+		}
+	}
+
+	/** Its routes for `url` taken away: `handler`'s, or every one. */
+	public async unroute(url: UrlMatcher, handler?: RouteEntry["handler"]): Promise<void> {
+		for (let index = this.routes.length - 1; index >= 0; index--) {
+			if (this.routes[index].url === url && (handler === undefined || this.routes[index].handler === handler)) {
+				this.routes.splice(index, 1);
+			}
+		}
+
+		await this.routesChanged();
+	}
+
+	public async unrouteAll(): Promise<void> {
+		this.routes.length = 0;
+		await this.routesChanged();
+	}
+
+	private async routesChanged(): Promise<void> {
+		for (let index = this.routes.length - 1; index >= 0; index--) {
+			if (this.routes[index].left <= 0) {
+				this.routes.splice(index, 1);
+			}
+		}
+
+		await this.driver.routes?.(this.routes.map(({ url }) => crossing(url)));
+	}
+
+	/** While it has routes: what's held for them, each answered by them as it comes. */
+	private async answerHeld(): Promise<void> {
+		try {
+			while (!this.closed && this.routes.length > 0) {
+				const held = await this.driver.routed?.();
+
+				if (held === undefined) {
+					break;
+				}
+
+				for (const each of held) {
+					void handle(this.routes, each).then(async (answer) => {
+						await this.driver.answer?.(each.id, answer);
+
+						if (this.routes.some(({ left }) => left <= 0)) {
+							await this.routesChanged();
+						}
+					});
+				}
+			}
+		} finally {
+			this.answering = false;
+		}
 	}
 
 	private closed = false;

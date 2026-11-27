@@ -17,6 +17,7 @@ import { askInWindow, type PreviewAsk } from "./preview-ask";
 import { installPreviewCdp, openDevtoolsPanel } from "./preview-devtools";
 import { askRealms, driving, inFull, keepEvidence } from "./own-evidence";
 import { createPreviewProfiler, installPreviewProfiler, PROFILE_MS } from "./preview-profile";
+import { installPreviewRoutes } from "./preview-routes";
 import "theme/components/button";
 
 const log = logger({ "source": "shell" });
@@ -397,10 +398,29 @@ function install(hub: Hub): void {
 		frame.style.colorScheme = scheme;
 	};
 
+	const routes = installPreviewRoutes(hub, (page) => claimed.get(page)?.querySelector("iframe")?.contentWindow);
+
 	serve(hub, "playwright.run", async (args) => {
 		const { call, "args": given = [], "page": asking = "" } = args as PlaywrightCall;
 
+		if (call === "routes") {
+			routes.routes(asking, given[0] as Parameters<typeof routes.routes>[1]);
+
+			return undefined;
+		}
+
+		if (call === "routed") {
+			return routes.routed(asking);
+		}
+
+		if (call === "answer") {
+			routes.answer(given[0] as string, given[1] as Parameters<typeof routes.answer>[1]);
+
+			return undefined;
+		}
+
 		if (call === "release") {
+			routes.release(asking);
 			await collect(asking);
 
 			const reach = ranSoFar.get(asking);

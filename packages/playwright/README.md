@@ -35,7 +35,9 @@ Playwright page in Chromium, and our `Page` running our engine in that same page
 - **States** read as Playwright's: visible is a non-empty box and not `visibility: hidden`; disabled includes a disabled
   fieldset's descendants.
 
-Frames: `frameLocator` goes into a same-origin iframe, as deep as they nest. Typing reaches an EditContext (Monaco's) as real keys do. Open shadow roots are gone into, by selectors crossing them too, as Playwright's are. Not here: closed ones, other origins' frames, `page.frames()`, `page.route`, screenshots, file uploads, drag and drop, and the `>>` selector syntax.
+Frames: `frameLocator` goes into a same-origin iframe, as deep as they nest. Typing reaches an EditContext (Monaco's) as real keys do. Open shadow roots are gone into, by selectors crossing them too, as Playwright's are. Not here: closed ones, other origins' frames, `page.frames()`, screenshots, file uploads, drag and drop, and the `>>` selector syntax.
+
+Routes (`src/route.ts`): `page.route(url, handler, { times })`, `unroute`, `unrouteAll`, with a glob, a RegExp or a predicate, matched as Playwright matches them (`test/route.test.mjs` holds the globs to Playwright's own). The newest route answers first; `fallback` hands a request to the one before; a handler that throws aborts it. A glob or RegExp crosses to the driver, which holds only what it matches; with a predicate, every request is held. Not here: changing a continued request, and `route.fetch`.
 
 ```bash
 node --test packages/playwright/test/engine.test.mjs
