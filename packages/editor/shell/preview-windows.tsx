@@ -1,10 +1,11 @@
 /** @jsxImportSource preact */
+import type { ModuleEvidence } from "@brianjenkins94/editor-api/recorded";
 import type { PlaywrightCall } from "@brianjenkins94/editor-api/runtime";
 import type { Hub } from "@brianjenkins94/hub";
 import type { ShellFeature } from "./feature";
 import type { DevtoolsPanel } from "./preview-devtools";
 import { appWindow } from "@brianjenkins94/app-window";
-import { serve } from "@brianjenkins94/hub";
+import { createRpcClient, serve } from "@brianjenkins94/hub";
 import { logger } from "@brianjenkins94/util/logger";
 import { AppWindow, ArrowDownToLine, ArrowUpToLine, Bug, Gauge, Pause, Play, Redo2, RotateCcw } from "lucide";
 import { render } from "preact";
@@ -23,12 +24,14 @@ const COVERAGE_CHANNEL = "editor.coverage";
 
 const ASK_MS = 1000;
 
-async function askRealms(ask: Record<string, unknown>): Promise<{ "realm": string; "ran"?: Record<string, [number, number][]> }[]> {
+interface RealmAnswer { "realm": string; "ran"?: Record<string, [number, number][]>; "modules"?: ModuleEvidence[] }
+
+async function askRealms(ask: Record<string, unknown>): Promise<RealmAnswer[]> {
 	const channel = new BroadcastChannel(COVERAGE_CHANNEL);
 	const nonce = crypto.randomUUID();
-	const answers: { "realm": string; "ran"?: Record<string, [number, number][]> }[] = [];
+	const answers: RealmAnswer[] = [];
 
-	channel.addEventListener("message", ({ data }: MessageEvent<{ "answer"?: string; "realm": string; "ran"?: Record<string, [number, number][]> }>) => {
+	channel.addEventListener("message", ({ data }: MessageEvent<RealmAnswer & { "answer"?: string }>) => {
 		if (data.answer === nonce) {
 			answers.push(data);
 		}
@@ -349,8 +352,24 @@ function install(hub: Hub): void {
 	const openedForPage = new Set<HTMLElement>();
 
 	const counting = "__evidence" in globalThis;
+	const inFull = (globalThis as { "__evidence"?: { "full"?: true } }).__evidence?.full === true;
 	const realmsBefore = new Map<string, Set<string>>();
 	const ranSoFar = new Map<string, Map<string, [number, number][]>>();
+	const drivenSoFar = new Map<string, Map<string, ModuleEvidence[]>>();
+	const rpc = createRpcClient(hub);
+	const keepDriven = async (modules: ModuleEvidence[]): Promise<void> => {
+		const [first, ...rest] = modules;
+
+		if (first === undefined) {
+			return;
+		}
+
+		const { id } = await rpc.request("runs.begin", { "title": "The editor, driven by a test", "cwd": "/workspace", "runtime": "browser" }, { "timeoutMs": 10_000 }) as { "id": string };
+		const coverage = ({ file, version, statements, sites }: ModuleEvidence): Record<string, unknown> => ({ "file": file, "version": version, "source": "", "statements": statements, "sites": sites });
+
+		hub.publish("evidence.observed", { "runId": id, ...coverage(first), "files": rest.map(coverage) });
+		hub.publish(`node.exit.${id}`, { "exitCode": 0 });
+	};
 	const collect = async (page: string): Promise<void> => log.span("editor.shell.preview-windows.reach", {}, async (span) => {
 		const before = realmsBefore.get(page);
 
@@ -369,6 +388,17 @@ function install(hub: Hub): void {
 		}
 
 		ranSoFar.set(page, ran);
+
+		if (inFull && realms.length > 0) {
+			const driven = drivenSoFar.get(page) ?? new Map<string, ModuleEvidence[]>();
+
+			for (const { realm, modules } of await askRealms({ "ask": "full", "realms": realms })) {
+				driven.set(realm, modules ?? []);
+			}
+
+			drivenSoFar.set(page, driven);
+		}
+
 		span.end({ "count": realms.length, "answered": answers.length, "files": ran.size });
 	});
 
@@ -413,10 +443,18 @@ function install(hub: Hub): void {
 			await collect(asking);
 
 			const reach = ranSoFar.get(asking);
+			const driven = [...drivenSoFar.get(asking)?.values() ?? []].flat();
 			const element = claimed.get(asking);
 
 			realmsBefore.delete(asking);
 			ranSoFar.delete(asking);
+			drivenSoFar.delete(asking);
+
+			if (driven.length > 0) {
+				await keepDriven(driven).catch((error: unknown) => {
+					log.warn("the driven editor's evidence wasn't kept", { "error": error instanceof Error ? error.message : String(error) });
+				});
+			}
 			schemes.delete(asking);
 
 			claimed.delete(asking);

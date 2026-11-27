@@ -243,6 +243,22 @@ Decided 2026-10-04: every one as recommended (the **bold** option).
 - **P9 · The envelope's versions.** **(a) `files` keeps the last version, `versions` lists every oid that ran**; (b)
   `files` only.
 
+## The editor's own, in the editor
+
+The editor is a program like any other, and its own code has evidence when an editor runs inside it (the user,
+2026-11-27: "we should be able to instrument editor in editor and get coverage/run information in doing so"). Served
+with `COVERAGE=full` (`COVERAGE=1` counts statements only, for the reach record), every realm's modules are
+instrumented as a preview's page is — statements, values, branches, what a return gave — by build/coverage.ts, each
+versioned by its source's git blob, and each realm loads previews/editor-evidence.ts once: page-evidence's recorder,
+answering the coverage channel (the realms, what ran, the counts, and all of it when asked). When a spec in the editor
+releases the editor it drove, the preview windows ask that editor's realms for their evidence and keep it as a run of
+its own ("The editor, driven by a test"); the workbench takes each module's source from the workspace only where its
+blob matches what ran, so evidence never lands on a different version of a file. The hover, the Margin and what could
+go then read it on the editor's own source: the hub's `envelope.from ?? data.replyTo`, "32 values in 1 run, never
+nullish", sampled as "workbench", "shell", "bridge", "debug-worker#…". Keeping it is BABLR's per file, about a third of
+a minute for a dozen files, so a driven editor's few hundred take a while after the spec ends. Not yet: a person's own
+use of an editor inside the editor, which no spec releases.
+
 ## Fourth slice: what could go, in purple, across inputs
 
 The point of running a program many times: what none of the runs needed is code that could go. Decided 2026-10-05.

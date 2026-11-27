@@ -3046,13 +3046,14 @@
     "why": "a stopgap (user, 2026-11-03): the end goal is every test running in the editor, in the browser, with in-editor Playwright driving previews and tsval running the tests, where what a test ran is its trace. This records reach from outside until then, to reassess sharing now. Remove it as Preview windows and Playwright tests in the debugger come back",
     "since": "2026-11-03",
     "until": "2027-02-01",
-    "what": "With COVERAGE=1, the editor's own modules are instrumented in every realm. In the editor, a UI spec run in the debugger keeps, as its reach, what the editor in its window ran, every realm of it, frames and workers (shell/preview-windows.tsx asks them on the origin's editor.coverage channel); and from outside, the browser suites record which statements of which files each test ran, which build/reach-record.ts compares with what each test's file declares, keeping it in .silo/last-run/reach.json.",
+    "what": "With COVERAGE=1, the editor's own modules are instrumented in every realm. In the editor, a UI spec run in the debugger keeps, as its reach, what the editor in its window ran, every realm of it, frames and workers (shell/preview-windows.tsx asks them on the origin's editor.coverage channel); and from outside, the browser suites record which statements of which files each test ran, which build/reach-record.ts compares with what each test's file declares, keeping it in .silo/last-run/reach.json. With COVERAGE=full, the editor's own code is counted in full — values, branches, what a return gave — and what an editor a test drives does is kept as a run's evidence on the editor's own source, where its hover and Margin show it.",
     "docs": "packages/silo/README.md, *Declared against observed*",
     "paths": [
       "packages/editor/build/coverage.ts",
       "packages/editor/build/reach-record.ts"
     ],
     "tests": [
+      "packages/editor/test/coverage-full.test.mjs",
       "packages/editor/test/reach-record.test.mjs"
     ]
   },

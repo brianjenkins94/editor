@@ -78,7 +78,7 @@ function browserClass(): Omit<Environment, "runtime" | "name"> {
 	};
 }
 
-interface Coverage { "file": string; "source": string; "statements": StatementCoverage[]; "sites": SiteObservation[] }
+interface Coverage { "file": string; "source": string; "statements": StatementCoverage[]; "sites": SiteObservation[]; "version"?: string }
 
 export function offsets(source: string, ranges: { "start": [number, number]; "end": [number, number] }[]): { "start": number; "end": number }[] {
 	const lineStarts = [0];
@@ -203,7 +203,10 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 					"statements": each.statements,
 					"sites": Array.isArray(each.sites)
 						? each.sites
-						: []
+						: [],
+					...typeof each.version === "string"
+						? { "version": each.version }
+						: {}
 				}
 			]
 		: []);
@@ -541,6 +544,16 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 
 	let writing = Promise.resolve();
 
+	const sourced = async (covered: Coverage[]): Promise<Coverage[]> => Promise.all(covered.map(async (each) => {
+		if (each.source !== "" || each.version === undefined) {
+			return each;
+		}
+
+		const source = await text(repoRelative(each.file));
+
+		return source !== "" && await blobOid(source) === each.version ? { ...each, "source": source } : each;
+	}));
+
 	runs.onEnd((run) => {
 		if (run.port !== undefined && !reports.has(run.id)) {
 			hub.publish("evidence.flush", { "port": run.port });
@@ -564,7 +577,7 @@ export function installEvidence(vscode: typeof vscodeApi, hub: Hub, runs: RunReg
 		packages.delete(run.id);
 
 		if (covered !== undefined) {
-			writing = writing.then(async () => record(run, covered, loaded)).catch(() => { /* evidence never breaks a run */ });
+			writing = writing.then(async () => record(run, await sourced(covered), loaded)).catch(() => { /* evidence never breaks a run */ });
 		} else if (preview !== undefined) {
 			writing = writing.then(async () => record(run, await previewCoverage(preview), [], Object.fromEntries(preview.versions), [...preview.packages])).catch(() => { /* evidence never breaks a run */ });
 		} else {

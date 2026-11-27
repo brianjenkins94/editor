@@ -1,4 +1,5 @@
-import type { Plugin } from "vite";
+import type { Plugin, RollupOutput } from "vite";
+import { createHash } from "node:crypto";
 import * as path from "node:path";
 import * as url from "node:url";
 import * as fs from "@brianjenkins94/util/fs";
@@ -26,38 +27,94 @@ function ours(id: string): string | undefined {
 	return linked === null ? relative : "packages/" + linked[1];
 }
 
-export function instrumented(code: string, id: string): string | undefined {
+export type Level = "coverage" | "full";
+
+export const levelOf = (setting = process.env["COVERAGE"]): Level | undefined => {
+	if (setting === "full") {
+		return "full";
+	}
+
+	return setting === "1" ? "coverage" : undefined;
+};
+
+export const RUNTIME_ID = "virtual:editor-evidence";
+
+export function blobOid(code: string): string {
+	return createHash("sha1").update(`blob ${String(Buffer.byteLength(code))}\0`).update(code).digest("hex");
+}
+
+export function instrumented(code: string, id: string, level: Level = "coverage"): string | undefined {
 	const name = ours(id);
 
 	if (name === undefined) {
 		return undefined;
 	}
 
-	const sites = instrument(name, "cov", "coverage");
+	const version = blobOid(code);
+	const sites = instrument(name, version, level);
 	const output = ts.transpileModule(code, { "fileName": name, "compilerOptions": { "module": ts.ModuleKind.ESNext, "target": ts.ScriptTarget.ESNext, "jsx": ts.JsxEmit.Preserve, "allowJs": true, "verbatimModuleSyntax": false, "useDefineForClassFields": true }, "transformers": { "before": [sites.before] } }).outputText;
+
+	if (level === "full") {
+		return `import ${JSON.stringify(RUNTIME_ID)};\n${sites.prelude()}\n${output}`;
+	}
+
 	const table = JSON.stringify(sites.sites().map((site) => [site.kind, ...site.start, ...site.end]));
 	const identity = "(_, x) => x";
-	const prelude = `${RUNTIME}const __ev = { ...globalThis.__evidence.module(${JSON.stringify(name)}, "cov", ${table}), v: ${identity}, b: ${identity}, a: ${identity}, o: ${identity}, c(_, __, x) { return x; }, p() {}, e() {}, k: ${identity}, x() {} };`;
+	const prelude = `${RUNTIME}const __ev = { ...globalThis.__evidence.module(${JSON.stringify(name)}, ${JSON.stringify(version)}, ${table}), v: ${identity}, b: ${identity}, a: ${identity}, o: ${identity}, c(_, __, x) { return x; }, p() {}, e() {}, k: ${identity}, x() {} };`;
 
 	return `${prelude}\n${output}`;
 }
 
-export function coveragePlugin(): Plugin {
+let runtime: Promise<string> | undefined;
+
+export async function bundledRuntime(): Promise<string> {
+	const { build } = await import("vite");
+	const output = await build({
+		"configFile": false,
+		"logLevel": "silent",
+		"root": url.fileURLToPath(new URL("..", import.meta.url)),
+		"build": {
+			"write": false,
+			"minify": false,
+			"target": "esnext",
+			"lib": { "entry": url.fileURLToPath(new URL("../previews/editor-evidence.ts", import.meta.url)), "formats": ["iife"], "name": "editor_evidence", "fileName": "editor-evidence" },
+			"rollupOptions": { "output": { "codeSplitting": false } }
+		}
+	}) as RollupOutput[];
+
+	return output[0].output.find((chunk) => chunk.type === "chunk")?.code ?? "";
+}
+
+export function coveragePlugin(level: Level = "coverage"): Plugin {
 	return {
 		"name": "coverage",
 		"enforce": "pre",
+		"resolveId": (source) => (source === RUNTIME_ID ? "\0" + RUNTIME_ID : undefined),
+		"load": async (id) => {
+			if (id !== "\0" + RUNTIME_ID) {
+				return undefined;
+			}
+
+			runtime ??= bundledRuntime();
+
+			return runtime;
+		},
 		"transform": (code, id) => {
-			const counted = instrumented(code, id);
+			const counted = instrumented(code, id, level);
 
 			return counted === undefined ? undefined : { "code": counted, "map": null };
 		}
 	};
 }
 
-export const coverage = (): Plugin[] => (process.env["COVERAGE"] === "1" ? [coveragePlugin()] : []);
+export const coverage = (): Plugin[] => {
+	const level = levelOf();
+
+	return level === undefined ? [] : [coveragePlugin(level)];
+};
 
 export function emittedAsIs(file: string): string {
 	const code = fs.readFileSync(file, "utf8");
 
-	return process.env["COVERAGE"] === "1" ? instrumented(code, file) ?? code : code;
+	return levelOf() === undefined ? code : instrumented(code, file) ?? code;
 }
