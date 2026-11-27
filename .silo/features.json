@@ -1983,9 +1983,10 @@
       "packages/editor/silo-enforce.d.ts"
     ],
     "tests": [
+      "packages/editor/test/agent-tools/real-effects.mjs",
       "packages/editor/test/capabilities.test.mjs",
-      "packages/editor/test/loopback-fetch.test.mjs",
-      "packages/editor/test/agent-tools/real-effects.mjs"
+      "packages/editor/test/in-editor/package-calls.spec.mjs",
+      "packages/editor/test/loopback-fetch.test.mjs"
     ]
   },
   "Redacted logging": {
