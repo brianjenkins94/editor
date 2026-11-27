@@ -138,6 +138,10 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      stale-entries.ts); declarations unrun in files partly run 370 → 338 — repo-load's loadRepo, behindGitHub and
      fastForward, git-engine's fetchBranch, pull and push, session's account and status among them. bablr-worker's
      reidentify runs in no test (it changed in 9068bf07).
+     What Nothing Ran… on it: called and never run 1,218 → 1,200, most of them what the record doesn't measure rather
+     than what no test runs — packages/api 423 (its tests run in workerd, outside the record), components 111 (the
+     monaco-vscode-api component isn't instrumented), packages/admin 95 (admin.mjs records no reach), and scripts and
+     benches run by hand. Next: those into the record, then what's left is what no test runs.
    - **Removed**: zenfs-vfs's getSharedWorkspaceBuffer and mountWorkspaceVfs (nothing calls them since the node worker
      went, 517144b7).
    - **Kept, as measurement**: tooling used by being run (the editor's build/, contrib, the demo, bench, monaco's build
