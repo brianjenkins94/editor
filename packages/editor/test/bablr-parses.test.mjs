@@ -8,7 +8,8 @@ import { test } from "node:test";
 import { logger, sinks } from "@brianjenkins94/util/logger";
 
 const { blobOid, pack, parseOf, parser, shapesOf, spansOf, unpack } = await import("../workers/bablr-parses.ts");
-const { atomsOf, cstSpansAsync, deriveIdentityAsync, editGroups, spanAnchors } = await import("@brianjenkins94/bablr");
+// (BABLR's source, as its own tests run it: its bundle, dist/, is built for the editor, not before the unit tests)
+const { atomsOf, cstSpansAsync, deriveIdentityAsync, editGroups, spanAnchors } = await import("../../bablr/src/index.js");
 
 const HEAD = "export function add(left: number, right: number) {\n\t// the sum\n\treturn left + right;\n}\n";
 const REINDENTED = "export function add(left: number, right: number) {\n    // the sum\n    return left + right;\n}\n";
