@@ -1,11 +1,13 @@
 import "./bablr-fast-freeze";
 // (A comment, so sorting leaves the freeze first.)
 import type { SpanRef, SpanShape } from "@brianjenkins94/util/silo/annotations";
+import type { Anchor, Kept, Places } from "./bablr-places";
 import { atomsOf, cstSpansAsync, deriveIdentityAsync, editGroups, follow, PARSE_VERSION, pickAnchor, spanAnchors } from "@brianjenkins94/bablr";
 import { createHub, portTransport, serve } from "@brianjenkins94/hub";
 import { observe } from "@brianjenkins94/observability";
 import { OBSERVED, PIPELINE, referTo, resolve } from "@brianjenkins94/util/silo/annotations";
 import { NETWORK_PROBES } from "../shared/architecture";
+import { blobOid, placer, placesOf, shapesOf } from "./bablr-places";
 
 const hub = createHub({ "id": "bablr" });
 
@@ -14,17 +16,6 @@ hub.link(portTransport(globalThis));
 const { log } = observe(hub, { "network": NETWORK_PROBES });
 
 interface Answer { "parsed": boolean; "why"?: string; "comments"?: number[]; "ms": number }
-
-async function blobOid(text: string): Promise<string> {
-	const body = new TextEncoder().encode(text);
-	const header = new TextEncoder().encode(`blob ${String(body.length)}\0`);
-	const bytes = new Uint8Array(header.length + body.length);
-
-	bytes.set(header);
-	bytes.set(body, header.length);
-
-	return [...new Uint8Array(await crypto.subtle.digest("SHA-1", bytes))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
 
 function done<T>(request: IDBRequest<T>): Promise<T> {
 	return new Promise((resolve, reject) => {
@@ -39,9 +30,11 @@ function done<T>(request: IDBRequest<T>): Promise<T> {
 
 let released = false;
 
+const MOST_PLACES = 4000;
+
 const database = new Promise<IDBDatabase | undefined>((resolve) => {
 	try {
-		const open = indexedDB.open("bablr", 3);
+		const open = indexedDB.open("bablr", 4);
 
 		open.addEventListener("upgradeneeded", () => {
 			for (const name of [...open.result.objectStoreNames]) {
@@ -49,6 +42,7 @@ const database = new Promise<IDBDatabase | undefined>((resolve) => {
 			}
 
 			open.result.createObjectStore("parses");
+			open.result.createObjectStore("places").createIndex("at", "at");
 		});
 		open.addEventListener("success", () => {
 			open.result.addEventListener("versionchange", () => {
@@ -68,11 +62,24 @@ const database = new Promise<IDBDatabase | undefined>((resolve) => {
 	}
 }).then(async (db) => {
 	if (db !== undefined) {
-		const parses = db.transaction("parses", "readwrite").objectStore("parses");
+		const stores = db.transaction(["parses", "places"], "readwrite");
 
-		for (const key of await done(parses.getAllKeys()) as string[]) {
-			if (!key.startsWith(PARSE_VERSION + "/")) {
-				parses.delete(key);
+		for (const name of ["parses", "places"]) {
+			const store = stores.objectStore(name);
+
+			for (const key of await done(store.getAllKeys()) as string[]) {
+				if (!key.startsWith(PARSE_VERSION + "/")) {
+					store.delete(key);
+				}
+			}
+		}
+
+		const places = stores.objectStore("places");
+		const over = await done(places.count()) - MOST_PLACES;
+
+		if (over > 0) {
+			for (const key of await done(places.index("at").getAllKeys(null, over))) {
+				places.delete(key);
 			}
 		}
 	}
@@ -128,7 +135,6 @@ serve(hub, "bablr.parse", async (args, { signal }) => {
 
 interface CstSpan { "type": string | null; "start": number; "end": number; "token": boolean; "trivia": boolean; "text"?: string }
 interface Cst { "spans": CstSpan[]; "length": number; "hash": string }
-interface Anchor { "type": string | null; "start": number; "end": number; "id": string }
 type Parsed = { "cst": Cst } | { "why": string };
 
 const KEPT_PARSES = 16;
@@ -221,35 +227,37 @@ serve(hub, "bablr.editGroups", async (args, { signal }) => {
 
 const anchorsOf = (source: string, cst: Cst): Anchor[] => spanAnchors(source, "Program", cst) as Anchor[];
 
-function shapesOf(source: string, cst: Cst): SpanShape[] {
-	const tokens = cst.spans.filter((span) => span.token && !span.trivia).toSorted((left, right) => left.start - right.start);
-	const firstAt = (offset: number): number => {
-		let low = 0;
-		let high = tokens.length;
+const kept: Kept = {
+	"get": async (key) => {
+		const db = await database;
 
-		while (low < high) {
-			const middle = (low + high) >> 1;
-
-			if (tokens[middle].start < offset) {
-				low = middle + 1;
-			} else {
-				high = middle;
-			}
+		if (db === undefined || released) {
+			return undefined;
 		}
 
-		return low;
-	};
+		const found = await done(db.transaction("places").objectStore("places").get(key) as IDBRequest<{ "bytes": ArrayBuffer } | undefined>);
 
-	return anchorsOf(source, cst).filter((span): span is Anchor & { "type": string } => span.type !== null).map((span) => {
-		const atoms: string[] = [];
+		return found?.bytes;
+	},
+	"put": async (key, bytes) => {
+		const db = await database;
 
-		for (let at = firstAt(span.start); at < tokens.length && tokens[at].end <= span.end; at += 1) {
-			atoms.push(tokens[at].text ?? "");
+		if (db !== undefined && !released) {
+			await done(db.transaction("places", "readwrite").objectStore("places").put({ "at": Date.now(), "bytes": bytes }, key));
 		}
+	}
+};
 
-		return { "id": span.id, "type": span.type, "start": span.start, "end": span.end, "atoms": atoms };
-	});
-}
+const place = placer({
+	"version": PARSE_VERSION,
+	"kept": kept,
+	"log": log,
+	"place": async (source, signal): Promise<{ "places": Places } | { "why": string }> => {
+		const answer = await parsed(source, signal);
+
+		return "why" in answer ? answer : { "places": placesOf(anchorsOf(source, answer.cst), answer.cst.spans) };
+	}
+});
 
 serve(hub, "bablr.spans", async (args, { signal }) => {
 	const { source } = args as { "source": string };
@@ -258,9 +266,9 @@ serve(hub, "bablr.spans", async (args, { signal }) => {
 		return { "spans": [] };
 	}
 
-	const answer = await parsed(source, signal);
+	const placing = await place(source, signal);
 
-	return "why" in answer ? { "unparsable": answer.why } : { "spans": anchorsOf(source, answer.cst).filter((span) => span.type !== null).map(({ id, type, start, end }) => ({ "id": id, "type": type, "start": start, "end": end })) };
+	return "why" in placing ? { "unparsable": placing.why } : { "spans": placing.places.anchors.filter((span) => span.type !== null) };
 });
 
 serve(hub, "bablr.refer", async (args, { signal }) => {
@@ -270,21 +278,35 @@ serve(hub, "bablr.refer", async (args, { signal }) => {
 		return { "refs": ranges.map(() => null) };
 	}
 
-	const answer = await parsed(source, signal);
+	const placing = await place(source, signal);
 
-	if ("why" in answer) {
-		return { "unparsable": answer.why };
+	if ("why" in placing) {
+		return { "unparsable": placing.why };
 	}
 
-	const shapes = shapesOf(source, answer.cst);
-	const blob = await blobOid(source);
+	const shapes = shapesOf(placing.places);
 
 	return { "refs": ranges.map((range) => {
 		const id = pickAnchor(shapes, range.start, range.end) as string | undefined;
 
-		return (id === undefined ? undefined : referTo(shapes, id, file, blob)) ?? null;
+		return (id === undefined ? undefined : referTo(shapes, id, file, placing.blob)) ?? null;
 	}) };
 });
+
+async function reidentify(baseline: string, source: string, span: string, anchors: readonly Anchor[], signal: AbortSignal): Promise<{ "id": string; "how": "kept" | "replaced" } | undefined> {
+	const placed = await place(baseline, signal);
+	const index = "places" in placed ? placed.places.anchors.findIndex((anchor) => anchor.id === span) : -1;
+
+	if (index === -1) {
+		return undefined;
+	}
+
+	const was = await parsed(baseline, signal);
+	const now = await parsed(source, signal);
+	const found = "cst" in was && "cst" in now ? follow(atomsOf(was.cst), atomsOf(now.cst), index) as { "to": number; "how": "kept" | "replaced" } | undefined : undefined;
+
+	return found === undefined ? undefined : { "id": anchors[found.to].id, "how": found.how };
+}
 
 serve(hub, "bablr.resolve", async (args, { signal }) => {
 	const { source, file, refs, "baselines": fromGit = {}, texts = [], others = {}, observed = false, types = {} } = args as { "source": string; "file": string; "refs": SpanRef[]; "baselines"?: Record<string, string>; "texts"?: string[]; "others"?: Record<string, string>; "observed"?: boolean; "types"?: Record<string, { "inferred"?: string; "observed"?: string[] }> };
@@ -293,36 +315,33 @@ serve(hub, "bablr.resolve", async (args, { signal }) => {
 		return { "resolutions": refs.map(() => ({ "status": "orphaned", "alternatives": [] })) };
 	}
 
-	const answer = await parsed(source, signal);
+	const placing = await place(source, signal);
 
-	if ("why" in answer) {
-		return { "unparsable": answer.why };
+	if ("why" in placing) {
+		return { "unparsable": placing.why };
 	}
 
-	const { cst } = answer;
 	const baselines: Record<string, string> = { ...fromGit };
 
 	for (const text of texts) {
 		baselines[await blobOid(text)] = text;
 	}
 
-	const shapes = shapesOf(source, cst);
+	const { anchors } = placing.places;
+	const shapes = shapesOf(placing.places);
 	const ids = new Set(shapes.map((shape) => shape.id));
-	const anchors = anchorsOf(source, cst);
-	const blob = await blobOid(source);
 	const elsewhere = new Map<string, { "file": string; "shape": SpanShape; "shapes": SpanShape[]; "blob": string }>();
 
 	if (!observed && refs.some((ref) => !ids.has(ref.span))) {
 		for (const [path, text] of Object.entries(others)) {
-			const theirs = await parsed(text, signal);
+			const theirs = await place(text, signal);
 
-			if ("cst" in theirs) {
-				const theirShapes = shapesOf(text, theirs.cst);
-				const theirBlob = await blobOid(text);
+			if ("places" in theirs) {
+				const theirShapes = shapesOf(theirs.places);
 
 				for (const shape of theirShapes) {
 					if (!elsewhere.has(shape.id)) {
-						elsewhere.set(shape.id, { "file": path, "shape": shape, "shapes": theirShapes, "blob": theirBlob });
+						elsewhere.set(shape.id, { "file": path, "shape": shape, "shapes": theirShapes, "blob": theirs.blob });
 					}
 				}
 			}
@@ -332,17 +351,8 @@ serve(hub, "bablr.resolve", async (args, { signal }) => {
 	const resolutions = [];
 
 	for (const ref of refs) {
-		let reidentified: { "id": string; "how": "kept" | "replaced" } | undefined;
 		const baseline = ref.baseline === undefined ? undefined : baselines[ref.baseline.blob];
-
-		if (!observed && baseline !== undefined && !ids.has(ref.span)) {
-			const was = await parsed(baseline, signal);
-			const index = "cst" in was ? anchorsOf(baseline, was.cst).findIndex((anchor) => anchor.id === ref.span) : -1;
-			const found = "cst" in was && index !== -1 ? follow(atomsOf(was.cst), atomsOf(cst), index) as { "to": number; "how": "kept" | "replaced" } | undefined : undefined;
-
-			reidentified = found === undefined ? undefined : { "id": anchors[found.to].id, "how": found.how };
-		}
-
+		const reidentified = !observed && baseline !== undefined && !ids.has(ref.span) ? await reidentify(baseline, source, ref.span, anchors, signal) : undefined;
 		const resolution = resolve(ref, {
 			"file": file,
 			"shapes": shapes,
@@ -351,7 +361,7 @@ serve(hub, "bablr.resolve", async (args, { signal }) => {
 			...reidentified === undefined ? {} : { "reidentified": () => reidentified }
 		}, observed ? OBSERVED : PIPELINE);
 		const at = resolution.status === "attached" ? undefined : resolution.candidate;
-		const there = at === undefined || at.file === file ? { "shapes": shapes, "blob": blob } : elsewhere.get(at.span);
+		const there = at === undefined || at.file === file ? { "shapes": shapes, "blob": placing.blob } : elsewhere.get(at.span);
 
 		resolutions.push({ ...resolution, ...at === undefined || there === undefined ? {} : { "ref": referTo(there.shapes, at.span, at.file, there.blob) } });
 	}

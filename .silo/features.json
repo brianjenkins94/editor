@@ -269,8 +269,12 @@
       "hub request|bablr.resolve",
       "hub request|bablr.spans"
     ],
+    "paths": [
+      "packages/editor/workers/bablr-places.ts"
+    ],
     "tests": [
       "packages/editor-api/test/annotations.test.mjs",
+      "packages/editor/test/bablr-places.test.mjs",
       "packages/editor/test/in-editor/coverage.spec.mjs"
     ]
   },

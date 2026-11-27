@@ -262,7 +262,7 @@ that ran and sites that saw something since, so a stretch it sat idle isn't a ru
 earn `neverRan` claims for nothing), and what a test drove, taken as that test's, isn't counted again; it waits while a
 test drives an editor. With its own repository open, its source fills with what using it did. Keeping is BABLR's per
 file: about a dozen files a half minute the first time a version is parsed (510 files on a first keep, some 20
-minutes), and again whenever a version is no longer among the 16 parses BABLR's worker holds (see *Bottlenecks to
+minutes); a version placed before is read from what BABLR's worker keeps, in milliseconds (see *Bottlenecks to
 expect*).
 
 ## What nothing ran
@@ -624,7 +624,7 @@ roughly in order of how much it would cost to change them later.
 
 - **One BABLR worker** answers notes, the hover, the hints, live values, every annotation's resolution and, at a preview
   run's end, every version of every file it ran. Measured 2026-11-27 whether a pool would help; **not yet: a durable
-  cache of what a parse gives comes first.**
+  cache of what a parse gives came first**, and is built.
   - *Where the time goes:* parsing. A What Nothing Ran… in a `COVERAGE=full` editor parsed 50 files (638 KB) in
     138.6 s of a 139.9 s stretch: the worker busy 99.1%, 217 ms a KB in the browser, flat across sizes (1–85 KB). The
     rest fits in the gap: `editor.workbench.bablr.resolve` p50 7,725 ms against the worker's
@@ -637,16 +637,19 @@ roughly in order of how much it would cost to change them later.
     (1.75×); 4, 31.3 s (3.0×); 8, 21.3 s (4.4×), each parse 28% slower at 8. A worker's heap settles at 25–80 MB with
     16 parses held, but BABLR allocates hard: the process peaked at 0.9–1.2 GB with one or two workers, 1.5 GB with
     4, 2.2 GB with 8 — and a page's dedicated workers live in its renderer, the one that ends near ~9 GB under spec load.
-  - *The cache doesn't cover it:* IndexedDB keeps only `bablr.parse`'s answer (the comments, for `stripped` and Check
-    Which Files Parse). `spans`, `refer` and `resolve` take a parse from an in-memory map of 16, so every keep after
-    the first re-parses each file it touches beyond the last 16, What Nothing Ran… re-parses every file with evidence each time, and a
-    hover re-parses any file outside the last 16. That repeat work is the larger cost, and a pool only divides it.
-  - *So:* first, keep what `refer`/`spans`/observed `resolve` need (`shapesOf`: ids, types, ranges, atoms) by
-    `PARSE_VERSION/blob` in the worker's IndexedDB, gzipped: 72–76× the source raw, ~9× gzipped (own-evidence.ts
-    4.8 KB → 44 KB, bablr.ts 14 KB → 128 KB; ~13 MB for the editor package's 1.45 MB of code), and storing tokens
-    once rather than each shape's atoms would shrink it more. A file's second time is then a read, not seconds. A pool
-    after that, if first parses still matter: 2–4 workers, each on subjects of its own (hub RPC is publish/subscribe:
-    N workers serving `bablr.spans` would all parse every call), a file always to the same worker (its parse map),
+  - *The cache didn't cover it:* IndexedDB kept only `bablr.parse`'s answer (the comments, for `stripped` and Check
+    Which Files Parse); `spans`, `refer` and `resolve` took a parse from an in-memory map of 16, so every later keep,
+    every What Nothing Ran… and a hover outside the last 16 parsed again. That repeat work was the larger cost, and a
+    pool would only have divided it.
+  - *Built, 2026-11-27:* the worker keeps a file's places (workers/bablr-places.ts: its anchors, and its tokens once,
+    from which `shapesOf` makes each shape's atoms) by `PARSE_VERSION/blob` in IndexedDB's `bablr` › `places`, gzipped,
+    the newest 4,000 versions; `spans`, `refer` and `resolve` take them (`editor.workers.bablr-places.place`, `cached`
+    and the bytes kept), and only `resolve`'s reidentifying across an edit, verdicts and edit groups still need the
+    whole parse. For the 48 files above: 2.0 MB kept for 221 KB of code (9.1×), and a placing read back in 1.2 ms a
+    file against 1.9 s parsed (Node); in the browser, a file placed in 363 ms took 0.77 ms once the page was reloaded,
+    from a worker that had never parsed it. A first parse is as slow as it was.
+  - *A pool, if first parses still matter:* 2–4 workers, each on subjects of its own (hub RPC is publish/subscribe: N
+    workers serving `bablr.spans` would all parse every call), a file always to the same worker (its parse map),
     callers asking a few files at once, and the renderer's memory checked under load before it ships.
 - **More hub channels** (`evidence.observed`, `evidence.preview`, `evidence.flush`, `evidence.level`, `preview.version`)
   against the aim of fewer connections. `evidence.level` could ride on `preview.start`.
