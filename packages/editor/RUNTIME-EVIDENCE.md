@@ -654,7 +654,9 @@ roughly in order of how much it would cost to change them later.
     for 221 KB of code, read back in 1.2 ms a file against 1.9 s parsed (Node); in the browser, a file placed in 363
     ms took 0.77 ms after a reload, from a worker that had never parsed it; a cosmetic verdict on bablr.ts (14 KB)
     14.6 s parsed, 0.6 s from kept parses, the same verdict. A first parse is as slow as it was.
-  - *A pool, if first parses still matter:* 2–4 workers, each on subjects of its own (hub RPC is publish/subscribe: N
+  - *A pool: held* (the user, 2026-11-27: "a more general purpose library approach … in lib that provides a worker pool
+    and spins up up to n workers depending on hardware"; it would quickly grow complex built here). What BABLR's would
+    need of it: 2–4 workers, each on subjects of its own (hub RPC is publish/subscribe: N
     workers serving `bablr.spans` would all parse every call), all on the one store (what one parsed, the others
     read), callers asking a few files at once, and the renderer's memory checked under load before it ships.
 - **More hub channels** (`evidence.observed`, `evidence.preview`, `evidence.flush`, `evidence.level`, `preview.version`)
