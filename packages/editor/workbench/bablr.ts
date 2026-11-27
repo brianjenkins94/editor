@@ -16,7 +16,7 @@ const MOST_OTHERS = 50;
 
 const MOST_WHY = 300;
 
-interface Parse { "parsed": boolean; "why"?: string; "comments"?: number[]; "ms": number; "cached": boolean }
+interface Parse { "parsed": boolean; "why"?: string; "comments"?: number[] }
 
 export interface Bablr {
 	"stripped": (text: string, signal?: AbortSignal) => Promise<string | undefined>;
@@ -43,7 +43,6 @@ interface Checked {
 	"lines": number;
 	"parsedLines": number;
 	"ms": number;
-	"cached": number;
 	"cancelled"?: true;
 	"unparsable": { "file": string; "lines": number; "why": string }[];
 }
@@ -115,8 +114,14 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		return started;
 	};
 
+	const parsing = async (text: string, signal?: AbortSignal): Promise<Parse> => {
+		const { why, comments } = await worker().ask<{ "why"?: string; "comments"?: number[] }>("parse", { "source": text }, signal);
+
+		return why === undefined ? { "parsed": true, "comments": comments ?? [] } : { "parsed": false, "why": why };
+	};
+
 	const parse = async (uri: vscodeApi.Uri, text: string, signal?: AbortSignal): Promise<Parse> => {
-		const answer = await worker().ask<Parse>("parse", { "source": text }, signal);
+		const answer = await parsing(text, signal);
 
 		if (answer.parsed) {
 			diagnostics.delete(uri);
@@ -141,7 +146,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 			"lines": 0,
 			"parsedLines": 0,
 			"ms": 0,
-			"cached": 0,
 			"unparsable": []
 		};
 		const begun = performance.now();
@@ -172,7 +176,6 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 			}
 
 			checked.lines += lines;
-			checked.cached += answer.cached ? 1 : 0;
 
 			if (answer.parsed) {
 				checked.parsed += 1;
@@ -191,8 +194,7 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 			"count": checked.files,
 			"parsed": checked.parsed,
 			"lines": checked.lines,
-			"parsedLines": checked.parsedLines,
-			"cached": checked.cached
+			"parsedLines": checked.parsedLines
 		});
 
 		return checked;
@@ -384,7 +386,7 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		"refer": async (source, file, ranges) => worker().ask("refer", { "source": source, "file": file, "ranges": ranges }),
 		"editGroups": async (chain) => worker().ask("editGroups", { "chain": chain }),
 		"stripped": async (text, signal) => {
-			const { parsed, comments = [] } = await worker().ask<Parse>("parse", { "source": text }, signal);
+			const { parsed, comments = [] } = await parsing(text, signal);
 
 			if (!parsed) {
 				return undefined;

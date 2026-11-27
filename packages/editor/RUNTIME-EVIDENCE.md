@@ -641,16 +641,22 @@ roughly in order of how much it would cost to change them later.
     Which Files Parse); `spans`, `refer` and `resolve` took a parse from an in-memory map of 16, so every later keep,
     every What Nothing Ran… and a hover outside the last 16 parsed again. That repeat work was the larger cost, and a
     pool would only have divided it.
-  - *Built, 2026-11-27:* the worker keeps a file's places (workers/bablr-places.ts: its anchors, and its tokens once,
-    from which `shapesOf` makes each shape's atoms) by `PARSE_VERSION/blob` in IndexedDB's `bablr` › `places`, gzipped,
-    the newest 4,000 versions; `spans`, `refer` and `resolve` take them (`editor.workers.bablr-places.place`, `cached`
-    and the bytes kept), and only `resolve`'s reidentifying across an edit, verdicts and edit groups still need the
-    whole parse. For the 48 files above: 2.0 MB kept for 221 KB of code (9.1×), and a placing read back in 1.2 ms a
-    file against 1.9 s parsed (Node); in the browser, a file placed in 363 ms took 0.77 ms once the page was reloaded,
-    from a worker that had never parsed it. A first parse is as slow as it was.
+  - *Built, 2026-11-27: one store for every BABLR request.* The worker keeps a text's parse — each code node's type,
+    range, id and token text, and the comments' ranges (workers/bablr-parses.ts) — by `PARSE_VERSION/blob` in
+    IndexedDB's `bablr` › `parses`, gzipped, the newest 4,000, 64 held in memory; every request starts from it:
+    `bablr.parse` (the parse itself, for any feature: Check Which Files Parse and `stripped` take theirs from it),
+    `spans`, `refer`, `resolve` (reidentifying across an edit included), and the cosmetic verdict and edit groups,
+    whose diff atoms are each node's type and token text. It replaced the two caches there were: IndexedDB's comments
+    for `bablr.parse` alone, and an in-memory map of 16 whole parses for the rest. Nothing that asks is told whether
+    a parse was kept (`editor.workers.bablr-parses.parse` says, `cached` and the bytes kept); the workbench's memo
+    of verdicts by the pair of texts stays, a comparison and not a parse. Not committed (derivable, ~9× its source)
+    and not in the workspace's zen-fs (its one shared buffer holds the source). For the 48 files above: 2.0 MB kept
+    for 221 KB of code, read back in 1.2 ms a file against 1.9 s parsed (Node); in the browser, a file placed in 363
+    ms took 0.77 ms after a reload, from a worker that had never parsed it; a cosmetic verdict on bablr.ts (14 KB)
+    14.6 s parsed, 0.6 s from kept parses, the same verdict. A first parse is as slow as it was.
   - *A pool, if first parses still matter:* 2–4 workers, each on subjects of its own (hub RPC is publish/subscribe: N
-    workers serving `bablr.spans` would all parse every call), a file always to the same worker (its parse map),
-    callers asking a few files at once, and the renderer's memory checked under load before it ships.
+    workers serving `bablr.spans` would all parse every call), all on the one store (what one parsed, the others
+    read), callers asking a few files at once, and the renderer's memory checked under load before it ships.
 - **More hub channels** (`evidence.observed`, `evidence.preview`, `evidence.flush`, `evidence.level`, `preview.version`)
   against the aim of fewer connections. `evidence.level` could ride on `preview.start`.
 - **`_types.at` lives in the capabilities tsserver plugin**, the expedient home since it holds the checker. A small

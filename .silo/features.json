@@ -270,11 +270,11 @@
       "hub request|bablr.spans"
     ],
     "paths": [
-      "packages/editor/workers/bablr-places.ts"
+      "packages/editor/workers/bablr-parses.ts"
     ],
     "tests": [
       "packages/editor-api/test/annotations.test.mjs",
-      "packages/editor/test/bablr-places.test.mjs",
+      "packages/editor/test/bablr-parses.test.mjs",
       "packages/editor/test/in-editor/coverage.spec.mjs"
     ]
   },

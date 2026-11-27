@@ -23,7 +23,7 @@ const code: ToolFamily = ({ request }) => [
 		"tool": defineTool({
 			"name": "code_parses",
 			"config": {
-				"description": "BABLR: Check Which Files Parse (the command): every code file under a folder parsed by BABLR, one at a time, and how much its grammar takes — files and lines — with each file it can't parse and why (a warning on it in Problems too: nothing attaches to code BABLR can't parse). About 14 ms a line the first time; a file is kept by its content, so asking again is quick. A folder opened with git_open (.refs/<name>/…) can be checked too. Returns { path, files, parsed, lines, parsedLines, ms, cached, cancelled?, unparsable: [{ file, lines, why }] }.",
+				"description": "BABLR: Check Which Files Parse (the command): every code file under a folder parsed by BABLR, one at a time, and how much its grammar takes — files and lines — with each file it can't parse and why (a warning on it in Problems too: nothing attaches to code BABLR can't parse). About 14 ms a line the first time; a file is kept by its content, so asking again is quick. A folder opened with git_open (.refs/<name>/…) can be checked too. Returns { path, files, parsed, lines, parsedLines, ms, cancelled?, unparsable: [{ file, lines, why }] }.",
 				"inputSchema": {
 					"path": z.string().describe("The folder, from the workspace's root (\"\" for all of it)."),
 					"exclude": z.string().optional().describe("A glob of files to leave out, from the folder (node_modules always is): \"**/test/**\", say.")
