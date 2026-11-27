@@ -125,6 +125,13 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      its line's run not counted — fixed. The view reads the program afresh when asked now, and opens its list as a
      document; it reads the active file's project only (open a file of the project to ask about). Next: called and
      never run (1,218 in the editor's project, most of it what the GitHub stand-in and the API would reach).
+   - **GitHub stood in** (2026-11-27): the API harness's GitHub stand-in (packages/api/harness/github.ts) serves a folder
+     of bare repositories too — git over HTTP by git's own `http-backend`, and a load's REST calls (a repository, its
+     tree, a blob). test/workbench/github.mjs stands in for the API at the browser's routes (its sign-in; its proxy,
+     handing /github/api and /github/git to the stand-in with Ann's token) and, signed in: a repository loaded from its
+     address, cloned through the proxy; GitHub moved ahead, the fast-forward offered and caught up (behindGitHub,
+     fastForward); a commit pushed back, by who's signed in. Next: the rest of called-and-never-run, measured again
+     with this suite in the record.
    - **Removed**: zenfs-vfs's getSharedWorkspaceBuffer and mountWorkspaceVfs (nothing calls them since the node worker
      went, 517144b7).
    - **Kept, as measurement**: tooling used by being run (the editor's build/, contrib, the demo, bench, monaco's build

@@ -2068,7 +2068,8 @@
     "tests": [
       "packages/editor/test/github.test.mjs",
       "packages/editor/test/project-load.test.mjs",
-      "packages/editor/test/shell-signed-out.test.mjs"
+      "packages/editor/test/shell-signed-out.test.mjs",
+      "packages/editor/test/workbench/github.mjs"
     ]
   },
   "Reset": {
