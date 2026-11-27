@@ -96,7 +96,13 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      withPlace, editor-metrics' worker names; almostnode's shims (148 declarations), bablr-language-ts (41), silo (24).
    (Lines in test-runs.ts and preview-windows.tsx shifted between the two commits: those two read wrong.)
    Next (the user, 2026-11-26: "dispatch, then backfill tests, measure again, reassess"): tests for the plain gaps and
-   the realms, then measure again.
+   the realms, then measure again. Backfilled so far (2026-11-27): a package's own calls in a run (package-calls.spec:
+   decide.ts, package-calls.ts, runtime-fs's decide op); the TS server's plugins counted (ee1659c5: the canary, the
+   engines, both ts-plugin.js); the debugger stopped (debugger.spec: a breakpoint added mid-run, the Event loop's timers,
+   Skip Waits, Step Out), which found Step Out disabled everywhere but an agent's tool, the Call Stack one frame deep
+   (fixed, 6cc7583e). Left: install.ts's linking, ata's resolveImport, the margin's withPlace, editor-metrics' worker
+   names, almostnode's shims, bablr-language-ts, silo; tsval's in-run modules (node-test.js, playwright.js, vite.js) run
+   as a run's guest code, which coverage's instrumenting doesn't count.
 4. **Which tests a change runs, here** (the user, 2026-11-04: ideally the minimal set). Built: each test's reach kept
    (`.silo/local/reach/`), a change selecting by its changed lines and saying why for each file (`runs_affected`'s `why`,
    the table's touched), a UI spec's reach the editor it drives (`COVERAGE=1 npm run dev`). CI's specs aren't selected by
