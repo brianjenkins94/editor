@@ -48,7 +48,12 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    was seen, the counts this machine's (RUNTIME-EVIDENCE.md, *Storage in git*; lib d7fc57b, d7a1ff5); a rerun that
    behaves the same changes nothing in git (evidence-hover.spec). Next, the evidence diff: a changed committed line is
    behavior that changed, so the view reads git's diff of `.silo/evidence/` as what an edit changed at runtime, placed
-   on the code.
+   on the code. After it, high-confidence claims (the user, 2026-11-26: "contribute local evidence when it becomes high
+   confidence"): what's contributed is a claim, not a count — a committed line gains `neverNullish`, `neverRan`,
+   `onlyArm` or `pure` once the machine's counts back it past a bar, and loses it when a run breaks it, so a claim
+   earned or broken is the diff and the counts still never are; a teammate's editor offers the quick fix on a claim
+   alone. Open: the bar (the quick fix's own `minSeen` 10 and `minRuns` 3, or stricter for what others act on unseen,
+   30+ runs: stricter, proposed), and that a quick fix needs no committed line anywhere contradicting it.
 3. **Unused code, from a coverage run** (the user, 2026-11-25: "by having detailed coverage information we can eliminate
    unused code"). A dispatched architecture run records what each test ran,
    by statement, and `.silo/last-run/reach.json` keeps of it each file and the tests that ran any: what nothing ran is never
