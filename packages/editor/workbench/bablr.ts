@@ -27,6 +27,15 @@ export interface Bablr {
 
 export interface EditGroup { "label": string; "kind": string; "startLine": number; "endLine": number; "edits": number; "nodeIds": string[] }
 
+function sourceBytes(args: unknown): number {
+	const { source, contents, chain } = (args ?? {}) as { "source"?: unknown; "contents"?: unknown; "chain"?: unknown };
+	const texts: unknown[] = [source, contents, chain].flat();
+
+	return texts.reduce((total: number, text) => total + (typeof text === "string"
+		? text.length
+		: 0), 0);
+}
+
 interface Checked {
 	"path": string;
 	"files": number;
@@ -73,6 +82,7 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		const dead = new AbortController();
 		const rpc = createRpcClient(hub);
 		let tail: Promise<unknown> = Promise.resolve();
+		let waiting = 0;
 
 		hub.link(portTransport(spawned));
 		watchWorker(spawned, "bablr-worker", (message) => {
@@ -81,16 +91,25 @@ export function installBablr(vscode: typeof vscodeApi, hub: Hub, log: Logger): B
 		});
 
 		started = {
-			"ask": async <T>(name: string, args: unknown, signal?: AbortSignal): Promise<T> => {
+			"ask": async <T>(name: string, args: unknown, signal?: AbortSignal): Promise<T> => log.span("editor.workbench.bablr.ask", {
+				"op": name,
+				"bytes": sourceBytes(args),
+				"ahead": waiting
+			}, async () => {
 				const combined = signal === undefined
 					? dead.signal
 					: AbortSignal.any([signal, dead.signal]);
 				const run = tail.then(async () => rpc.request(`bablr.${name}`, args, { "timeoutMs": Infinity, "waitForResponderMs": 60_000, "signal": combined }) as Promise<T>);
 
 				tail = run.catch(() => undefined);
+				waiting += 1;
 
-				return run;
-			}
+				try {
+					return await run;
+				} finally {
+					waiting -= 1;
+				}
+			})
 		};
 
 		return started;

@@ -262,7 +262,8 @@ that ran and sites that saw something since, so a stretch it sat idle isn't a ru
 earn `neverRan` claims for nothing), and what a test drove, taken as that test's, isn't counted again; it waits while a
 test drives an editor. With its own repository open, its source fills with what using it did. Keeping is BABLR's per
 file: about a dozen files a half minute the first time a version is parsed (510 files on a first keep, some 20
-minutes), cached after.
+minutes), and again whenever a version is no longer among the 16 parses BABLR's worker holds (see *Bottlenecks to
+expect*).
 
 ## Fourth slice: what could go, in purple, across inputs
 
@@ -607,7 +608,31 @@ roughly in order of how much it would cost to change them later.
 ### Bottlenecks to expect
 
 - **One BABLR worker** answers notes, the hover, the hints, live values, every annotation's resolution and, at a preview
-  run's end, every version of every file it ran. The pool (deferred) goes behind workbench/bablr.ts's `request`.
+  run's end, every version of every file it ran. Measured 2026-11-27 whether a pool would help; **not yet: a durable
+  cache of what a parse gives comes first.**
+  - *Where the time goes:* parsing. A What Nothing Ran… in a `COVERAGE=full` editor parsed 50 files (638 KB) in
+    138.6 s of a 139.9 s stretch: the worker busy 99.1%, 217 ms a KB in the browser, flat across sizes (1–85 KB). The
+    rest fits in the gap: `editor.workbench.bablr.resolve` p50 7,725 ms against the worker's
+    `editor.workers.bablr-worker.spans` 7,709 ms. Message passing and IndexedDB don't show.
+  - *Serial twice over:* workbench/bablr.ts runs one request at a time (`ask`'s `tail`; its
+    `editor.workbench.bablr.ask` span says how many were `ahead`), and its callers ask one file at a time anyway
+    (evidence.ts `recordFile`'s loop, unrun.ts `usedRanges`, the store's `placeIn`). So nothing waits in the queue,
+    and a pool would change nothing until they ask for several files at once.
+  - *What N workers buy* (Node worker_threads, cold, 48 of the editor's files, 221 KB): 1 worker 94.1 s; 2, 53.9 s
+    (1.75×); 4, 31.3 s (3.0×); 8, 21.3 s (4.4×), each parse 28% slower at 8. A worker's heap settles at 25–80 MB with
+    16 parses held, but BABLR allocates hard: the process peaked at 0.9–1.2 GB with one or two workers, 1.5 GB with
+    4, 2.2 GB with 8 — and a page's dedicated workers live in its renderer, the one that ends near ~9 GB under spec load.
+  - *The cache doesn't cover it:* IndexedDB keeps only `bablr.parse`'s answer (the comments, for `stripped` and Check
+    Which Files Parse). `spans`, `refer` and `resolve` take a parse from an in-memory map of 16, so every keep after
+    the first re-parses each file it touches beyond the last 16, What Nothing Ran… re-parses every file with evidence each time, and a
+    hover re-parses any file outside the last 16. That repeat work is the larger cost, and a pool only divides it.
+  - *So:* first, keep what `refer`/`spans`/observed `resolve` need (`shapesOf`: ids, types, ranges, atoms) by
+    `PARSE_VERSION/blob` in the worker's IndexedDB, gzipped: 72–76× the source raw, ~9× gzipped (own-evidence.ts
+    4.8 KB → 44 KB, bablr.ts 14 KB → 128 KB; ~13 MB for the editor package's 1.45 MB of code), and storing tokens
+    once rather than each shape's atoms would shrink it more. A file's second time is then a read, not seconds. A pool
+    after that, if first parses still matter: 2–4 workers, each on subjects of its own (hub RPC is publish/subscribe:
+    N workers serving `bablr.spans` would all parse every call), a file always to the same worker (its parse map),
+    callers asking a few files at once, and the renderer's memory checked under load before it ships.
 - **More hub channels** (`evidence.observed`, `evidence.preview`, `evidence.flush`, `evidence.level`, `preview.version`)
   against the aim of fewer connections. `evidence.level` could ride on `preview.start`.
 - **`_types.at` lives in the capabilities tsserver plugin**, the expedient home since it holds the checker. A small
