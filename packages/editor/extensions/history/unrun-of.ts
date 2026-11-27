@@ -52,6 +52,65 @@ export function callersOf(graph: UnrunInputs["graph"], declared: ReadonlySet<str
 	return users;
 }
 
+interface Imported { "name": string; "relative"?: string; "pkg"?: string; "sub"?: string }
+
+const IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/gu;
+
+const withoutExtension = (file: string): string => file.replace(/\.[cm]?[jt]sx?$/u, "");
+
+function normalized(path: string): string {
+	const parts: string[] = [];
+
+	for (const part of path.split("/")) {
+		if (part === "..") {
+			parts.pop();
+		} else if (part !== "." && part !== "") {
+			parts.push(part);
+		}
+	}
+
+	return parts.join("/");
+}
+
+export function importsIn(texts: ReadonlyMap<string, string>): Imported[] {
+	const found: Imported[] = [];
+
+	for (const [file, text] of texts) {
+		if (TEST_FILE.test(file) || !/\.[cm]?[jt]sx?$/u.test(file)) {
+			continue;
+		}
+
+		for (const [, names, spec] of text.matchAll(IMPORT)) {
+			const where = spec.startsWith(".")
+				? { "relative": withoutExtension(normalized(`${file.slice(0, file.lastIndexOf("/"))}/${spec}`)) }
+				: (() => {
+						const bare = spec.replace(/^@[^/]+\//u, "");
+						const slash = bare.indexOf("/");
+
+						return slash === -1 ? { "pkg": bare, "sub": "index" } : { "pkg": bare.slice(0, slash), "sub": bare.slice(slash + 1) };
+					})();
+
+			for (const each of names.split(",")) {
+				const name = each.trim().replace(/^type\s+/u, "").split(/\s+as\s+/u)[0];
+
+				if (name !== "") {
+					found.push({ "name": name, ...where });
+				}
+			}
+		}
+	}
+
+	return found;
+}
+
+export function isImported(file: string, name: string, imports: readonly Imported[]): boolean {
+	const bare = withoutExtension(file);
+
+	return imports.some((each) => each.name === name && (each.relative === undefined
+		? bare.includes(`/${each.pkg ?? ""}/`) && bare.endsWith(`/${each.sub ?? ""}`)
+		: each.relative === bare));
+}
+
 function kindOf(ranInUse: boolean, calledBy: number, exported: boolean): UnrunKind {
 	if (ranInUse) {
 		return "used";
@@ -67,6 +126,7 @@ function kindOf(ranInUse: boolean, calledBy: number, exported: boolean): UnrunKi
 export function unrunOf({ graph, analyses, texts, tested, used }: UnrunInputs): Unrun[] {
 	const declared = new Set([...analyses].flatMap(([file, analysis]) => Object.keys(analysis.declarations).map((name) => `${file}#${name}`)));
 	const callers = callersOf(graph, declared);
+	const imports = importsIn(texts);
 	const found: Unrun[] = [];
 
 	for (const [file, analysis] of analyses) {
@@ -98,7 +158,8 @@ export function unrunOf({ graph, analyses, texts, tested, used }: UnrunInputs): 
 
 			const bodyStart = inBody ? text.indexOf("\n", range[0]) : range[0];
 			const ranInUse = (used[file] ?? []).some(([start, end]) => start >= bodyStart && end <= range[1]);
-			const calledBy = callers.get(`${file}#${name}`)?.size ?? 0;
+			const graphed = callers.get(`${file}#${name}`)?.size ?? 0;
+			const calledBy = graphed === 0 && isImported(file, name, imports) ? 1 : graphed;
 
 			found.push({
 				"file": file,

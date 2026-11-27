@@ -38,14 +38,3 @@ export function uint8ToHex(bytes: Uint8Array): string {
 
 	return hex.join("");
 }
-
-/** Convert Uint8Array to binary (latin1) string */
-export function uint8ToBinaryString(bytes: Uint8Array): string {
-	const parts: string[] = [];
-
-	for (let i = 0; i < bytes.length; i += CHUNK) {
-		parts.push(String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK))));
-	}
-
-	return parts.join("");
-}

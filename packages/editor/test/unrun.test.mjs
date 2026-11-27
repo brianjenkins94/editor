@@ -62,3 +62,24 @@ test("what no test ran: run in use, called, exported, or nothing calls it; types
 
 	assert.ok(loadedOnly.some(({ name }) => name === "add"), "a function whose first line ran (its module loaded) but not its body didn't run");
 });
+
+test("an import the graph doesn't follow — by a package's name, across packages — still counts as a caller", async () => {
+	const { importsIn, isImported } = await import("../extensions/history/unrun-of.ts");
+	const imports = importsIn(new Map([
+		["packages/editor/workbench/editor-state.ts", "import { shownNotifications, traceLog } from \"@brianjenkins94/monaco-vscode-api/main\";\nimport type { Foo } from \"@brianjenkins94/editor-api\";\n"],
+		["packages/editor/shell/a.ts", "import { helper as named } from \"./lib/helpers.ts\";\n"],
+		["packages/editor/test/x.test.mjs", "import { onlyTests } from \"../shell/b.ts\";\n"]
+	]));
+
+	assert.ok(isImported("components/monaco-vscode-api/main.ts", "shownNotifications", imports));
+	assert.ok(isImported("packages/editor-api/src/index.ts", "Foo", imports), "a package's bare name is its index");
+	assert.ok(isImported("packages/editor/shell/lib/helpers.ts", "helper", imports), "relative, by the name it exports");
+	assert.ok(!isImported("packages/editor/shell/b.ts", "onlyTests", imports), "a test's import isn't code calling it");
+	assert.ok(!isImported("components/monaco-vscode-api/main.ts", "elsewhere", imports));
+
+	const texts = new Map([["components/monaco-vscode-api/main.ts", "export async function shownNotifications() {\n\treturn [];\n}\n"], ["packages/editor/workbench/editor-state.ts", "import { shownNotifications } from \"@brianjenkins94/monaco-vscode-api/main\";\n"]]);
+	const analyses = new Map([["components/monaco-vscode-api/main.ts", { "declarations": { "shownNotifications": { "range": [0, texts.get("components/monaco-vscode-api/main.ts").length - 1], "uses": [], "fingerprint": "x" } } }]]);
+	const [listed] = unrunOf({ "graph": { "nodes": () => [], "edges": () => [] }, "analyses": analyses, "texts": texts, "tested": {}, "used": {} });
+
+	assert.equal(listed.kind, "called", "imported by editor-state.ts, so called, not nothing");
+});

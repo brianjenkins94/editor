@@ -110,6 +110,13 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    none run 143 → 137, declarations unrun in files partly run 417 → 361; nothing newly unrun. Reassessed, the rest:
    - **Seen in the editor** (2026-11-27): History: What Nothing Ran… lists them — no test ran it, by the record; and,
      from the evidence kept, whether a run here did (the editor's own use under COVERAGE=full), and what calls it.
+   - **Nothing calls it, nothing ran it, worked through** (2026-11-27): of the record's unrun declarations in files
+     unchanged since 2e50df9d, one had no mention anywhere but its own: almostnode's uint8ToBinaryString (its last caller
+     went in 2a2d17bc), removed. Kept with why: readdirpPromise and getPackageBase, the readdirp and rollup APIs the shims
+     stand in for, which programs call. The 82 the view first showed were its blind spots, now closed: an export a
+     program outside uses (its own group), and an import by a package's name the graph didn't follow
+     (`@brianjenkins94/monaco-vscode-api/main`'s shownNotifications, which editor-state.ts serves): an import by name
+     counts as a caller now. Next: the two other groups — ran in use with no test (each a test), called and never run.
    - **Removed**: zenfs-vfs's getSharedWorkspaceBuffer and mountWorkspaceVfs (nothing calls them since the node worker
      went, 517144b7).
    - **Kept, as measurement**: tooling used by being run (the editor's build/, contrib, the demo, bench, monaco's build
