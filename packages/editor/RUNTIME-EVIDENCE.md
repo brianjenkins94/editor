@@ -79,6 +79,16 @@ count, weight and run behind it (`Observation`, all of what's below) is the mach
 everyone else's committed lines as coarse evidence: what ran and how, on so many runs at least (the hover says "in 10+
 runs").
 
+**A committed line claims what its counts back once they pass a bar** (the user, 2026-11-26: "contribute local
+evidence when it becomes high confidence"; lib `claimOf`, `CLAIM_BAR`): `neverRan`, `neverNullish`, `onlyArm` or `pure`,
+each since the span's code last changed, once this machine has 30 runs of it and 100 tries in them (values seen, a
+branch's times, a function's calls; a statement's runs, strictly counted as `tried`, since faded runs top out near 29).
+A run that breaks it takes it away. So a claim earned or broken is the diff, and the counts still never are. The bar is
+stricter than a quick fix on one's own counts (3 runs, 10 tries) because others act on a claim without seeing what's
+behind it: 100 tries never contradicted is at most 1 in 33. Someone else's editor offers the quick fix on a claim alone
+(insights' suggestions: coarse evidence needs `claimed`), and not when any committed line contradicts it: a nullish
+value, the other arm, a run of the statement in anyone's line is in the folded counts the fix reads.
+
 The files the editor makes for a project — `versions.json` (the versions it pins) and `baseline.json` (the dependency
 baseline) — are the repository's at `.silo/` once it has committed them,
 and in `.silo/local/` until then (2026-10-30; editor-api's git.ts `keptAt`), so loading a repository doesn't put them
@@ -566,7 +576,8 @@ roughly in order of how much it would cost to change them later.
 
 - **Previews instrument in `full` by default.** About ×3 on a pure-JavaScript hot loop (×1.4 for `coverage`). For a
   game at 60 frames a second, `coverage` may be the better default, with `full` on request.
-- **The quick-fix thresholds** (`silo.evidence.minRuns` 3, `minSeen` 10). Evidence covers only the paths runs took:
+- **The quick-fix thresholds** (`silo.evidence.minRuns` 3, `minSeen` 10, on this machine's counts; a claim's 30 runs
+  and 100 tries on someone else's, *Storage in git*). Evidence covers only the paths runs took:
   "never nullish" can hold for every path that ran and not for one that didn't. Higher thresholds, or the surrounding
   code's coverage shown beside the hint, before a fix is trusted.
 - **The typed strategy's weights** came from reasoning and one case, not data; the corpus has six cases. Every

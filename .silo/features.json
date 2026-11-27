@@ -3022,7 +3022,7 @@
     "status": "active",
     "why": "reintroduced on the evidence kept in git, on the code only: the Suggestions view beside Problems isn't back, as a list somewhere else is somewhere nobody looks (the user, 2026-11-06, of the old panels). The objective is rough feature parity with full-editor",
     "since": "2026-11-07",
-    "what": "Code the runs show was never needed, such as a `?.` that never met an empty value, a `??` or `&&`/`||` whose right side never ran, a branch never taken or code never run, is marked in purple where it is, more strongly the more tries say so, with how rare it could still be and a quick fix to remove it.",
+    "what": "Code the runs show was never needed, such as a `?.` that never met an empty value, a `??` or `&&`/`||` whose right side never ran, a branch never taken or code never run, is marked in purple where it is, more strongly the more tries say so, with how rare it could still be and a quick fix to remove it. On someone else's committed evidence, only what a commit claims (30+ runs and 100+ tries on its machine), and nothing any committed line contradicts.",
     "docs": "packages/editor/RUNTIME-EVIDENCE.md, *Fourth slice: what could go, in purple, across inputs*",
     "ways": [
       "code actions provider||insights/fixes.ts",

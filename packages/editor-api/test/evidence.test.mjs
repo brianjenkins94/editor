@@ -171,6 +171,20 @@ test("this machine's counts, and someone else's committed lines as what was seen
 	assert.deepEqual(bySpan("v").value, { "seen": 3, "nullish": 0, "tags": { "string": 3 }, "ever": 3, "runs": 3, "lastAt": "", "coarse": true });
 });
 
+test("a committed claim is claimed; another's line against it stays in the counts, for a fix to see", async () => {
+	const files = new Map([
+		["/workspace/.silo/evidence/bo/ci/src/a.ts.jsonl", line({ "span": "v", "key": "bablr1", "runs": 30, "claim": "neverNullish", "kind": "value", "tags": ["string"], "nullish": false }) + line({ "span": "s", "key": "bablr1", "runs": 30, "claim": "neverRan", "kind": "reached", "ran": false }) + line({ "span": "b", "key": "bablr1", "runs": 30, "kind": "branch", "taken": [1] })],
+		["/workspace/.silo/evidence/cy/laptop/src/a.ts.jsonl", line({ "span": "s", "key": "bablr1", "runs": 3, "kind": "reached", "ran": true })]
+	]);
+	const { vscode } = standIn(files, () => at(0, 4));
+	const placed = await evidenceStore(vscode, []).placedIn("src/a.ts", "text");
+	const of = (kind) => placed.find((each) => each.evidence[kind] !== undefined)?.evidence[kind];
+
+	assert.deepEqual(of("value"), { "seen": 30, "nullish": 0, "tags": { "string": 30 }, "ever": 30, "runs": 30, "lastAt": "", "coarse": true, "claimed": true });
+	assert.deepEqual(of("reached"), { "ever": 3, "runs": 33, "lastAt": "", "coarse": true, "claimed": true }, "bo's claim, and cy's run of it: ran, in the counts");
+	assert.equal(of("branch").claimed, undefined, "a line without a claim claims nothing");
+});
+
 test("every file with evidence, at any depth and once whoever ran it; a change to one is said, and it's read again", async () => {
 	const files = new Map([
 		["/workspace/.silo/evidence/ann/node-24/src/a.ts.jsonl", line({ "kind": "reached", "span": "s1", "ever": 1, "runs": 1, "lastAt": "2026-11-01" })],

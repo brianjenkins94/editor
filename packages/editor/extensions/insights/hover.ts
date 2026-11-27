@@ -76,7 +76,9 @@ export function describe(evidence: SpanEvidence, type: string | undefined, decla
 		return [
 			`**${valueSite(type)}** — in ${runs(value.ever, true)}, ${value.nullish === 0
 				? "never nullish"
-				: "nullish seen"}`,
+				: "nullish seen"}${value.nullish === 0 && value.claimed === true
+				? ", claimed"
+				: ""}`,
 			`Observed ${Object.keys(value.tags).map((tag) => `\`${tag}\``).join(", ")}${declared === undefined ? "" : ` · declared \`${declared}\``}`
 		].join("\n\n");
 	}
@@ -110,7 +112,9 @@ export function describe(evidence: SpanEvidence, type: string | undefined, decla
 
 		return `**${name}** — ${branch.arms.map((ran, arm) => `${arms[arm] ?? `arm ${arm + 1}`} ${ran === 0
 			? "never ran"
-			: "taken"}`).join(" · ")}, in ${runs(branch.ever, true)}`;
+			: "taken"}`).join(" · ")}, in ${runs(branch.ever, true)}${branch.claimed === true && branch.arms.filter((ran) => ran > 0).length === 1
+			? ", claimed"
+			: ""}`;
 	}
 
 	if (branch !== undefined) {

@@ -20,12 +20,14 @@ import { annotations } from "./annotations.ts";
 
 /** What every run observed at one span, folded: strict counts summed, faded runs summed, the latest report's time. */
 export interface SpanEvidence {
-	"reached"?: { "ever": number; "runs": number; "lastAt": string; "coarse"?: true };
+	/** `claimed`: a committed line claims it never ran (util's `claimOf`), on counts past the claim bar; a quick fix on
+	 *  coarse evidence needs one, as it does `value`'s and `branch`'s. */
+	"reached"?: { "ever": number; "runs": number; "lastAt": string; "coarse"?: true; "claimed"?: true };
 	/** `coarse`: some of it is a committed line, so `seen`, `nullish` and each tag's count are each run floor's (how
 	 *  many runs at least), not how many values. */
-	"value"?: { "seen": number; "nullish": number; "tags": Record<string, number>; "ever": number; "runs": number; "lastAt": string; "coarse"?: true };
+	"value"?: { "seen": number; "nullish": number; "tags": Record<string, number>; "ever": number; "runs": number; "lastAt": string; "coarse"?: true; "claimed"?: true };
 	/** `coarse`: some of it is a committed line, so an arm's count says it was taken, not how often. */
-	"branch"?: { "arms": number[]; "ever": number; "runs": number; "lastAt": string; "coarse"?: true };
+	"branch"?: { "arms": number[]; "ever": number; "runs": number; "lastAt": string; "coarse"?: true; "claimed"?: true };
 	/** Where a function's time went in the runs that profiled it (a preview's CPU profile): its own (`selfMs`), with what
 	 *  it called (`totalMs`), how long those profiles sampled (`profiledMs`), each faded, so its share is `selfMs /
 	 *  profiledMs`; and who called it and what it called, by name, each by its ms. */
@@ -103,13 +105,17 @@ function foldTime(known: SpanEvidence, observation: Extract<Observation, { "kind
 	return { ...known, "time": { "selfMs": (before?.selfMs ?? 0) + observation.w, "totalMs": (before?.totalMs ?? 0) + observation.totalMs, "profiledMs": (before?.profiledMs ?? 0) + observation.profiledMs, "callers": addMs(before?.callers ?? {}, observation.callers), "callees": addMs(before?.callees ?? {}, observation.callees), "runs": (before?.runs ?? 0) + observation.runs, "lastAt": latest(before?.lastAt, observation.lastAt) } };
 }
 
+/** Whether `stable`, or what was known before it, claims what its kind can (util's `Claim`). A claim one partition
+ *  makes and another's line contradicts stays claimed: the contradiction is in the folded counts, which a fix reads too. */
+const claimed = (before: { "claimed"?: true } | undefined, stable: StableObservation, claim: StableObservation["claim"]): { "claimed"?: true } => (before?.claimed === true || stable.claim === claim ? { "claimed": true } : {});
+
 /** A committed line (what was seen, on `runs` runs at least) added to what's known of its span, as coarse evidence. */
 function foldStable(known: SpanEvidence, stable: StableObservation): SpanEvidence {
 	switch (stable.kind) {
 		case "reached": {
 			const before = known.reached;
 
-			return { ...known, "reached": { "ever": (before?.ever ?? 0) + (stable.ran ? stable.runs : 0), "runs": (before?.runs ?? 0) + stable.runs, "lastAt": before?.lastAt ?? "", "coarse": true } };
+			return { ...known, "reached": { "ever": (before?.ever ?? 0) + (stable.ran ? stable.runs : 0), "runs": (before?.runs ?? 0) + stable.runs, "lastAt": before?.lastAt ?? "", "coarse": true, ...claimed(before, stable, "neverRan") } };
 		}
 
 		case "value": {
@@ -120,14 +126,14 @@ function foldStable(known: SpanEvidence, stable: StableObservation): SpanEvidenc
 				tags[tag] = (tags[tag] ?? 0) + stable.runs;
 			}
 
-			return { ...known, "value": { "seen": (before?.seen ?? 0) + stable.runs, "nullish": (before?.nullish ?? 0) + (stable.nullish ? stable.runs : 0), "tags": tags, "ever": (before?.ever ?? 0) + stable.runs, "runs": (before?.runs ?? 0) + stable.runs, "lastAt": before?.lastAt ?? "", "coarse": true } };
+			return { ...known, "value": { "seen": (before?.seen ?? 0) + stable.runs, "nullish": (before?.nullish ?? 0) + (stable.nullish ? stable.runs : 0), "tags": tags, "ever": (before?.ever ?? 0) + stable.runs, "runs": (before?.runs ?? 0) + stable.runs, "lastAt": before?.lastAt ?? "", "coarse": true, ...claimed(before, stable, "neverNullish") } };
 		}
 
 		case "branch": {
 			const before = known.branch;
 			const arms = Array.from({ "length": Math.max(before?.arms.length ?? 0, ...stable.taken.map((arm) => arm + 1)) }, (_, arm) => (before?.arms[arm] ?? 0) + (stable.taken.includes(arm) ? 1 : 0));
 
-			return { ...known, "branch": { "arms": arms, "ever": (before?.ever ?? 0) + stable.runs, "runs": (before?.runs ?? 0) + stable.runs, "lastAt": before?.lastAt ?? "", "coarse": true } };
+			return { ...known, "branch": { "arms": arms, "ever": (before?.ever ?? 0) + stable.runs, "runs": (before?.runs ?? 0) + stable.runs, "lastAt": before?.lastAt ?? "", "coarse": true, ...claimed(before, stable, "onlyArm") } };
 		}
 
 		default:

@@ -203,3 +203,28 @@ test("a statement inside an arm already marked isn't marked again", () => {
 	assert.deepEqual(found.map((suggestion) => suggestion.code), ["branch-never-taken"]);
 	assert.equal(found[0].fix.text, "", "no else: the if goes");
 });
+
+test("on someone else's committed lines, only what's claimed: a fix needs a claim, and nothing anywhere against it", () => {
+	const committed = { "ever": 30, "runs": 30, "lastAt": "", "coarse": true };
+	const optional = (value) => suggestions(source, [at("order.address?.country", { "value": { "seen": 30, "nullish": 0, "tags": { "object": 30 }, ...committed, ...value } }, "MemberExpression")], 3, 10);
+	const branch = (evidence) => suggestions(source, [at("order.coupon ? 0.1 : 0", { "branch": { "arms": [0, 1], ...committed, ...evidence } }, "TernaryExpression")], 3, 10);
+	const unreached = (evidence) => suggestions(source, [at("return 20;", { "reached": { "ever": 0, "runs": 30, "lastAt": "", "coarse": true, ...evidence } })], 3, 10);
+
+	assert.deepEqual(optional({}), [], "30+ runs never nullish, unclaimed: no fix");
+	assert.deepEqual(branch({}), []);
+	assert.deepEqual(unreached({}), []);
+
+	const [claimed] = optional({ "claimed": true });
+
+	assert.equal(claimed.code, "unneeded-optional-chain");
+	assert.equal(claimed.fix.title, "Remove the `?.` (never nullish in 30+ runs)");
+	assert.match(claimed.message, /claimed in a commit/u);
+	assert.equal(claimed.evidence, "30+ runs · claimed");
+	assert.equal(branch({ "claimed": true })[0].code, "branch-never-taken");
+	assert.match(branch({ "claimed": true })[0].message, /every time the false in 30\+ runs, claimed/u);
+	assert.equal(unreached({ "claimed": true })[0].fix.title, "Remove it (never ran in 30+ runs)");
+
+	assert.deepEqual(optional({ "claimed": true, "nullish": 1 }), [], "claimed by one, nullish in another's line: no fix");
+	assert.deepEqual(branch({ "claimed": true, "arms": [1, 1] }), [], "the other arm taken in another's line: no fix");
+	assert.deepEqual(unreached({ "claimed": true, "ever": 3 }), [], "ran in another's line: no fix");
+});

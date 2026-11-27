@@ -281,10 +281,26 @@ interface Gathering {
 	"minSeen": number;
 }
 
+const atLeast = (count: number): string => `${count.toLocaleString("en-US")}+ runs`;
+
+const CLAIMED = "claimed in a commit, on 30+ runs and 100+ tries";
+
 function gatherNullish({ found }: Gathering, { start, end, type }: Placed, span: string, value: NonNullable<SpanEvidence["value"]>): void {
 	const operators = topLevelOperators(span);
 	const at = ownOperator(type, operators);
-	const why = `${value.seen.toLocaleString("en-US")} values in ${runs(value.ever)} since this code last changed — nullish ${bound(value.seen)}`;
+	const coarse = value.coarse === true;
+	const tally = coarse
+		? atLeast(value.ever)
+		: runs(value.ever);
+	const why = coarse
+		? `never nullish in ${tally}, ${CLAIMED}`
+		: `${value.seen.toLocaleString("en-US")} values in ${tally} since this code last changed — nullish ${bound(value.seen)}`;
+	const evidence = coarse
+		? `${tally} · claimed`
+		: `${value.seen.toLocaleString("en-US")} values in ${tally} · ${short(value.seen)}`;
+	const sure = coarse
+		? 1
+		: strength(value.seen);
 
 	if (at !== undefined && (type === "MemberExpression" || type === "CallExpression")) {
 		const replacement = /[[(]/u.test(span[at + 2] ?? "")
@@ -296,12 +312,12 @@ function gatherNullish({ found }: Gathering, { start, end, type }: Placed, span:
 			"end": start + at + 2,
 			"style": "underline",
 			"label": "?. never nullish",
-			"evidence": `${value.seen.toLocaleString("en-US")} values in ${runs(value.ever)} · ${short(value.seen)}`,
+			"evidence": evidence,
 			"message": `\`?.\` never met a nullish value: ${why}.`,
 			"code": "unneeded-optional-chain",
-			"strength": strength(value.seen),
+			"strength": sure,
 			"fix": {
-				"title": `Remove the \`?.\` (never nullish in ${runs(value.ever)})`,
+				"title": `Remove the \`?.\` (never nullish in ${tally})`,
 				"start": start + at,
 				"end": start + at + 2,
 				"text": replacement
@@ -315,12 +331,12 @@ function gatherNullish({ found }: Gathering, { start, end, type }: Placed, span:
 			"end": end,
 			"style": "underline",
 			"label": "?? right side never ran",
-			"evidence": `${value.seen.toLocaleString("en-US")} values in ${runs(value.ever)} · ${short(value.seen)}`,
+			"evidence": evidence,
 			"message": `The right side of \`??\` never ran — its left was never nullish: ${why}.`,
 			"code": "unneeded-nullish-coalescing",
-			"strength": strength(value.seen),
+			"strength": sure,
 			"fix": {
-				"title": `Remove \`${span.slice(at).replace(/\s+/gu, " ").slice(0, 30)}\` (its left never nullish in ${runs(value.ever)})`,
+				"title": `Remove \`${span.slice(at).replace(/\s+/gu, " ").slice(0, 30)}\` (its left never nullish in ${tally})`,
 				"start": start + left,
 				"end": end,
 				"text": ""
@@ -371,17 +387,31 @@ function keptCode(text: string, start: number, type: string, span: string, shape
 function gatherBranch({ text, found, tinted, minRuns, minSeen }: Gathering, { start, end, type }: Placed, span: string, branch: NonNullable<SpanEvidence["branch"]>): void {
 	const total = branch.arms.reduce((sum, count) => sum + count, 0);
 	const never = branch.arms.findIndex((count) => count === 0);
+	const coarse = branch.coarse === true;
+	const enough = coarse
+		? branch.claimed === true
+		: branch.ever >= minRuns && total >= minSeen;
 
-	if (type === undefined || branch.ever < minRuns || never === -1 || total < minSeen) {
+	if (type === undefined || never === -1 || !enough) {
 		return;
 	}
 
 	const shape = armsOf(span, type);
 	const { names, what } = branchWords(type);
-	const why = `${times(total)} in ${runs(branch.ever)}, every one the ${names[1 - never]} — the ${names[never]} ${bound(total)}`;
+	const tally = coarse
+		? atLeast(branch.ever)
+		: runs(branch.ever);
+	const why = coarse
+		? `every time the ${names[1 - never]} in ${tally}, ${CLAIMED}`
+		: `${times(total)} in ${tally}, every one the ${names[1 - never]} — the ${names[never]} ${bound(total)}`;
 	const message = `The ${what} ${names[never]} never ran: ${why}.`;
 	const label = `${what.replaceAll("`", "")} ${names[never]} never ran`;
-	const evidence = `${times(total)} in ${runs(branch.ever)} · ${short(total)}`;
+	const evidence = coarse
+		? `${tally} · claimed`
+		: `${times(total)} in ${tally} · ${short(total)}`;
+	const sure = coarse
+		? 1
+		: strength(total);
 
 	if (shape === undefined) {
 		return;
@@ -393,13 +423,13 @@ function gatherBranch({ text, found, tinted, minRuns, minSeen }: Gathering, { st
 
 	if (keep === "") {
 		fix = {
-			"title": `Remove the \`if\` (its then never ran in ${runs(branch.ever)})`,
+			"title": `Remove the \`if\` (its then never ran in ${tally})`,
 			...removal(text, start, end),
 			"text": ""
 		};
 	} else if (keep !== undefined) {
 		fix = {
-			"title": `Keep only \`${keep.replace(/\s+/gu, " ").slice(0, 30)}\` (the ${names[1 - never]}, every time in ${runs(branch.ever)})`,
+			"title": `Keep only \`${keep.replace(/\s+/gu, " ").slice(0, 30)}\` (the ${names[1 - never]}, every time in ${tally})`,
 			"start": start,
 			"end": end,
 			"text": keep
@@ -416,7 +446,7 @@ function gatherBranch({ text, found, tinted, minRuns, minSeen }: Gathering, { st
 			"evidence": evidence,
 			"message": message,
 			"code": "branch-never-taken",
-			"strength": strength(total),
+			"strength": sure,
 			...fix === undefined
 				? {}
 				: { "fix": fix }
@@ -430,7 +460,7 @@ function gatherBranch({ text, found, tinted, minRuns, minSeen }: Gathering, { st
 			"evidence": evidence,
 			"message": message,
 			"code": "branch-never-taken",
-			"strength": strength(total),
+			"strength": sure,
 			...fix === undefined
 				? {}
 				: { "fix": fix }
@@ -452,7 +482,9 @@ export function suggestions(text: string, placed: Placed[], minRuns: number, min
 		const span = text.slice(at.start, at.end);
 		const { value, branch } = at.evidence;
 
-		if (value?.nullish === 0 && value.ever >= minRuns && value.seen >= minSeen) {
+		if (value?.nullish === 0 && (value.coarse === true
+			? value.claimed === true
+			: value.ever >= minRuns && value.seen >= minSeen)) {
 			gatherNullish(gathering, at, span, value);
 		}
 
@@ -461,11 +493,17 @@ export function suggestions(text: string, placed: Placed[], minRuns: number, min
 		}
 	}
 
-	const unreached = placed.filter(({ evidence }) => evidence.reached?.ever === 0 && Math.round(evidence.reached.runs) >= minRuns).toSorted((left, right) => left.start - right.start || right.end - left.end);
+	const unreached = placed.filter(({ evidence }) => evidence.reached?.ever === 0 && (evidence.reached.coarse === true
+		? evidence.reached.claimed === true
+		: Math.round(evidence.reached.runs) >= minRuns)).toSorted((left, right) => left.start - right.start || right.end - left.end);
 
 	for (const { start, end, evidence } of unreached) {
 		if (!tinted.some(([from, to]) => start >= from && end <= to)) {
 			const tries = Math.round(evidence.reached.runs);
+			const coarse = evidence.reached.coarse === true;
+			const tally = coarse
+				? atLeast(tries)
+				: runs(tries);
 
 			tinted.push([start, end]);
 			found.push({
@@ -473,12 +511,18 @@ export function suggestions(text: string, placed: Placed[], minRuns: number, min
 				"end": end,
 				"style": "tint",
 				"label": "never ran",
-				"evidence": `${runs(tries)} · ${short(tries)}`,
-				"message": `Never ran: not once in ${runs(tries)} since this code last changed — ${bound(tries)}.`,
+				"evidence": coarse
+					? `${tally} · claimed`
+					: `${tally} · ${short(tries)}`,
+				"message": coarse
+					? `Never ran: not once in ${tally}, ${CLAIMED}.`
+					: `Never ran: not once in ${tally} since this code last changed — ${bound(tries)}.`,
 				"code": "never-reached",
-				"strength": strength(tries),
+				"strength": coarse
+					? 1
+					: strength(tries),
 				"fix": {
-					"title": `Remove it (never ran in ${runs(tries)})`,
+					"title": `Remove it (never ran in ${tally})`,
 					...removal(text, start, end),
 					"text": ""
 				}
