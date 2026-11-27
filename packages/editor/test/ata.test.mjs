@@ -2,7 +2,7 @@
 //   node --import tsx --test test/ata.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { exportedTypes, importedPackages, importedSubpaths, references } from "../workbench/ata.ts";
+import { exportedTypes, importedPackages, importedSubpaths, references, resolveImport } from "../workbench/ata.ts";
 
 test("imports, requires and dynamic imports name their package roots", () => {
 	const source = [
@@ -54,4 +54,16 @@ test("a package's subpaths, imported, are each looked up in its exports: a wildc
 	assert.equal(exportedTypes({ "./jsx-runtime": "./jsx-runtime.js" }, "jsx-runtime"), "./jsx-runtime.d.ts", "a JS target: its declaration beside it");
 	assert.equal(exportedTypes({ "./a": { "types": "./a.d.ts" } }, "b"), undefined);
 	assert.equal(exportedTypes(undefined, "anything"), undefined);
+});
+
+test("a package's own # imports, in its declarations, resolve through its package.json imports: a wildcard's, a condition's types", () => {
+	// (as a package's .d.ts names "#internal/…" and its package.json maps it)
+	const imports = { "#types": "./dist/types.d.ts", "#internal/*": { "types": "./dist/internal/*.d.ts", "default": "./dist/internal/*.js" }, "#runtime": { "import": "./runtime.js" }, "#node-only": { "node": "./node.js" } };
+
+	assert.equal(resolveImport("#types", imports), "./dist/types.d.ts");
+	assert.equal(resolveImport("#internal/stream", imports), "./dist/internal/stream.d.ts", "the wildcard's part carried into the target");
+	assert.equal(resolveImport("#runtime", imports), "./runtime.d.ts", "an import condition's JS: its declaration beside it");
+	assert.equal(resolveImport("#node-only", imports), undefined, "a condition types aren't read from");
+	assert.equal(resolveImport("#elsewhere", imports), undefined);
+	assert.equal(resolveImport("#types", undefined), undefined, "a package with no imports field");
 });

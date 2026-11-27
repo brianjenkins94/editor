@@ -21,8 +21,9 @@ async function answer(workbench, text) {
 
 const said = (workbench, text) => workbench.locator(".repl .output", { "hasText": text }).first();
 
-test("a variable set on every run: the rule sets it, const or not, shows in the gutter, follows its code, and says so when it's lost", async ({ page }) => {
-	const workbench = await openEditor(page, { "rate.mjs": PROGRAM });
+test("a variable set on every run: the rule sets it, const or not, shows in the gutter, follows its code, says so when it's lost, and is put back", async ({ page }) => {
+	// (F5's runs only: a live run a save starts could be the one F5 finds, from before the rule was put back)
+	const workbench = await openEditor(page, { ".vscode/settings.json": "{ \"run.liveRuns\": false }\n", "rate.mjs": PROGRAM });
 
 	await openFile(workbench, "rate.mjs");
 	await quickFix(workbench, "Set rate on every run");
@@ -50,6 +51,22 @@ test("a variable set on every run: the rule sets it, const or not, shows in the 
 	const rows = await problems(workbench);
 
 	await expect(rows.filter({ "hasText": "A rule's place in this file is lost" })).toHaveCount(1, { "timeout": 60_000 });
+
+	// Put back where it belongs, from the lightbulb on that line, it applies again.
+	await openFile(workbench, "rate.mjs");
+	await retype(workbench, PROGRAM.replace("= 2", "= 3"));
+
+	for (let line = 0; line < 3; line += 1) {
+		await codeOf(workbench).press("ArrowUp");
+	}
+
+	await quickFix(workbench, "Put the rule back here");
+	// (its mark the one that applies, not one it isn't sure of)
+	await expect(workbench.locator(".notes-margin-mark[title*='rate']:not([title^='Not sure'])")).toHaveCount(1, { "timeout": 60_000 });
+	await expect(rows.filter({ "hasText": "A rule's place in this file is lost" })).toHaveCount(0, { "timeout": 60_000 });
+	await codeOf(workbench).press("F5");
+	await runCommand(workbench, "Debug Console: Focus on Debug Console View");
+	await expect(workbench.locator(".repl .output", { "hasText": /total \d+/u }).last()).toContainText("total 50", { "timeout": 60_000 });
 });
 
 test("the program's arguments on every run, from the lightbulb on process.argv", async ({ page }) => {

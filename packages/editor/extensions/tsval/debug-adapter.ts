@@ -203,7 +203,7 @@ class TsvalDebugSession extends vscode.Disposable implements vscode.DebugAdapter
 				break;
 
 			case "setVariable":
-				if (args["variablesReference"] !== 1000) {
+				if (args["variablesReference"] !== undefined && args["variablesReference"] !== 1000) {
 					this.fail(request, "Only the frame it's stopped in can have its values set.");
 					break;
 				}

@@ -223,7 +223,7 @@ export function references(dts: string): { "relative": string[]; "packages": str
 	return { "relative": [...relative], "packages": [...packages], "imports": [...imports] };
 }
 
-function resolveImport(spec: string, imports: unknown): string | undefined {
+export function resolveImport(spec: string, imports: unknown): string | undefined {
 	if (imports === null || typeof imports !== "object") {
 		return undefined;
 	}
