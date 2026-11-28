@@ -2075,8 +2075,9 @@
     "tests": [
       "packages/editor/test/github.test.mjs",
       "packages/editor/test/project-load.test.mjs",
-      "packages/editor/test/shell-signed-out.test.mjs",
-      "packages/editor/test/workbench/github.mjs"
+      "packages/editor/test/in-editor/api-stand-in.mjs",
+      "packages/editor/test/in-editor/github.spec.mjs",
+      "packages/editor/test/shell-signed-out.test.mjs"
     ]
   },
   "Reset": {
@@ -2405,9 +2406,11 @@
     "status": "active",
     "why": "core: the least the editor needs to be worked in, so the rewrite is worked in it (packages/editor/ARCHITECTURE.md, *The rewrite, in place*)",
     "since": "2026-11-02",
-    "what": "An optional sign-in (GitHub or email) for private repos and commits, with your account, where you're signed in, signing out everywhere and deleting the account.",
+    "what": "An optional sign-in (GitHub or email) for private repos and commits, with your account, where you're signed in, signing out everywhere and deleting the account. A sign-in started in a named instance comes back to it. On localhost, `?api=/__test-api` gives an instance an API at its own origin's /__test-api, which a test's routes answer (test/in-editor/api-stand-in.mjs).",
     "ways": [
-      "button|GitHub"
+      "button|GitHub",
+      "url parameter|?api",
+      "url parameter|?state"
     ],
     "paths": [
       "packages/editor/shell/account-dialog.tsx",
@@ -2417,7 +2420,7 @@
       "packages/editor/shell/sign-in.tsx"
     ],
     "tests": [
-      "packages/editor/test/workbench/sign-in.mjs"
+      "packages/editor/test/in-editor/github.spec.mjs"
     ]
   },
   "Sites on unusuallygood.dev": {

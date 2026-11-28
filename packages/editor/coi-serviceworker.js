@@ -482,6 +482,8 @@ globalThis.addEventListener("activate", (event) => {
 // route's handler, which fulfills, aborts or continues them; one no route matches goes on at once.
 const routing = new Set();
 
+const TEST_API = "/__test-api/";
+
 swHub.subscribe("playwright.routes", (data) => {
 	if (data?.routing === true) {
 		routing.add(data.tab);
@@ -512,11 +514,15 @@ async function routedFirst(event, answerer) {
 		preview = undefined;
 	}
 
-	if (preview === undefined || !routing.has(preview.tab)) {
+	// A preview's tab, or with no server's address (a test's window: an editor driven by a spec), every tab that's routing,
+	// the window known by its address: the referrer's, which follows the page's history (a client's is where it loaded).
+	const asked = preview === undefined ? [...routing].map((tab) => ({ "tab": tab, "port": 0 })) : routing.has(preview.tab) ? [preview] : [];
+
+	if (asked.length === 0) {
 		return answerer.answer();
 	}
 
-	const answer = await swLog.span("editor.coi-serviceworker.route", { "op": request.method, "port": preview.port }, async (span) => {
+	const answer = await swLog.span("editor.coi-serviceworker.route", { "op": request.method, "port": asked[0].port }, async (span) => {
 		const headers = {};
 
 		request.headers.forEach((value, key) => {
@@ -524,11 +530,19 @@ async function routedFirst(event, answerer) {
 		});
 
 		const body = request.method === "GET" || request.method === "HEAD" ? undefined : bytesToBase64(new Uint8Array(await request.clone().arrayBuffer()));
-		const answered = await rpc.request(`playwright.route.${preview.tab}`, { "port": preview.port, "client": client?.url, "url": request.url, "method": request.method, "headers": headers, "body": body, "resourceType": request.destination || "fetch" }, { "timeoutMs": 120000, "waitForResponderMs": 2000 }).catch((error) => {
-			span.warn("the routes didn't answer: continued", { "error": String(error) });
+		let answered = { "continue": true };
 
-			return { "continue": true };
-		});
+		for (const { tab, port } of asked) {
+			answered = await rpc.request(`playwright.route.${tab}`, { "port": port, "client": request.referrer || client?.url, "url": request.url, "method": request.method, "headers": headers, "body": body, "resourceType": request.destination || "fetch" }, { "timeoutMs": 120000, "waitForResponderMs": 2000 }).catch((error) => {
+				span.warn("the routes didn't answer: continued", { "error": String(error) });
+
+				return { "continue": true };
+			});
+
+			if (answered.continue !== true) {
+				break;
+			}
+		}
 
 		span.end({ "answer": Object.keys(answered)[0] });
 
@@ -541,6 +555,10 @@ async function routedFirst(event, answerer) {
 
 	if (answer.fulfill !== undefined) {
 		const { status, headers, body } = answer.fulfill;
+
+		if (status >= 300 && status < 400 && headers.location !== undefined) {
+			return Response.redirect(new URL(headers.location, request.url).href, status);
+		}
 
 		return new Response(NULL_BODY.has(status) ? null : Uint8Array.from(atob(body), (character) => character.codePointAt(0)), { "status": status, "headers": headers });
 	}
@@ -572,6 +590,11 @@ function answererOf(event) {
 
 	if (wsIndex !== -1) {
 		return { "answer": () => serveWorkspace(request, requestUrl, pathname.slice(wsIndex)) };
+	}
+
+	// A test's API (shell/session.ts: ?api=/__test-api on a localhost editor): nothing serves it but a test's routes.
+	if (requestUrl.origin === globalThis.location.origin && pathname.startsWith(TEST_API)) {
+		return { "fromPreview": true, "answer": () => passThrough(request) };
 	}
 
 	// A same-origin request with no address, but a referer from a page of a server: the app used an absolute path or

@@ -1,7 +1,28 @@
 import { createClient } from "@brianjenkins94/util/auth/client";
+import { instance } from "../shared/instance";
 import { isProduction, PRODUCTION, site } from "./address";
 
-export const API = isProduction() ? PRODUCTION.api : "https://editor-api-dev.brianjenkins94.workers.dev";
+const TEST_API = "/__test-api";
+
+function underTest(): boolean {
+	if (isProduction() || globalThis.location?.hostname !== "localhost" || instance === undefined) {
+		return false;
+	}
+
+	try {
+		if (new URLSearchParams(location.search).get("api") === TEST_API) {
+			sessionStorage.setItem("shell:api", TEST_API);
+		}
+
+		return sessionStorage.getItem("shell:api") === TEST_API;
+	} catch {
+		return false;
+	}
+}
+
+const testing = underTest();
+
+export const API = isProduction() ? PRODUCTION.api : testing ? `${location.origin}${TEST_API}` : "https://editor-api-dev.brianjenkins94.workers.dev";
 
 const PAGES = [`${PRODUCTION.site}/`, "https://brianjenkins94.github.io/editor/", "http://localhost:5173/", "http://editor.localhost:5173/"];
 

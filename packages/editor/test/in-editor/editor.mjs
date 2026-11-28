@@ -5,10 +5,11 @@
 import { expect } from "@playwright/test";
 
 /** An editor of its own, holding `files` (each path from its workspace's root, with its text): its workbench, once it's up. `extension`: one from outside the editor, by its address. */
-export async function openEditor(page, files, { extension } = {}) {
+export async function openEditor(page, files, { extension, api } = {}) {
 	const seed = encodeURIComponent(Buffer.from(JSON.stringify(files)).toString("base64"));
 
-	await page.goto(`?instance=test-${crypto.randomUUID()}&seed=${seed}${extension === undefined ? "" : `&extension=${encodeURIComponent(extension)}`}`);
+	// (`api`: its API's address, the test's own — api-stand-in.mjs — for one on localhost)
+	await page.goto(`?instance=test-${crypto.randomUUID()}&seed=${seed}${extension === undefined ? "" : `&extension=${encodeURIComponent(extension)}`}${api === undefined ? "" : `&api=${encodeURIComponent(api)}`}`);
 
 	const workbench = page.frameLocator("iframe[title='editor']").frameLocator("iframe");
 

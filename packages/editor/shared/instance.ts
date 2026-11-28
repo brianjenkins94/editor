@@ -13,9 +13,9 @@ function named(): string | undefined {
 
 	try {
 		for (let frame: Window = window; ; frame = frame.parent) {
-			const name = new URLSearchParams(frame.location.search).get("instance");
+			const name = new URLSearchParams(frame.location.search).get("instance") ?? signingInto(frame);
 
-			if (name !== null && name !== "") {
+			if (name !== null && name !== "" && name !== undefined) {
 				return name;
 			}
 
@@ -28,10 +28,30 @@ function named(): string | undefined {
 	}
 }
 
+function signingInto(frame: Window): string | undefined {
+	try {
+		const state = new URLSearchParams(frame.location.search).get("state");
+
+		for (const key of state === null ? [] : Object.keys(sessionStorage)) {
+			const owner = /^instance:(.+):shell:signIn$/u.exec(key)?.[1];
+
+			if (owner !== undefined && (JSON.parse(sessionStorage.getItem(key) ?? "{}") as { "state"?: string }).state === state) {
+				return owner;
+			}
+		}
+	} catch {
+		return undefined;
+	}
+
+	return undefined;
+}
+
 export const instance = named();
 
+const landing = typeof window === "undefined" ? undefined : signingInto(window);
+
 export function isEditorTop(): boolean {
-	return window.parent === window || new URLSearchParams(location.search).get("instance") !== null;
+	return window.parent === window || new URLSearchParams(location.search).get("instance") !== null || landing !== undefined;
 }
 
 export function ownKeys(): string[] {

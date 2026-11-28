@@ -125,12 +125,15 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      its line's run not counted — fixed. The view reads the program afresh when asked now, and opens its list as a
      document; it reads the active file's project only (open a file of the project to ask about). Next: called and
      never run (1,218 in the editor's project, most of it what the GitHub stand-in and the API would reach).
-   - **GitHub stood in** (2026-11-27): the API harness's GitHub stand-in (packages/api/harness/github.ts) serves a folder
-     of bare repositories too — git over HTTP by git's own `http-backend`, and a load's REST calls (a repository, its
-     tree, a blob). test/workbench/github.mjs stands in for the API at the browser's routes (its sign-in; its proxy,
-     handing /github/api and /github/git to the stand-in with Ann's token) and, signed in: a repository loaded from its
-     address, cloned through the proxy; GitHub moved ahead, the fast-forward offered and caught up (behindGitHub,
-     fastForward); a commit pushed back, by who's signed in.
+   - **GitHub stood in** (2026-11-27), **in the editor** since page.route (the user: "Build the workarounds"):
+     test/in-editor/github.spec.mjs opens an editor whose API is its own origin's /__test-api (`?api=/__test-api`, on
+     localhost only: shell/session.ts) and answers it by page.route with api-stand-in.mjs — the API's sign-in and its
+     proxy, and a GitHub whose repositories are kept as git keeps objects, served as git over HTTP (a clone, a fetch, a
+     push) and REST. Signed in from the GitHub button: a repository loaded, cloned through the proxy; GitHub moved ahead,
+     the fast-forward offered and caught up (behindGitHub, fastForward); a commit pushed back from the terminal, by
+     who's signed in. It replaces test/workbench/github.mjs and sign-in.mjs (and the API harness's repositories, there
+     only for them). On the way: a sign-in started in a named instance now comes back to it (shared/instance.ts reads
+     the instance from the sign-in it's finishing; it came back to the default one).
    - **Measured again** (2026-11-27, at 72157b4c: CI's coverage run 46072531887 and 166 of the 168 unit test files in
      a throwaway editor — api's log.test asks for exec, debug-mcp's sessions.test runs past 5 minutes; cdp-memory-realms'
      reach kept from the last record, nothing it reaches changed): statements run 24,300 → 25,361 of 40,054; files none

@@ -49,10 +49,12 @@ export function installPreviewRoutes(hub: Hub, windowOf: (page: string) => Windo
 		const here = [...matchesOf.keys()].filter((page) => {
 			const href = windowOf(page)?.location.href;
 
-			return href !== undefined && parseVirtual(new URL(href).pathname)?.port === request.port;
+			return href !== undefined && (parseVirtual(new URL(href).pathname)?.port ?? 0) === request.port;
 		});
 
-		return here.find((page) => windowOf(page)?.location.href === request.client) ?? here[0];
+		const theOne = here.find((page) => windowOf(page)?.location.href === request.client);
+
+		return request.port === 0 ? theOne : theOne ?? here[0];
 	};
 
 	serve(hub, "playwright.route", async (args) => {
