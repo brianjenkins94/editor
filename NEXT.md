@@ -160,7 +160,11 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      github). Found measuring: what a driven editor ran in a page the spec then navigates away from is lost —
      github.spec leaves for the sign-in's start page and reloads, so shell/git-clone.ts (none run, 30 statements) and
      repo-load's loadRepo, which it runs (its clone asks the stand-in's upload-pack), read as unrun; the coverage
-     runtime publishes a realm's counts only when the editor lets its window go, not when the page itself goes. Left,
+     runtime published a realm's counts only when the editor let its window go, not when the page itself went. Fixed
+     (2026-11-27, the user: "Yes, fix it"): a window's realm publishes them as its page goes (pagehide), which the
+     harness keeps for the next read, as it keeps the debug worker's; github.spec alone, counted: git-clone.ts 0 → 30
+     statements, repo-load.tsx 42 → 73. A worker that goes with its page still isn't counted (it has no pagehide). The
+     record has it from the next dispatched run. Left,
      the 75: tooling and configs, scripts and benches run by hand, tsval's in-run modules and silo's and debug-mcp's
      CLI processes (Kept, as measurement); the API's public/ scripts, run on the API's origin, which nothing counts;
      eslint-plugin-webawesome's rules (its test can't find `uri-js` in the editor); admin's timeline.tsx and

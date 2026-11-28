@@ -64,4 +64,10 @@ if (scope.__evidence?.full !== true) {
 			} catch { /* nothing to publish to */ }
 		}
 	});
+
+	try {
+		globalThis.addEventListener("pagehide", () => {
+			evidence.publish?.();
+		});
+	} catch { /* a realm with no page to leave */ }
 }
