@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, beforeEach, test } from "node:test";
 import { base64url, exportJWK, generateKeyPair } from "jose";
-import { createTestHarness } from "wrangler";
 import { testBrowser } from "./helpers.ts";
+import { apiWorker } from "./worker.ts";
 
 // The cost guard (README.md, O2) in workerd, against a stand-in for Cloudflare's GraphQL Analytics that reports
 // whatever usage the test says: the hourly check prices it, emails the owner past half the budget (once a day), turns
@@ -72,7 +72,7 @@ await new Promise<void>((resolve) => {
 });
 
 const standIn = `http://127.0.0.1:${(stand.address() as AddressInfo).port}`;
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn, "CLOUDFLARE_API": standIn } }] });
+const server = apiWorker({ secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn, "CLOUDFLARE_API": standIn } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "DB": D1Database };

@@ -1,7 +1,8 @@
 /**
  * The admin app (packages/admin) as the owner has it, against the API's local harness (packages/api/harness), GitHub stood
  * in for: signing in, each page's own content, a user's page, the account page (packages/account), and the brand's colours
- * (theme/chrome), which the editor's own pages take from VS Code's theme instead.
+ * (theme/chrome), which the editor's own pages take from VS Code's theme instead. With COVERAGE=1, the app is counted
+ * (its vite.config.ts) and each test's reach written, as the editor's suites write theirs (architecture-harness.mjs).
  *
  *   node --test test/workbench/admin.mjs
  */
@@ -12,6 +13,7 @@ import { after, before, test } from "node:test";
 import * as url from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import { launchChromium } from "@brianjenkins94/util/playwright/chromium";
+import { countReachOf } from "../architecture-harness.mjs";
 
 const packages = url.fileURLToPath(new URL("../../../", import.meta.url));
 const started = [];
@@ -50,6 +52,7 @@ before(async () => {
 	browser = await launchChromium();
 	page = await (await browser.newContext({ "viewport": { "width": 1300, "height": 900 }, "colorScheme": "light" })).newPage();
 	page.on("pageerror", (error) => errors.push(error.message));
+	countReachOf(page);
 }, { "timeout": 120_000 });
 
 after(async () => {

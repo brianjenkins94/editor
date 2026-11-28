@@ -4,11 +4,11 @@ import * as nodeCrypto from "node:crypto";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, exportJWK, generateKeyPair } from "jose";
-import { createTestHarness } from "wrangler";
 import type { Answer, App } from "./helpers.ts";
 import { testBrowser, someone } from "./helpers.ts";
 import { hashPassword, verifyPassword } from "../src/password-hash.ts";
 import { hotp, stepAt, unbase32 } from "@brianjenkins94/util/auth/totp";
+import { apiWorker } from "./worker.ts";
 
 // C3 in workerd (README.md, C3): someone who signed in by email sets a password from their account (a code to
 // their email first, then the password, checked against known breaches by a stand-in of Have I Been Pwned), then signs
@@ -62,7 +62,7 @@ await new Promise<void>((resolve) => {
 });
 
 const standIn = `http://127.0.0.1:${(stand.address() as AddressInfo).port}`;
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "PWNED_API": standIn, "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9", "CLOUDFLARE_API": "http://127.0.0.1:9" } }] });
+const server = apiWorker({ secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "PWNED_API": standIn, "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9", "CLOUDFLARE_API": "http://127.0.0.1:9" } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "DB": D1Database };

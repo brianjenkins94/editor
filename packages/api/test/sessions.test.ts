@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createTestHarness } from "wrangler";
 import { BROWSER } from "./browser.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
+import { apiWorker } from "./worker.ts";
 
 // A3 in workerd: a sign-in as A0's GitHub callback will start it (Grant.begin), then everything the browser does with
 // it — /token, /me, refresh, /revoke — with DPoP proofs from a key of the test's own, as the shell's will be.
@@ -16,7 +16,7 @@ const secrets = {
 	"AUDIT_KEY": "audit key for the tests"
 };
 // GitHub nowhere: revoking a grant also revokes its token at GitHub, best effort, and these tests have no GitHub.
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9" } }] });
+const server = apiWorker({ secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9" } });
 const worker = server.getWorker();
 let base: URL;
 // The Worker's bindings, as the GitHub callback has them: the Grant namespace and D1.

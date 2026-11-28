@@ -554,7 +554,8 @@ commit (decision 12). Two rows are never hidden:
   empty: code no feature explicitly owns is an error (decision 22).
 - **Declared against observed**: a test that declares one feature but whose reach is mostly another's code. That's how
   a boundary drawn in the wrong place shows itself. The editor's `build/reach-record.ts <reach>`, from a folder of each suite's reach
-  (`COVERAGE=1` locally, a dispatched architecture run in CI, as artifacts). By statement, among those few tests ran: by
+  (`COVERAGE=1` locally, a dispatched architecture run in CI, as artifacts: the admin app and the monaco-vscode-api
+  component counted by their own builds, and the API's tests in workerd by `COVERAGE=1 npm test`, its job `api-reach`). By statement, among those few tests ran: by
   file, a session loading nearly everything makes nearly everything look shared (a test's median share of its own features'
   code was 6% by file, 40% by statement, 2026-11-03). Much of what it shows is a dependency (ESLint's tests run almostnode),
   not a mistake: it says, and a person decides.

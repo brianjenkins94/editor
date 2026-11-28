@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, exportJWK, generateKeyPair } from "jose";
-import { createTestHarness } from "wrangler";
 import { SURGE } from "../src/errors.ts";
 import { someone, testBrowser } from "./helpers.ts";
+import { apiWorker } from "./worker.ts";
 
 // Errors (README.md, O4) in workerd: a request that fails answers with an id the person can quote; the error is
 // recorded under it, grouped, redacted, with its route, release and sign-in; the owner hears of a new group and of a
@@ -56,7 +56,7 @@ await new Promise<void>((resolve) => {
 });
 
 const standIn = `http://127.0.0.1:${(stand.address() as AddressInfo).port}`;
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn, "CLOUDFLARE_API": "http://127.0.0.1:9", "RELEASE": "abc1234" } }] });
+const server = apiWorker({ secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn, "CLOUDFLARE_API": "http://127.0.0.1:9", "RELEASE": "abc1234" } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "DB": D1Database };

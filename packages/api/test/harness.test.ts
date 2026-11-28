@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createTestHarness } from "wrangler";
 import { recorded } from "../harness/state.ts";
 import { BROWSER } from "./browser.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
+import { apiWorker } from "./worker.ts";
 
 // C0 (README.md): `recorded` reads everything the API stores, from outside it, and says exactly what an action wrote.
 // Here: what a sign-in writes, all of it, and nothing secret in the reading.
 
 const signing = { ...await exportJWK((await generateKeyPair("ES256", { "extractable": true })).privateKey), "alg": "ES256", "kid": "test" };
 const secrets = { "SIGNING_JWK": JSON.stringify(signing), "NONCE_KEY": "nonce key for the tests", "TOKEN_KEK": base64url.encode(crypto.getRandomValues(new Uint8Array(32))), "AUDIT_KEY": "audit key for the tests" };
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9" } }] });
+const server = apiWorker({ secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9" } });
 let base: URL;
 
 before(async () => {

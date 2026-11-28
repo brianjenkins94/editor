@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createTestHarness } from "wrangler";
 import { recorded } from "../harness/state.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
+import { apiWorker } from "./worker.ts";
 
 // C2 in workerd (README.md, C2): the admin app pushes its request, the browser opens the attempt, asks for a code
 // by email (sent to an outbox of the test's own), and types it or follows the link, in that same browser; a match finds
@@ -40,7 +40,7 @@ await new Promise<void>((resolve) => {
 	mail.listen(0, "127.0.0.1", resolve);
 });
 
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "EMAIL_OUTBOX": `http://127.0.0.1:${(mail.address() as AddressInfo).port}/`, "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9" } }] });
+const server = apiWorker({ secrets, "vars": { "EMAIL_OUTBOX": `http://127.0.0.1:${(mail.address() as AddressInfo).port}/`, "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9" } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "DB": D1Database };

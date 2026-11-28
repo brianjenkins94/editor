@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, exportJWK, generateKeyPair } from "jose";
-import { createTestHarness } from "wrangler";
 import { someone, testBrowser } from "./helpers.ts";
+import { apiWorker } from "./worker.ts";
 
 // Session timelines (README.md, O5) in workerd: each request through a sign-in is held by its Grant, and the admin
 // app reads the sign-in's requests, audit rows and errors in order; a viewer may, an editor token may not; RETAIN after
@@ -53,7 +53,7 @@ await new Promise<void>((resolve) => {
 });
 
 const standIn = `http://127.0.0.1:${(stand.address() as AddressInfo).port}`;
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn, "CLOUDFLARE_API": "http://127.0.0.1:9" } }] });
+const server = apiWorker({ secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn, "CLOUDFLARE_API": "http://127.0.0.1:9" } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "DB": D1Database; "GRANTS": DurableObjectNamespace<import("../src/grant.ts").Grant> };

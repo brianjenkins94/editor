@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createTestHarness } from "wrangler";
 import { BROWSER } from "./browser.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
+import { apiWorker } from "./worker.ts";
 
 // B4 in workerd: /admin/traffic asks Cloudflare's GraphQL API (here, a stand-in) with the API's own read-only token, and
 // answers the admin app in its own shape. Only `traffic:read` may ask; without a token it says so.
@@ -50,7 +50,7 @@ await new Promise<void>((resolve) => {
 });
 
 const cloudflareOrigin = `http://127.0.0.1:${(mock.address() as AddressInfo).port}`;
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9", "CLOUDFLARE_API": cloudflareOrigin } }] });
+const server = apiWorker({ secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9", "CLOUDFLARE_API": cloudflareOrigin } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }> } }; "DB": D1Database };

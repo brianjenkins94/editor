@@ -4,12 +4,12 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createTestHarness } from "wrangler";
 import type { Copy, Row } from "../src/audit-copies.ts";
 import { compare, copyKey, parseKey } from "../src/audit-copies.ts";
 import { BROWSER } from "./browser.ts";
 import { keyed } from "../src/behavior.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
+import { apiWorker } from "./worker.ts";
 
 // The GitHub proxy in workerd (README.md, "The proxy"): a signed-in browser's calls go through with the sign-in's GitHub
 // token, refreshed when it's close to expiring; anything the editor doesn't call is refused; sizes are capped.
@@ -80,7 +80,7 @@ await new Promise<void>((resolve) => {
 });
 
 const githubOrigin = `http://127.0.0.1:${(mock.address() as AddressInfo).port}`;
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": githubOrigin, "GITHUB_API": githubOrigin } }] });
+const server = apiWorker({ secrets, "vars": { "GITHUB_ORIGIN": githubOrigin, "GITHUB_API": githubOrigin } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }> } }; "DB": D1Database; "AUDIT_COPIES": R2Bucket };

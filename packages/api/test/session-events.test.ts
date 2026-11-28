@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, exportJWK, generateKeyPair } from "jose";
-import { createTestHarness } from "wrangler";
 import { someone, testBrowser } from "./helpers.ts";
+import { apiWorker } from "./worker.ts";
 
 // What the editor reports (README.md, O6) in workerd: a signed-in session's events onto its timeline, in the fixed
 // vocabulary only, a repository by its keyed tag; its uncaught errors, signed in (on the timeline, with the user) or
@@ -52,7 +52,7 @@ await new Promise<void>((resolve) => {
 });
 
 const standIn = `http://127.0.0.1:${(stand.address() as AddressInfo).port}`;
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn, "CLOUDFLARE_API": "http://127.0.0.1:9" } }] });
+const server = apiWorker({ secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn, "CLOUDFLARE_API": "http://127.0.0.1:9" } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "DB": D1Database; "SOURCE_MAPS": R2Bucket };

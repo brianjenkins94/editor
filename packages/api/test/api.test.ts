@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { exportJWK, generateKeyPair } from "jose";
-import { createTestHarness } from "wrangler";
+import { apiWorker } from "./worker.ts";
 
 // A signing key of the test's own, as the SIGNING_JWK secret.
 const signing = { ...await exportJWK((await generateKeyPair("ES256", { "extractable": true })).privateKey), "alg": "ES256", "kid": "test" };
 
-// The Worker runs in workerd, built from wrangler.jsonc exactly as `wrangler dev` builds it.
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", "secrets": { "SIGNING_JWK": JSON.stringify(signing) } }] });
+const server = apiWorker({ "secrets": { "SIGNING_JWK": JSON.stringify(signing) } });
 
 before(async () => {
 	await server.listen();

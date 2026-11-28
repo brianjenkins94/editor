@@ -4,9 +4,9 @@ import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { isoBase64URL, isoCBOR } from "@simplewebauthn/server/helpers";
 import { base64url, exportJWK, generateKeyPair } from "jose";
-import { createTestHarness } from "wrangler";
 import type { Answer, App, Client } from "./helpers.ts";
 import { testBrowser, PAGES, someone } from "./helpers.ts";
+import { apiWorker } from "./worker.ts";
 
 // Passkeys (README.md, "Passkeys") in workerd, with a software authenticator of the test's own (a P-256 key, and the
 // bytes a device would send): added from the account through our passkey page, then signing in with one; bound to our
@@ -56,7 +56,7 @@ await new Promise<void>((resolve) => {
 });
 
 const standIn = `http://127.0.0.1:${(stand.address() as AddressInfo).port}`;
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn, "CLOUDFLARE_API": "http://127.0.0.1:9" } }] });
+const server = apiWorker({ secrets, "vars": { "EMAIL_OUTBOX": `${standIn}/outbox`, "GITHUB_ORIGIN": standIn, "GITHUB_API": standIn, "CLOUDFLARE_API": "http://127.0.0.1:9" } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "DB": D1Database };

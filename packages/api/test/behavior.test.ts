@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createTestHarness } from "wrangler";
 import { START } from "../src/behavior.ts";
 import { BROWSER } from "./browser.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
+import { apiWorker } from "./worker.ts";
 
 // B7 (README.md, "Behavior"): actions as templates, probes, and a sign-in's client fingerprint, in workerd. Sign-ins start as the
 // GitHub callback starts them (Grant.begin).
@@ -17,7 +17,7 @@ const secrets = {
 	"AUDIT_KEY": "audit key for the tests",
 	"STATE_KEY": base64url.encode(crypto.getRandomValues(new Uint8Array(32)))
 };
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9" } }] });
+const server = apiWorker({ secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9" } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "idFromString": (id: string) => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }>; "flush": () => Promise<number> } }; "DB": D1Database };

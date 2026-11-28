@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createTestHarness } from "wrangler";
 import { BROWSER } from "./browser.ts";
 import { keyed } from "../src/behavior.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
+import { apiWorker } from "./worker.ts";
 
 // Detecting abuse (README.md, "Hardening"): the rate limits, the alert someone gets at once when a sign-in is used the
 // way only a thief or a script would use it (deduplicated, and never quoting a secret), and every proxied write recorded.
@@ -45,7 +45,7 @@ const secrets = {
 	"GITHUB_CLIENT_SECRET": "client secret for the tests",
 	"ALERT_WEBHOOK": `${origin}/alerts`
 };
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": origin, "GITHUB_API": origin } }] });
+const server = apiWorker({ secrets, "vars": { "GITHUB_ORIGIN": origin, "GITHUB_API": origin } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }> } }; "DB": D1Database };

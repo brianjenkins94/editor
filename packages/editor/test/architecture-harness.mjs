@@ -143,6 +143,13 @@ if (process.env.COVERAGE === "1" && process.env.NODE_TEST_CONTEXT !== undefined)
 	});
 }
 
+/** With COVERAGE=1, `page`'s realms are read for each test's reach (above): a session's, or a page a suite opens itself. */
+export function countReachOf(page, context = page.context()) {
+	if (process.env.COVERAGE === "1") {
+		(globalThis.__coverageSessions ??= new Set()).add({ "page": page, "context": context });
+	}
+}
+
 async function reachable(url) {
 	try {
 		return (await fetch(url)).ok;
@@ -307,7 +314,7 @@ export async function startSession(options = {}) {
 	// window the editor lets go as a test ends (shell/preview-windows.tsx) read first, then closed, as without coverage:
 	// kept open, a spec's windows were each a whole editor, and preview-prompts' three crashed the renderer.
 	if (process.env.COVERAGE === "1") {
-		(globalThis.__coverageSessions ??= new Set()).add({ "page": page, "context": context });
+		countReachOf(page, context);
 		// (what a realm publishes as it ends — the debug worker, before the adapter terminates it — kept in the page's top
 		// frame, for the next read)
 		await page.addInitScript(() => {

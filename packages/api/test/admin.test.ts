@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createTestHarness } from "wrangler";
 import { PERMISSIONS } from "../src/rbac.ts";
 import { BROWSER } from "./browser.ts";
 import { keyed } from "../src/behavior.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
+import { apiWorker } from "./worker.ts";
 
 // B1 in workerd (README.md, "Admin app"): the admin client, the Grant remembering its client, /admin/* for admin tokens
 // only, and roles from OWNERS. Sign-ins start as the GitHub callback starts them (Grant.begin), for either client.
@@ -20,7 +20,7 @@ const secrets = {
 	"AUDIT_KEY": "audit key for the tests",
 	"STATE_KEY": base64url.encode(crypto.getRandomValues(new Uint8Array(32)))
 };
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9", "CLOUDFLARE_API": "http://127.0.0.1:9" } }] });
+const server = apiWorker({ secrets, "vars": { "GITHUB_ORIGIN": "http://127.0.0.1:9", "GITHUB_API": "http://127.0.0.1:9", "CLOUDFLARE_API": "http://127.0.0.1:9" } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }> } }; "DB": D1Database };

@@ -1,5 +1,6 @@
 import { isCI } from "@brianjenkins94/util/env";
 import { defaults } from "@brianjenkins94/util/vite/defaults";
+import type { Plugin } from "vite";
 import { mergeConfig } from "vite";
 
 // Inherits the repo's shared build defaults (esnext, [name].js, cleaned outDir) and bundles
@@ -7,6 +8,12 @@ import { mergeConfig } from "vite";
 // self-contained, minified ES build under dist/, so consumers import the finished artifact
 // rather than raw source.
 const WEBVIEW_WORKER = /^webview\/service-worker-[\w-]+\.js$/u;
+
+// COVERAGE=1 (the reach record: packages/editor/build/coverage.ts, as the editor's own build counts its modules): the
+// component's own modules counted, in its workers too, so a test's reach says what of them it ran; not the demo it's built
+// beside (install.sh fetches it, and it isn't the repository's). By URL, so the config's bundle leaves it for Node to load.
+const { coverage } = ["1", "full"].includes(process.env["COVERAGE"] ?? "") ? await import(new URL("../../packages/editor/build/coverage.ts", import.meta.url).href) as { "coverage": () => Plugin[] } : { "coverage": (): Plugin[] => [] };
+const counted = (): Plugin[] => coverage().map((plugin) => ({ ...plugin, "transform": (code: string, id: string) => (id.includes("/demo/") ? undefined : (plugin.transform as (code: string, id: string) => unknown)(code, id)) }) as Plugin);
 
 export default mergeConfig(defaults, {
 	// Relative base so emitted asset URLs (e.g. the codicon font, `url(./codicon.ttf)`) resolve
@@ -35,7 +42,9 @@ export default mergeConfig(defaults, {
 			}
 		}
 	},
+	"worker": { "plugins": counted },
 	"plugins": [
+		...counted(),
 		{
 			// monaco-vscode-api ships CSS that must be loaded as inline strings, not injected stylesheets.
 			"name": "load-vscode-css-as-string",

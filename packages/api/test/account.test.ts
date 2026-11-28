@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { base64url, calculateJwkThumbprint, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createTestHarness } from "wrangler";
 import { BROWSER } from "./browser.ts";
 import { accessTokenHash as s256 } from "@brianjenkins94/util/auth/dpop";
+import { apiWorker } from "./worker.ts";
 
 // Your sessions and your account (src/account.ts), in workerd: listing and ending your own sign-ins (never anyone
 // else's), signing out everywhere, and deleting the account — at GitHub too, and leaving nothing that points at you.
@@ -45,7 +45,7 @@ const secrets = {
 	"STATE_KEY": base64url.encode(crypto.getRandomValues(new Uint8Array(32))),
 	"GITHUB_CLIENT_SECRET": "client secret for the tests"
 };
-const server = createTestHarness({ "root": new URL("..", import.meta.url).pathname, "workers": [{ "configPath": "wrangler.jsonc", secrets, "vars": { "GITHUB_ORIGIN": github, "GITHUB_API": github } }] });
+const server = apiWorker({ secrets, "vars": { "GITHUB_ORIGIN": github, "GITHUB_API": github } });
 const worker = server.getWorker();
 let base: URL;
 let env: { "GRANTS": { "newUniqueId": () => DurableObjectId; "get": (id: DurableObjectId) => { "begin": (options: unknown) => Promise<{ "code": string }> } }; "DB": D1Database };
