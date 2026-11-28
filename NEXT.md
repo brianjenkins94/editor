@@ -145,11 +145,32 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
      than what no test runs — packages/api 423 (its tests run in workerd, outside the record), components 111 (the
      monaco-vscode-api component isn't instrumented), packages/admin 95 (admin.mjs records no reach), and scripts and
      benches run by hand. Next: those into the record, then what's left is what no test runs.
+   - **What wasn't measured, measured** (2026-11-27, a7d2b507; the user: "Item 3's measurement"): the API's 23 test
+     files that run the Worker in workerd record each test's reach (packages/api/test/worker.ts: the Worker built from an
+     instrumented copy of src/, asked for its counts after each test; a dispatched architecture run's `api-reach` job),
+     admin.mjs records the admin app's (its vite.config.ts counts it), and the monaco-vscode-api component is built
+     counted in a dispatched run. The record remade at a7d2b507 (coverage run 46101380320, all green; 166 of the 169 unit
+     test files in a throwaway editor — log.test asks for exec, sessions.test ran past 5 minutes, playwright's route.test
+     can't load there, as it launches Chromium through playwright-core and unenv has no `net` — and cdp-memory-realms'
+     kept, nothing it reaches changed): 2,135 tests; statements run 25,361 → 28,629 of 40,287; files none run 136 → 75;
+     declarations unrun in files partly run 338 → 352, the newly measured files' own. The API 136 → 2,121 of 2,794
+     statements (files none run 45 → 11: its local harness, the sign-in pages' scripts in public/, scripts); the admin
+     app 0 → 213 of 525 (17 → 3: deployment.ts, timeline.tsx, its vite config) and account 0 → 61 of 221; the component
+     0 → 892 of 1,070 (12 → 1: its vite config). playwright's route.ts reads 64 of 95 run, by the specs (page-route,
+     github). Found measuring: what a driven editor ran in a page the spec then navigates away from is lost —
+     github.spec leaves for the sign-in's start page and reloads, so shell/git-clone.ts (none run, 30 statements) and
+     repo-load's loadRepo, which it runs (its clone asks the stand-in's upload-pack), read as unrun; the coverage
+     runtime publishes a realm's counts only when the editor lets its window go, not when the page itself goes. Left,
+     the 75: tooling and configs, scripts and benches run by hand, tsval's in-run modules and silo's and debug-mcp's
+     CLI processes (Kept, as measurement); the API's public/ scripts, run on the API's origin, which nothing counts;
+     eslint-plugin-webawesome's rules (its test can't find `uri-js` in the editor); admin's timeline.tsx and
+     deployment.ts; git-clone.ts (above); account-dialog.tsx; almostnode's domain and perf_hooks shims; bablr's
+     shims/record.js; site's gate.ts.
    - **Removed**: zenfs-vfs's getSharedWorkspaceBuffer and mountWorkspaceVfs (nothing calls them since the node worker
      went, 517144b7).
-   - **Kept, as measurement**: tooling used by being run (the editor's build/, contrib, the demo, bench, monaco's build
-     and probes, tsval's scripts, configs); silo's CLI in the processes its tests spawn; tsval's in-run modules; the
-     API (workerd, not the browser); bablr-language-ts's grammar.ts (its lines don't match what ran).
+   - **Kept, as measurement**: tooling used by being run (the editor's build/, contrib, the demo, bench, monaco's build,
+     tsval's scripts, configs); silo's CLI in the processes its tests spawn; tsval's in-run modules; bablr-language-ts's
+     grammar.ts (its lines don't match what ran). The API in workerd and monaco's probes are measured since a7d2b507.
    - **A test away** (callers, no test): the eslint extension's globOf and projectFolderOf, ci-status's icons, the
      Features view's slower badge, the terminal's tab completion (longestCommonPrefix), test-notice's digestOf, the
      Changes panel's plain rows and collapse, codehike's fold slot, the playground's instance, the reset popover's loss,
@@ -158,7 +179,8 @@ Each item says what finishes it. One that has no such line yet waits on a decisi
    - **Needs GitHub or an account**: session.ts, sign-in.tsx, github.ts, repo-load's load and fast-forward,
      git-engine's push, pull and fetch, git-clone.ts, reset.ts. Open: a test double for GitHub and the account API, or
      these stay what CI can't reach.
-   - **No tests**: admin (17 files), account. Open: tests, or a decision they stay manual.
+   - **No tests**: admin's timeline.tsx and deployment.ts (admin.mjs runs the rest of it, and account, since a7d2b507).
+     Open: tests, or a decision they stay manual.
    - **almostnode's shims nothing reaches** (130 declarations: esbuild's build, chokidar, readdirp, rollup, http2, tls,
      brotli, dns). Open: kept for the programs that may call them, or out until one does.
    - Found measuring: under coverage, a run right after "Put the rule back here" went without the rule (mock-value.spec,
